@@ -175,8 +175,8 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## 📚 Documentation
 
-- [Architecture Overview](docs/ARCHITECTURE.md)
-- [Graph Commands](docs/GRAPH_COMMANDS.md)
+- [Architecture Overview](ARCHITECTURE.md)
+- [Graph Commands](GRAPH_COMMANDS.md)
 - [Vector Search](VECTOR_SEARCH_COMPLETE.md)
 - [AI Features](AI_FEATURES_COMPLETE.md)
 
