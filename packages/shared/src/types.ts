@@ -334,6 +334,14 @@ export interface CVConfig {
     maxTokens: number;
     temperature: number;
   };
+  // Alias for llm (for backward compatibility)
+  ai: {
+    provider: 'anthropic' | 'openai' | 'ollama';
+    model: string;
+    apiKey?: string;
+    maxTokens: number;
+    temperature: number;
+  };
   embedding: {
     provider: 'openai' | 'ollama';
     model: string;

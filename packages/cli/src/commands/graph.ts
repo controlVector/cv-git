@@ -393,7 +393,7 @@ export function graphCommand(): Command {
           if (symbol.docstring) {
             console.log(chalk.white('  Documentation:'));
             const docLines = symbol.docstring.split('\n').slice(0, 3);
-            docLines.forEach(line => {
+            docLines.forEach((line: string) => {
               console.log(chalk.gray(`    ${line}`));
             });
           }

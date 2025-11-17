@@ -15,15 +15,21 @@ import { explainCommand } from './commands/explain.js';
 import { reviewCommand } from './commands/review.js';
 import { graphCommand } from './commands/graph.js';
 import { gitCommand } from './commands/git.js';
+import { authCommand } from './commands/auth.js';
+import { prCommand } from './commands/pr.js';
+import { releaseCommand } from './commands/release.js';
 
 const program = new Command();
 
 program
   .name('cv')
-  .description('AI-Native Paired-Programming + Knowledge-Graph Version Control Layer')
-  .version('0.1.0');
+  .description('AI-Native Version Control with Knowledge Graph & Secure Credentials')
+  .version('0.2.0');
 
 // Add commands
+program.addCommand(authCommand());          // NEW: Credential management
+program.addCommand(prCommand());            // NEW: Pull request management
+program.addCommand(releaseCommand());       // NEW: Release management
 program.addCommand(initCommand());
 program.addCommand(syncCommand());
 program.addCommand(doCommand());

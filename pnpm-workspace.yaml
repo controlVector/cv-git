@@ -1,0 +1,9 @@
+packages:
+  - packages/*
+
+ignoredBuiltDependencies:
+  - esbuild
+  - keytar
+  - tree-sitter
+  - tree-sitter-python
+  - tree-sitter-typescript

@@ -88,7 +88,7 @@ export function syncCommand(): Command {
 
         // Determine sync type
         const forceFullSync = options.force;
-        const useIncremental = options.incremental && !forceFullSync;
+        let useIncremental = options.incremental && !forceFullSync;
 
         if (useIncremental) {
           // Incremental sync

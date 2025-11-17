@@ -62,9 +62,9 @@ export function reviewCommand(): Command {
         let diff: string;
 
         if (options.staged) {
-          diff = await git.getDiff('--staged');
+          diff = await git.getRawDiff('--staged');
         } else {
-          diff = await git.getDiff(ref);
+          diff = await git.getRawDiff(ref);
         }
 
         if (!diff || diff.trim().length === 0) {

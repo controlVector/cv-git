@@ -3,7 +3,7 @@
  * Wraps git operations and provides hooks for CV-Git
  */
 
-import simpleGit, { SimpleGit, StatusResult, DiffResult, LogResult } from 'simple-git';
+import { simpleGit, SimpleGit, StatusResult, DiffResult, LogResult } from 'simple-git';
 import * as path from 'path';
 import { GitError, WorkingTreeStatus, GitCommit, GitDiff } from '@cv-git/shared';
 
@@ -160,12 +160,27 @@ export class GitManager {
     try {
       const diffSummary = await this.git.diffSummary([fromCommit, toCommit]);
 
-      return diffSummary.files.map(file => ({
-        file: file.file,
-        insertions: file.insertions,
-        deletions: file.deletions,
-        changes: file.changes.toString()
-      }));
+      return diffSummary.files
+        .filter(file => 'insertions' in file && 'deletions' in file)
+        .map(file => ({
+          file: file.file,
+          insertions: (file as any).insertions,
+          deletions: (file as any).deletions,
+          changes: ((file as any).changes || 0).toString()
+        }));
+    } catch (error: any) {
+      throw new GitError(`Failed to get diff: ${error.message}`, error);
+    }
+  }
+
+  /**
+   * Get raw diff text (for review, etc.)
+   */
+  async getRawDiff(ref?: string): Promise<string> {
+    try {
+      const args = ref ? [ref] : [];
+      const diff = await this.git.diff(args);
+      return diff || '';
     } catch (error: any) {
       throw new GitError(`Failed to get diff: ${error.message}`, error);
     }

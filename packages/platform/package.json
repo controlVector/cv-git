@@ -1,0 +1,32 @@
+{
+  "name": "@cv-git/platform",
+  "version": "0.2.0",
+  "description": "Platform-agnostic git hosting adapter for CV-Git",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "jest",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "cv-git",
+    "git",
+    "github",
+    "platform-adapter"
+  ],
+  "author": "CV-Git Contributors",
+  "license": "MIT",
+  "dependencies": {
+    "@cv-git/credentials": "workspace:*",
+    "@cv-git/shared": "workspace:*",
+    "@octokit/rest": "^20.0.2",
+    "simple-git": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "typescript": "^5.0.0"
+  }
+}

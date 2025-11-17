@@ -11,7 +11,8 @@ import {
   DocstringPayload,
   CommitPayload,
   VectorError,
-  CodeChunk
+  CodeChunk,
+  VectorPayload
 } from '@cv-git/shared';
 import { chunkArray } from '@cv-git/shared';
 
@@ -230,7 +231,7 @@ export class VectorManager {
   /**
    * Search vectors by query text
    */
-  async search<T = CodeChunkPayload>(
+  async search<T extends VectorPayload = CodeChunkPayload>(
     collection: string,
     query: string,
     limit: number = 10,
@@ -300,8 +301,8 @@ export class VectorManager {
     );
 
     // Filter by minimum score if specified
-    if (options?.minScore) {
-      return results.filter(r => r.score >= options.minScore);
+    if (options?.minScore !== undefined) {
+      return results.filter(r => r.score >= options.minScore!);
     }
 
     return results;

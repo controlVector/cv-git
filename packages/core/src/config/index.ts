@@ -21,6 +21,13 @@ const DEFAULT_CONFIG: CVConfig = {
     maxTokens: 4096,
     temperature: 0.2
   },
+  ai: {
+    provider: 'anthropic',
+    model: 'claude-sonnet-4',
+    apiKey: process.env.CV_ANTHROPIC_KEY,
+    maxTokens: 4096,
+    temperature: 0.2
+  },
   embedding: {
     provider: 'openai',
     model: 'text-embedding-3-small',
@@ -153,7 +160,7 @@ export class ConfigManager {
     this.config = this.deepMerge(this.config, updates);
     await this.save();
 
-    return this.config;
+    return this.config!;
   }
 
   /**
