@@ -1,0 +1,40 @@
+{
+  "name": "cv-git",
+  "version": "0.1.0",
+  "description": "AI-Native Paired-Programming + Knowledge-Graph Version Control Layer",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm -r dev",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "clean": "pnpm -r clean && rm -rf node_modules",
+    "cv": "node packages/cli/dist/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.54.0",
+    "prettier": "^3.1.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.0.4"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "keywords": [
+    "git",
+    "ai",
+    "knowledge-graph",
+    "developer-tools",
+    "cli"
+  ],
+  "author": "CV-Git Contributors",
+  "license": "MIT"
+}
