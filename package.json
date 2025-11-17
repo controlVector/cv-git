@@ -9,7 +9,11 @@
   "scripts": {
     "build": "pnpm -r build",
     "dev": "pnpm -r dev",
-    "test": "pnpm -r test",
+    "test": "node tests/run-all.mjs",
+    "test:integration": "node tests/run-all.mjs",
+    "test:unit": "vitest run",
+    "test:watch": "vitest watch",
+    "test:coverage": "vitest run --coverage",
     "lint": "pnpm -r lint",
     "clean": "pnpm -r clean && rm -rf node_modules",
     "cv": "node packages/cli/dist/index.js"

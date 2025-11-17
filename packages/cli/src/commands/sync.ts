@@ -5,7 +5,7 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
-import ora, { Ora } from 'ora';
+import { Ora } from 'ora';
 import {
   configManager,
   createGitManager,
@@ -15,6 +15,7 @@ import {
   createSyncEngine
 } from '@cv-git/core';
 import { findRepoRoot } from '@cv-git/shared';
+import { addGlobalOptions, createOutput } from '../utils/output.js';
 
 export function syncCommand(): Command {
   const cmd = new Command('sync');
@@ -22,9 +23,13 @@ export function syncCommand(): Command {
   cmd
     .description('Synchronize the knowledge graph with the repository')
     .option('--incremental', 'Only sync changed files')
-    .option('--force', 'Force full rebuild')
-    .action(async (options) => {
-      let spinner: Ora | null = null;
+    .option('--force', 'Force full rebuild');
+
+  addGlobalOptions(cmd);
+
+  cmd.action(async (options) => {
+      const output = createOutput(options);
+      let spinner: any;
 
       try {
         // Find repository root
@@ -35,12 +40,12 @@ export function syncCommand(): Command {
         }
 
         // Load configuration
-        spinner = ora('Loading configuration...').start();
+        spinner = output.spinner('Loading configuration...').start();
         const config = await configManager.load(repoRoot);
         spinner.succeed('Configuration loaded');
 
         // Initialize components
-        spinner = ora('Initializing components...').start();
+        spinner = output.spinner('Initializing components...').start();
 
         // Git manager
         const git = createGitManager(repoRoot);
@@ -65,7 +70,7 @@ export function syncCommand(): Command {
 
         if (openaiApiKey && config.vector) {
           try {
-            spinner = ora('Connecting to Qdrant...').start();
+            spinner = output.spinner('Connecting to Qdrant...').start();
             vector = createVectorManager(
               config.vector.url,
               openaiApiKey,
@@ -75,12 +80,12 @@ export function syncCommand(): Command {
             spinner.succeed('Connected to Qdrant');
           } catch (error: any) {
             spinner.warn(`Could not connect to Qdrant: ${error.message}`);
-            spinner = ora('Continuing without vector search...').start();
+            spinner = output.spinner('Continuing without vector search...').start();
             vector = undefined;
           }
         } else if (!openaiApiKey) {
-          console.log(chalk.gray('  ℹ OpenAI API key not found - skipping vector embeddings'));
-          console.log(chalk.gray('    Set OPENAI_API_KEY to enable semantic search'));
+          output.info('OpenAI API key not found - skipping vector embeddings');
+          output.debug('Set OPENAI_API_KEY to enable semantic search');
         }
 
         // Sync engine
@@ -92,7 +97,7 @@ export function syncCommand(): Command {
 
         if (useIncremental) {
           // Incremental sync
-          spinner = ora('Getting changed files...').start();
+          spinner = output.spinner('Getting changed files...').start();
 
           const lastState = await syncEngine.loadSyncState();
           if (!lastState || !lastState.lastCommitSynced) {
@@ -126,7 +131,7 @@ export function syncCommand(): Command {
 
         if (!useIncremental) {
           // Full sync
-          spinner = ora('Starting full sync...').start();
+          spinner = output.spinner('Starting full sync...').start();
 
           // Clear graph if forcing full rebuild
           if (forceFullSync) {

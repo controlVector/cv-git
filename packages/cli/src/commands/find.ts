@@ -5,13 +5,13 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
-import ora from 'ora';
 import {
   configManager,
   createVectorManager
 } from '@cv-git/core';
 import { findRepoRoot } from '@cv-git/shared';
 import { VectorSearchResult, CodeChunkPayload } from '@cv-git/shared';
+import { addGlobalOptions, createOutput } from '../utils/output.js';
 
 export function findCommand(): Command {
   const cmd = new Command('find');
@@ -22,9 +22,13 @@ export function findCommand(): Command {
     .option('-l, --limit <number>', 'Maximum number of results', '10')
     .option('--language <lang>', 'Filter by programming language')
     .option('--file <path>', 'Filter by file path (partial match)')
-    .option('--min-score <score>', 'Minimum similarity score (0-1)', '0.5')
-    .action(async (query: string, options) => {
-      const spinner = ora('Initializing semantic search...').start();
+    .option('--min-score <score>', 'Minimum similarity score (0-1)', '0.5');
+
+  addGlobalOptions(cmd);
+
+  cmd.action(async (query: string, options) => {
+      const output = createOutput(options);
+      const spinner = output.spinner('Initializing semantic search...').start();
 
       try {
         // Find repository root
