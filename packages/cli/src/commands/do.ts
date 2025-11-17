@@ -16,6 +16,7 @@ import {
 } from '@cv-git/core';
 import { findRepoRoot } from '@cv-git/shared';
 import { Plan } from '@cv-git/shared';
+import { addGlobalOptions } from '../utils/output.js';
 
 export function doCommand(): Command {
   const cmd = new Command('do');
@@ -24,8 +25,11 @@ export function doCommand(): Command {
     .description('Execute a task with AI assistance')
     .argument('<task>', 'Task description in natural language')
     .option('--plan-only', 'Only generate the plan, do not generate code')
-    .option('--yes', 'Skip approval prompts')
-    .action(async (task: string, options) => {
+    .option('--yes', 'Skip approval prompts');
+
+  addGlobalOptions(cmd);
+
+  cmd.action(async (task: string, options) => {
       let spinner = ora('Initializing...').start();
 
       try {

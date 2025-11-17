@@ -14,6 +14,7 @@ import {
   createGitManager
 } from '@cv-git/core';
 import { findRepoRoot } from '@cv-git/shared';
+import { addGlobalOptions } from '../utils/output.js';
 
 export function explainCommand(): Command {
   const cmd = new Command('explain');
@@ -21,8 +22,11 @@ export function explainCommand(): Command {
   cmd
     .description('Explain code, files, or concepts using AI')
     .argument('<target>', 'What to explain (symbol name, file path, or concept)')
-    .option('--no-stream', 'Disable streaming output')
-    .action(async (target: string, options) => {
+    .option('--no-stream', 'Disable streaming output');
+
+  addGlobalOptions(cmd);
+
+  cmd.action(async (target: string, options) => {
       let spinner = ora('Initializing...').start();
 
       try {

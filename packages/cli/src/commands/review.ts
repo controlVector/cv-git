@@ -14,6 +14,7 @@ import {
   createGitManager
 } from '@cv-git/core';
 import { findRepoRoot } from '@cv-git/shared';
+import { addGlobalOptions } from '../utils/output.js';
 
 export function reviewCommand(): Command {
   const cmd = new Command('review');
@@ -22,8 +23,11 @@ export function reviewCommand(): Command {
     .description('Review code changes with AI')
     .argument('[ref]', 'Git ref to review (default: HEAD)', 'HEAD')
     .option('--staged', 'Review staged changes instead of a commit')
-    .option('--context', 'Include related code context in review')
-    .action(async (ref: string, options) => {
+    .option('--context', 'Include related code context in review');
+
+  addGlobalOptions(cmd);
+
+  cmd.action(async (ref: string, options) => {
       let spinner = ora('Initializing...').start();
 
       try {
