@@ -84,19 +84,33 @@ export class GraphManager {
 
   /**
    * Create indexes for better query performance
+   * Enhanced with FalkorDB code-graph-backend patterns
    */
   private async createIndexes(): Promise<void> {
     try {
-      // File indexes
+      // File indexes (FalkorDB pattern)
       await this.safeCreateIndex('File', 'path');
+      await this.safeCreateIndex('File', 'name');
+      await this.safeCreateIndex('File', 'ext');
       await this.safeCreateIndex('File', 'language');
       await this.safeCreateIndex('File', 'gitHash');
 
-      // Symbol indexes
+      // Symbol indexes (keep our generic Symbol for backwards compatibility)
       await this.safeCreateIndex('Symbol', 'name');
       await this.safeCreateIndex('Symbol', 'qualifiedName');
       await this.safeCreateIndex('Symbol', 'file');
       await this.safeCreateIndex('Symbol', 'kind');
+
+      // Specific node type indexes (FalkorDB pattern)
+      await this.safeCreateIndex('Function', 'name');
+      await this.safeCreateIndex('Function', 'qualifiedName');
+      await this.safeCreateIndex('Class', 'name');
+      await this.safeCreateIndex('Class', 'qualifiedName');
+      await this.safeCreateIndex('Interface', 'name');
+      await this.safeCreateIndex('Struct', 'name');
+
+      // Full-text search index for Searchable entities (FalkorDB pattern)
+      await this.createFullTextIndex('Searchable', 'name');
 
       // Module indexes
       await this.safeCreateIndex('Module', 'path');
@@ -110,6 +124,21 @@ export class GraphManager {
     } catch (error: any) {
       // Indexes might already exist, log but don't fail
       console.warn('Index creation warning:', error.message);
+    }
+  }
+
+  /**
+   * Create full-text search index (FalkorDB pattern)
+   */
+  private async createFullTextIndex(label: string, property: string): Promise<void> {
+    try {
+      // FalkorDB full-text index syntax
+      await this.query(`CALL db.idx.fulltext.createNodeIndex('${label.toLowerCase()}', '${label}', '${property}')`);
+    } catch (error: any) {
+      // Index might already exist
+      if (!error.message.includes('already exists') && !error.message.includes('Index')) {
+        console.warn(`Full-text index creation warning for ${label}:`, error.message);
+      }
     }
   }
 
@@ -245,10 +274,18 @@ export class GraphManager {
 
   /**
    * Create or update a Symbol node
+   * Enhanced with FalkorDB patterns - creates specific node types with Searchable mixin
    */
   async upsertSymbolNode(symbol: SymbolNode): Promise<void> {
+    // Determine specific label based on kind (FalkorDB pattern)
+    const specificLabel = this.getSpecificLabel(symbol.kind);
+
+    // Use both generic Symbol and specific label (e.g., :Symbol:Function:Searchable)
+    // This gives us backwards compatibility + FalkorDB pattern benefits
+    const labels = `Symbol:${specificLabel}:Searchable`;
+
     const cypher = `
-      MERGE (s:Symbol {qualifiedName: $qualifiedName})
+      MERGE (s:${labels} {qualifiedName: $qualifiedName})
       SET s.name = $name,
           s.kind = $kind,
           s.file = $file,
@@ -256,12 +293,15 @@ export class GraphManager {
           s.endLine = $endLine,
           s.signature = $signature,
           s.docstring = $docstring,
+          s.doc = $docstring,
           s.returnType = $returnType,
           s.visibility = $visibility,
           s.isAsync = $isAsync,
           s.isStatic = $isStatic,
           s.complexity = $complexity,
           s.vectorId = $vectorId,
+          s.src_start = $startLine,
+          s.src_end = $endLine,
           s.updatedAt = $updatedAt
       RETURN s
     `;
@@ -283,6 +323,25 @@ export class GraphManager {
       vectorId: symbol.vectorId || '',
       updatedAt: Date.now()
     });
+  }
+
+  /**
+   * Get specific label for symbol kind (FalkorDB pattern)
+   */
+  private getSpecificLabel(kind: string): string {
+    const labelMap: Record<string, string> = {
+      'function': 'Function',
+      'method': 'Function',  // Methods are functions
+      'class': 'Class',
+      'interface': 'Interface',
+      'type': 'Type',
+      'struct': 'Struct',
+      'enum': 'Enum',
+      'constant': 'Constant',
+      'variable': 'Variable'
+    };
+
+    return labelMap[kind] || 'Symbol';
   }
 
   /**
@@ -577,27 +636,185 @@ export class GraphManager {
 
   /**
    * Get graph statistics
+   * Enhanced with FalkorDB pattern for detailed breakdown
    */
   async getStats(): Promise<{
     fileCount: number;
     symbolCount: number;
+    functionCount: number;
+    classCount: number;
     commitCount: number;
     moduleCount: number;
     relationshipCount: number;
+    nodesByLabel?: Record<string, number>;
+    relationshipsByType?: Record<string, number>;
   }> {
     const fileCount = await this.query('MATCH (f:File) RETURN count(f) as count');
     const symbolCount = await this.query('MATCH (s:Symbol) RETURN count(s) as count');
+    const functionCount = await this.query('MATCH (f:Function) RETURN count(f) as count');
+    const classCount = await this.query('MATCH (c:Class) RETURN count(c) as count');
     const commitCount = await this.query('MATCH (c:Commit) RETURN count(c) as count');
     const moduleCount = await this.query('MATCH (m:Module) RETURN count(m) as count');
     const relationshipCount = await this.query('MATCH ()-[r]->() RETURN count(r) as count');
 
+    // FalkorDB pattern: Get detailed breakdown
+    const nodesByLabel = await this.query('MATCH (n) RETURN labels(n) as label, count(n) as count');
+    const relationshipsByType = await this.query('MATCH ()-[r]->() RETURN type(r) as type, count(r) as count');
+
     return {
       fileCount: fileCount[0]?.count || 0,
       symbolCount: symbolCount[0]?.count || 0,
+      functionCount: functionCount[0]?.count || 0,
+      classCount: classCount[0]?.count || 0,
       commitCount: commitCount[0]?.count || 0,
       moduleCount: moduleCount[0]?.count || 0,
-      relationshipCount: relationshipCount[0]?.count || 0
+      relationshipCount: relationshipCount[0]?.count || 0,
+      nodesByLabel: this.parseBreakdown(nodesByLabel, 'label'),
+      relationshipsByType: this.parseBreakdown(relationshipsByType, 'type')
     };
+  }
+
+  /**
+   * Parse breakdown results into a record
+   */
+  private parseBreakdown(results: GraphQueryResult[], key: string): Record<string, number> {
+    const breakdown: Record<string, number> = {};
+    for (const result of results) {
+      const label = Array.isArray(result[key]) ? result[key][0] : result[key];
+      if (label) {
+        breakdown[label] = result.count || 0;
+      }
+    }
+    return breakdown;
+  }
+
+  /**
+   * Find all call paths between two functions (FalkorDB pattern)
+   * @param fromFunction - Source function name or qualified name
+   * @param toFunction - Target function name or qualified name
+   * @param maxDepth - Maximum path length (default: 10)
+   * @returns Array of paths, where each path is an array of function names
+   */
+  async findCallPaths(fromFunction: string, toFunction: string, maxDepth: number = 10): Promise<string[][]> {
+    const cypher = `
+      MATCH p = (f1:Function)-[:CALLS*1..${maxDepth}]->(f2:Function)
+      WHERE f1.name = $fromFunction OR f1.qualifiedName = $fromFunction
+        AND f2.name = $toFunction OR f2.qualifiedName = $toFunction
+      RETURN [node in nodes(p) | node.name] as path
+      LIMIT 100
+    `;
+
+    const results = await this.query(cypher, { fromFunction, toFunction });
+    return results.map(r => r.path as string[]);
+  }
+
+  /**
+   * Find unreachable/dead code (FalkorDB pattern)
+   * Functions that are never called by any other function
+   * @returns Array of unused function symbols
+   */
+  async findDeadCode(): Promise<SymbolNode[]> {
+    const cypher = `
+      MATCH (f:Function)
+      WHERE NOT ()-[:CALLS]->(f)
+        AND NOT f.name IN ['main', 'init', '__init__', 'constructor']
+      RETURN f
+      LIMIT 100
+    `;
+
+    const results = await this.query(cypher);
+    return results.map(r => r.f as SymbolNode);
+  }
+
+  /**
+   * Full-text search for entities (FalkorDB pattern)
+   * Searches across all Searchable entities (Functions, Classes, etc.)
+   * @param searchText - Text to search for (prefix matching)
+   * @param limit - Maximum results to return
+   * @returns Array of matching symbols
+   */
+  async searchEntities(searchText: string, limit: number = 10): Promise<SymbolNode[]> {
+    try {
+      // Try full-text search first (FalkorDB pattern)
+      const cypher = `
+        CALL db.idx.fulltext.queryNodes('searchable', $searchText)
+        YIELD node
+        RETURN node
+        LIMIT $limit
+      `;
+
+      const results = await this.query(cypher, { searchText, limit });
+      return results.map(r => r.node as SymbolNode);
+    } catch (error) {
+      // Fallback to regular pattern matching if full-text index not available
+      const cypher = `
+        MATCH (s:Searchable)
+        WHERE s.name CONTAINS $searchText
+        RETURN s
+        LIMIT $limit
+      `;
+
+      const results = await this.query(cypher, { searchText, limit });
+      return results.map(r => r.s as SymbolNode);
+    }
+  }
+
+  /**
+   * Find functions with high cyclomatic complexity (FalkorDB pattern)
+   * @param threshold - Minimum complexity score
+   * @returns Array of complex functions
+   */
+  async findComplexFunctions(threshold: number = 10): Promise<SymbolNode[]> {
+    const cypher = `
+      MATCH (f:Function)
+      WHERE f.complexity >= $threshold
+      RETURN f
+      ORDER BY f.complexity DESC
+      LIMIT 50
+    `;
+
+    const results = await this.query(cypher, { threshold });
+    return results.map(r => r.f as SymbolNode);
+  }
+
+  /**
+   * Find functions with most callers (hot spots)
+   * @param limit - Number of hot spots to return
+   * @returns Array of tuples: [function, caller_count]
+   */
+  async findHotSpots(limit: number = 20): Promise<Array<{ function: SymbolNode; callerCount: number }>> {
+    const cypher = `
+      MATCH (f:Function)
+      OPTIONAL MATCH (caller)-[:CALLS]->(f)
+      WITH f, count(caller) as callerCount
+      WHERE callerCount > 0
+      RETURN f as function, callerCount
+      ORDER BY callerCount DESC
+      LIMIT $limit
+    `;
+
+    const results = await this.query(cypher, { limit });
+    return results.map(r => ({
+      function: r.function as SymbolNode,
+      callerCount: r.callerCount as number
+    }));
+  }
+
+  /**
+   * Detect circular dependencies (FalkorDB pattern)
+   * Find cycles in the call graph
+   * @param maxDepth - Maximum cycle length to detect
+   * @returns Array of cycles
+   */
+  async findCircularDependencies(maxDepth: number = 5): Promise<string[][]> {
+    const cypher = `
+      MATCH p = (f:Function)-[:CALLS*2..${maxDepth}]->(f)
+      RETURN [node in nodes(p) | node.name] as cycle
+      LIMIT 50
+    `;
+
+    const results = await this.query(cypher);
+    return results.map(r => r.cycle as string[]);
   }
 
   /**
