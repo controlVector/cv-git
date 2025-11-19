@@ -4,6 +4,7 @@
  */
 
 import chalk from 'chalk';
+import ora from 'ora';
 
 export interface OutputOptions {
   json?: boolean;
@@ -161,7 +162,6 @@ export class OutputManager {
       };
     }
 
-    const ora = require('ora');
     return ora(text);
   }
 
