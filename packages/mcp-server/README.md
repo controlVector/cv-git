@@ -6,7 +6,7 @@ Model Context Protocol (MCP) server for CV-Git, enabling AI assistants like Clau
 
 [Model Context Protocol](https://modelcontextprotocol.io/) is Anthropic's open protocol for connecting AI assistants to external tools and data sources. This MCP server exposes CV-Git's powerful code analysis capabilities as tools that Claude and other AI assistants can use.
 
-## Available Tools
+## Available Tools (20 total)
 
 ### Code Understanding (5 tools)
 
@@ -34,6 +34,38 @@ Model Context Protocol (MCP) server for CV-Git, enabling AI assistants like Clau
 - Deep dive into specific symbols or files
 - See all relationships and dependencies
 - View callers and callees
+
+### Advanced Code Analysis (5 tools)
+
+**cv_graph_path** - Find execution paths
+- Find all execution paths between two functions
+- Understand how functions are connected in the call graph
+- Set maximum depth to control search scope
+- Example: "Find all paths from `main` to `processPayment`"
+
+**cv_graph_dead_code** - Detect unreachable code
+- Identify functions with no callers (potential dead code)
+- Helps find code that may be safe to remove
+- Note: Some functions may be called dynamically or from external code
+- Useful for cleanup and reducing codebase size
+
+**cv_graph_complexity** - Find complex functions
+- Find functions with high cyclomatic complexity
+- Set threshold (default: 10) to control sensitivity
+- Identify functions that may need refactoring
+- Complexity > 10 often indicates need for simplification
+
+**cv_graph_cycles** - Detect circular dependencies
+- Find circular call chains in the codebase
+- Identify potential architectural issues
+- Set maximum depth to control search scope
+- Warning: Circular dependencies make code harder to maintain
+
+**cv_graph_hotspots** - Find most-called functions
+- Identify the most frequently called functions
+- Find optimization targets
+- Set limit to control number of results
+- Hot spots may benefit from performance optimization
 
 ### Code Modification (3 tools)
 
@@ -155,6 +187,13 @@ Once configured, Claude can automatically use CV-Git tools. Examples:
 
 **Query relationships:**
 > "Show me all functions that call the `handleLogin` function"
+
+**Advanced analysis:**
+> "Find all execution paths from main() to processPayment()"
+> "Detect any dead code in the codebase"
+> "Find all functions with complexity greater than 15"
+> "Check for circular dependencies"
+> "Show me the top 10 most-called functions"
 
 **Review changes:**
 > "Review my staged changes and provide feedback"
