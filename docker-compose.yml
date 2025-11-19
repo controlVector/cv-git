@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  # FalkorDB - Graph Database
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: cv-git-falkordb
+    ports:
+      - "${FALKORDB_PORT:-6379}:6379"
+    volumes:
+      - falkordb-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - cv-git-network
+
+  # Qdrant - Vector Database (optional)
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: cv-git-qdrant
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - cv-git-network
+
+volumes:
+  falkordb-data:
+    driver: local
+  qdrant-data:
+    driver: local
+
+networks:
+  cv-git-network:
+    driver: bridge

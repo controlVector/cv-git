@@ -28,37 +28,59 @@ export class CodeParser {
    * Initialize all supported language parsers
    */
   private initializeParsers(): void {
+    console.log('[DEBUG] Initializing parsers...');
+
     // TypeScript/JavaScript parser
+    console.log('[DEBUG] Creating TypeScript parser...');
     const tsParser = createTypeScriptParser();
+    console.log('[DEBUG] Registering TypeScript parser...');
     this.registerParser('typescript', tsParser);
 
     // Python parser
+    console.log('[DEBUG] Creating Python parser...');
     const pythonParser = createPythonParser();
+    console.log('[DEBUG] Registering Python parser...');
     this.registerParser('python', pythonParser);
 
-    // Go parser
-    const goParser = createGoParser();
-    this.registerParser('go', goParser);
+    // Go parser (disabled - needs native build)
+    // console.log('[DEBUG] Creating Go parser...');
+    // const goParser = createGoParser();
+    // console.log('[DEBUG] Registering Go parser...');
+    // this.registerParser('go', goParser);
 
-    // Rust parser
-    const rustParser = createRustParser();
-    this.registerParser('rust', rustParser);
+    // Rust parser (disabled - needs native build)
+    // console.log('[DEBUG] Creating Rust parser...');
+    // const rustParser = createRustParser();
+    // console.log('[DEBUG] Registering Rust parser...');
+    // this.registerParser('rust', rustParser);
 
-    // Java parser
-    const javaParser = createJavaParser();
-    this.registerParser('java', javaParser);
+    // Java parser (disabled - needs native build)
+    // console.log('[DEBUG] Creating Java parser...');
+    // const javaParser = createJavaParser();
+    // console.log('[DEBUG] Registering Java parser...');
+    // this.registerParser('java', javaParser);
+
+    console.log('[DEBUG] All parsers initialized successfully');
   }
 
   /**
    * Register a language parser
    */
   private registerParser(language: string, parser: ILanguageParser): void {
+    console.log(`[DEBUG] Registering parser for ${language}`);
     this.parsers.set(language, parser);
 
     // Map file extensions to language
-    for (const ext of parser.getSupportedExtensions()) {
+    console.log(`[DEBUG] Getting extensions for ${language}...`);
+    const extensions = parser.getSupportedExtensions();
+    console.log(`[DEBUG] Extensions for ${language}:`, extensions);
+    console.log(`[DEBUG] Extensions length: ${extensions?.length}`);
+
+    for (const ext of extensions) {
+      console.log(`[DEBUG] Mapping ${ext} to ${language}`);
       this.extensionMap.set(ext, language);
     }
+    console.log(`[DEBUG] Finished registering ${language}`);
   }
 
   /**
