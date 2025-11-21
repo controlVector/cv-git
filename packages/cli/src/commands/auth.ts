@@ -19,6 +19,32 @@ import {
 } from '@cv-git/credentials';
 import { GitHubAdapter } from '@cv-git/platform';
 import { randomBytes } from 'crypto';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
+
+/**
+ * Open URL in default browser
+ */
+async function openBrowser(url: string): Promise<void> {
+  const platform = process.platform;
+  let command: string;
+
+  if (platform === 'darwin') {
+    command = `open "${url}"`;
+  } else if (platform === 'win32') {
+    command = `start "" "${url}"`;
+  } else {
+    command = `xdg-open "${url}"`;
+  }
+
+  try {
+    await execAsync(command);
+  } catch (error) {
+    // Browser open failed, user will need to open manually
+  }
+}
 
 export function authCommand(): Command {
   const cmd = new Command('auth').description(
@@ -29,9 +55,11 @@ export function authCommand(): Command {
   cmd
     .command('setup [service]')
     .description(
-      'Set up authentication (services: github, anthropic, openai, all)'
+      'Set up authentication (services: github, anthropic, openai, openrouter, all)'
     )
-    .action(async (service?: string) => {
+    .option('--no-browser', 'Do not open browser automatically')
+    .action(async (service?: string, cmdOptions?: { browser?: boolean }) => {
+      const autoBrowser = cmdOptions?.browser !== false;
       console.log(chalk.bold.blue('\n🔐 CV-Git Authentication Setup\n'));
 
       const credentials = new CredentialManager();
@@ -57,15 +85,19 @@ export function authCommand(): Command {
       const setupAll = !service || service === 'all';
 
       if (setupAll || service === 'github') {
-        await setupGitHub(credentials);
+        await setupGitHub(credentials, autoBrowser);
       }
 
       if (setupAll || service === 'anthropic') {
-        await setupAnthropic(credentials);
+        await setupAnthropic(credentials, autoBrowser);
       }
 
       if (setupAll || service === 'openai') {
-        await setupOpenAI(credentials);
+        await setupOpenAI(credentials, autoBrowser);
+      }
+
+      if (setupAll || service === 'openrouter') {
+        await setupOpenRouter(credentials, autoBrowser);
       }
 
       console.log(chalk.bold.green('\n✅ Authentication setup complete!\n'));
@@ -228,19 +260,22 @@ export function authCommand(): Command {
 // Setup Functions
 // ============================================================================
 
-async function setupGitHub(credentials: CredentialManager): Promise<void> {
+async function setupGitHub(credentials: CredentialManager, autoBrowser: boolean = true): Promise<void> {
   console.log(chalk.bold('──────────────────────────────────────────'));
   console.log(chalk.bold.cyan('GitHub Authentication'));
   console.log(chalk.bold('──────────────────────────────────────────\n'));
 
-  console.log(
-    chalk.gray('1. Visit: ') +
-      chalk.blue(
-        'https://github.com/settings/tokens/new?scopes=repo,workflow,write:packages'
-      )
-  );
-  console.log(chalk.gray('2. Generate a Personal Access Token'));
-  console.log(chalk.gray('3. Copy the token (it starts with ') + chalk.white('ghp_') + chalk.gray(')'));
+  const url = 'https://github.com/settings/tokens/new?scopes=repo,workflow,write:packages';
+
+  if (autoBrowser) {
+    console.log(chalk.cyan('Opening browser to create token...'));
+    await openBrowser(url);
+    console.log();
+  }
+
+  console.log(chalk.gray('URL: ') + chalk.blue(url));
+  console.log(chalk.gray('1. Generate a Personal Access Token'));
+  console.log(chalk.gray('2. Copy the token (it starts with ') + chalk.white('ghp_') + chalk.gray(')'));
   console.log();
 
   const { token } = await inquirer.prompt([
@@ -287,13 +322,21 @@ async function setupGitHub(credentials: CredentialManager): Promise<void> {
   }
 }
 
-async function setupAnthropic(credentials: CredentialManager): Promise<void> {
+async function setupAnthropic(credentials: CredentialManager, autoBrowser: boolean = true): Promise<void> {
   console.log(chalk.bold('──────────────────────────────────────────'));
   console.log(chalk.bold.cyan('Anthropic Authentication'));
   console.log(chalk.bold('──────────────────────────────────────────\n'));
 
-  console.log(chalk.gray('1. Visit: ') + chalk.blue('https://console.anthropic.com/'));
-  console.log(chalk.gray('2. Copy your API key (starts with ') + chalk.white('sk-ant-') + chalk.gray(')'));
+  const url = 'https://console.anthropic.com/settings/keys';
+
+  if (autoBrowser) {
+    console.log(chalk.cyan('Opening browser to get API key...'));
+    await openBrowser(url);
+    console.log();
+  }
+
+  console.log(chalk.gray('URL: ') + chalk.blue(url));
+  console.log(chalk.gray('Copy your API key (starts with ') + chalk.white('sk-ant-') + chalk.gray(')'));
   console.log();
 
   const { apiKey } = await inquirer.prompt([
@@ -322,15 +365,21 @@ async function setupAnthropic(credentials: CredentialManager): Promise<void> {
   console.log(chalk.green('✅ Anthropic authentication configured!\n'));
 }
 
-async function setupOpenAI(credentials: CredentialManager): Promise<void> {
+async function setupOpenAI(credentials: CredentialManager, autoBrowser: boolean = true): Promise<void> {
   console.log(chalk.bold('──────────────────────────────────────────'));
   console.log(chalk.bold.cyan('OpenAI Authentication'));
   console.log(chalk.bold('──────────────────────────────────────────\n'));
 
-  console.log(
-    chalk.gray('1. Visit: ') + chalk.blue('https://platform.openai.com/api-keys')
-  );
-  console.log(chalk.gray('2. Copy your API key (starts with ') + chalk.white('sk-') + chalk.gray(')'));
+  const url = 'https://platform.openai.com/api-keys';
+
+  if (autoBrowser) {
+    console.log(chalk.cyan('Opening browser to get API key...'));
+    await openBrowser(url);
+    console.log();
+  }
+
+  console.log(chalk.gray('URL: ') + chalk.blue(url));
+  console.log(chalk.gray('Copy your API key (starts with ') + chalk.white('sk-') + chalk.gray(')'));
   console.log();
 
   const { apiKey } = await inquirer.prompt([
@@ -357,4 +406,47 @@ async function setupOpenAI(credentials: CredentialManager): Promise<void> {
   });
 
   console.log(chalk.green('✅ OpenAI authentication configured!\n'));
+}
+
+async function setupOpenRouter(credentials: CredentialManager, autoBrowser: boolean = true): Promise<void> {
+  console.log(chalk.bold('──────────────────────────────────────────'));
+  console.log(chalk.bold.cyan('OpenRouter Authentication'));
+  console.log(chalk.bold('──────────────────────────────────────────\n'));
+
+  const url = 'https://openrouter.ai/keys';
+
+  if (autoBrowser) {
+    console.log(chalk.cyan('Opening browser to get API key...'));
+    await openBrowser(url);
+    console.log();
+  }
+
+  console.log(chalk.gray('URL: ') + chalk.blue(url));
+  console.log(chalk.gray('Copy your API key (starts with ') + chalk.white('sk-or-') + chalk.gray(')'));
+  console.log();
+
+  const { apiKey } = await inquirer.prompt([
+    {
+      type: 'password',
+      name: 'apiKey',
+      message: 'Enter your OpenRouter API key:',
+      validate: (input: string) => {
+        if (!input || !input.trim()) {
+          return 'API key is required';
+        }
+        if (!input.startsWith('sk-or-')) {
+          return 'Invalid OpenRouter API key format (should start with sk-or-)';
+        }
+        return true;
+      },
+    },
+  ]);
+
+  await credentials.store<OpenAIAPICredential>({
+    type: CredentialType.OPENAI_API,
+    name: 'openrouter',
+    apiKey,
+  });
+
+  console.log(chalk.green('✅ OpenRouter authentication configured!\n'));
 }
