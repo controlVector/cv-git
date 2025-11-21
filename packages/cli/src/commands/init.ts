@@ -6,8 +6,10 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import * as path from 'path';
+import inquirer from 'inquirer';
 import { configManager } from '@cv-git/core';
 import { ensureDir, getCVDir } from '@cv-git/shared';
+import { CredentialManager } from '@cv-git/credentials';
 import { addGlobalOptions, createOutput } from '../utils/output.js';
 
 export function initCommand(): Command {
@@ -56,11 +58,41 @@ export function initCommand(): Command {
           output.json({ success: true, repoName, cvDir });
         } else {
           console.log();
-          console.log(chalk.bold('Next steps:'));
-          console.log(chalk.gray('  1. Set up your API keys:'));
-          console.log(chalk.cyan('     export CV_ANTHROPIC_KEY="your-key-here"'));
-          console.log(chalk.cyan('     export CV_OPENAI_KEY="your-key-here"'));
-          console.log();
+
+          // Prompt to set up credentials
+          const { setupCreds } = await inquirer.prompt([
+            {
+              type: 'confirm',
+              name: 'setupCreds',
+              message: 'Would you like to set up API keys now?',
+              default: true,
+            },
+          ]);
+
+          if (setupCreds) {
+            console.log();
+            console.log(chalk.cyan('Running: cv auth setup'));
+            console.log();
+
+            // Initialize credential manager and run setup
+            const credentials = new CredentialManager();
+            await credentials.init();
+
+            // Import and run auth setup dynamically to avoid circular deps
+            const { execSync } = await import('child_process');
+            try {
+              execSync('cv auth setup', { stdio: 'inherit' });
+            } catch {
+              console.log(chalk.yellow('\nYou can run `cv auth setup` later to configure API keys.'));
+            }
+          } else {
+            console.log();
+            console.log(chalk.bold('Next steps:'));
+            console.log(chalk.gray('  1. Set up your API keys:'));
+            console.log(chalk.cyan('     cv auth setup'));
+            console.log();
+          }
+
           console.log(chalk.gray('  2. Sync your repository:'));
           console.log(chalk.cyan('     cv sync'));
           console.log();
