@@ -53,22 +53,32 @@ export class SyncEngine {
 
       console.log(`Syncing ${filesToSync.length} files`);
 
-      // 3. Parse all files
+      // 3. Parse all files (with parallelization)
       console.log('Parsing files...');
       const parsedFiles: ParsedFile[] = [];
+      const CONCURRENCY = 10; // Parse 10 files in parallel
 
-      for (let i = 0; i < filesToSync.length; i++) {
-        const file = filesToSync[i];
-        try {
-          const parsed = await this.parseFile(file);
-          parsedFiles.push(parsed);
+      // Process files in batches for parallel parsing
+      for (let i = 0; i < filesToSync.length; i += CONCURRENCY) {
+        const batch = filesToSync.slice(i, i + CONCURRENCY);
+        const batchResults = await Promise.allSettled(
+          batch.map(file => this.parseFile(file))
+        );
 
-          if ((i + 1) % 10 === 0) {
-            console.log(`Parsed ${i + 1}/${filesToSync.length} files`);
+        for (let j = 0; j < batchResults.length; j++) {
+          const result = batchResults[j];
+          const file = batch[j];
+          if (result.status === 'fulfilled') {
+            parsedFiles.push(result.value);
+          } else {
+            errors.push(`Failed to parse ${file}: ${result.reason?.message || 'Unknown error'}`);
+            console.error(`Error parsing ${file}:`, result.reason?.message);
           }
-        } catch (error: any) {
-          errors.push(`Failed to parse ${file}: ${error.message}`);
-          console.error(`Error parsing ${file}:`, error.message);
+        }
+
+        const progress = Math.min(i + CONCURRENCY, filesToSync.length);
+        if (progress % 50 === 0 || progress === filesToSync.length) {
+          console.log(`Parsed ${progress}/${filesToSync.length} files`);
         }
       }
 
@@ -283,6 +293,22 @@ export class SyncEngine {
 
     console.log('Creating call relationships...');
 
+    // Build symbol index for faster call resolution
+    const symbolIndex = new Map<string, string>(); // name -> qualifiedName
+    const exportedSymbols = new Map<string, string>(); // name -> qualifiedName (exported only)
+
+    for (const file of parsedFiles) {
+      for (const symbol of file.symbols) {
+        symbolIndex.set(`${file.path}:${symbol.name}`, symbol.qualifiedName);
+
+        // Track exported symbols for cross-file resolution
+        const isExported = file.exports.some(exp => exp.name === symbol.name);
+        if (isExported) {
+          exportedSymbols.set(symbol.name, symbol.qualifiedName);
+        }
+      }
+    }
+
     // Step 4: Create CALLS edges
     for (const file of parsedFiles) {
       for (const symbol of file.symbols) {
@@ -292,10 +318,12 @@ export class SyncEngine {
         for (const call of symbol.calls) {
           try {
             // Try to resolve the callee to a qualified name
-            const calleeQualifiedName = await this.resolveCallTarget(
+            const calleeQualifiedName = this.resolveCallTargetFast(
               call.callee,
               file,
-              parsedFiles
+              parsedFiles,
+              symbolIndex,
+              exportedSymbols
             );
 
             if (calleeQualifiedName) {
@@ -323,56 +351,39 @@ export class SyncEngine {
   }
 
   /**
-   * Resolve a call target to a qualified symbol name
+   * Fast call target resolution using pre-built symbol index
    */
-  private async resolveCallTarget(
+  private resolveCallTargetFast(
     callee: string,
     currentFile: ParsedFile,
-    allFiles: ParsedFile[]
-  ): Promise<string | null> {
-    // Strategy 1: Look for symbol in the same file
-    const localSymbol = currentFile.symbols.find(s => s.name === callee);
-    if (localSymbol) {
-      return localSymbol.qualifiedName;
+    allFiles: ParsedFile[],
+    symbolIndex: Map<string, string>,
+    exportedSymbols: Map<string, string>
+  ): string | null {
+    // Strategy 1: Look for symbol in the same file (O(1) with index)
+    const localKey = `${currentFile.path}:${callee}`;
+    if (symbolIndex.has(localKey)) {
+      return symbolIndex.get(localKey)!;
     }
 
-    // Strategy 2: Look for symbol in imported files
+    // Strategy 2: Look for symbol in imported files (O(imports) with index)
     for (const imp of currentFile.imports) {
       if (imp.isExternal) continue;
 
       const targetPath = this.resolveImportPath(currentFile.path, imp.source);
-      const targetFile = allFiles.find(f => f.path === targetPath);
 
-      if (targetFile) {
-        // Check if the imported symbols include this callee
-        if (imp.importedSymbols.includes(callee)) {
-          const symbol = targetFile.symbols.find(s => s.name === callee);
-          if (symbol) {
-            return symbol.qualifiedName;
-          }
-        }
-
-        // If it's a namespace import, try to find the symbol
-        if (imp.importType === 'namespace' || imp.importType === 'default') {
-          const symbol = targetFile.symbols.find(s => s.name === callee);
-          if (symbol) {
-            return symbol.qualifiedName;
-          }
+      // Check if the imported symbols include this callee
+      if (imp.importedSymbols.includes(callee) || imp.importType === 'namespace' || imp.importType === 'default') {
+        const importedKey = `${targetPath}:${callee}`;
+        if (symbolIndex.has(importedKey)) {
+          return symbolIndex.get(importedKey)!;
         }
       }
     }
 
-    // Strategy 3: Search all files for exported symbol with this name
-    // (This is a fallback for cases we can't resolve through imports)
-    for (const file of allFiles) {
-      const symbol = file.symbols.find(s => s.name === callee);
-      if (symbol) {
-        // Check if it's exported
-        const isExported = file.exports.some(exp => exp.name === callee);
-        if (isExported) {
-          return symbol.qualifiedName;
-        }
-      }
+    // Strategy 3: Look up in exported symbols index (O(1))
+    if (exportedSymbols.has(callee)) {
+      return exportedSymbols.get(callee)!;
     }
 
     // Could not resolve
