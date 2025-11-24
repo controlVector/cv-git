@@ -79,16 +79,19 @@ git clone https://github.com/controlVector/cv-git.git
 cd cv-git
 
 # Install dependencies (pnpm required for monorepo)
+# Note: This will build native tree-sitter and keytar bindings
 pnpm install
 
 # Build the project
 pnpm build
 
-# Link CLI globally (must specify CLI package)
-pnpm link --global --dir packages/cli
+# Link CLI globally
+cd packages/cli && pnpm link --global && cd ../..
 ```
 
 > **Note:** This project uses pnpm workspaces. npm and yarn are not currently supported.
+>
+> **Build Dependencies:** You'll need build tools for native modules (gcc, g++, make, python3). On Ubuntu/Debian: `sudo apt install build-essential python3`
 
 ### Verify Installation
 

@@ -9,7 +9,7 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "jest",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist *.tsbuildinfo"
   },
   "keywords": [
     "cv-git",
