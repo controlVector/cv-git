@@ -89,6 +89,52 @@ pnpm build
 cd packages/cli && pnpm link --global && cd ../..
 ```
 
+### WSL Installation
+```bash
+ # Install Node.js using nvm (Node Version Manager) - recommended approach
+  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+
+  # Reload your shell configuration
+  source ~/.bashrc
+
+  # Install the latest LTS version of Node.js
+  nvm install --lts
+
+  # Verify installation
+  node --version
+  npm --version
+
+  # Install pnpm globally in WSL
+  npm install -g pnpm
+
+  # Verify pnpm installation
+  pnpm --version
+
+  # Now you can run the build
+  cd ~/prod/cv-git
+  pnpm install
+  pnpm build
+```
+
+### libsecret Package Installation
+```bash
+# Install libsecret development library
+  sudo apt update
+  sudo apt install -y libsecret-1-dev
+
+  # You may also need to rebuild the native modules
+  cd ~/prod/cv-git
+  pnpm rebuild keytar
+
+  # Now try running cv again
+  cv
+
+  If you still have issues after installing libsecret, you might need to rebuild all native dependencies:
+
+  cd ~/prod/cv-git
+  pnpm rebuild
+```
+
 > **Note:** This project uses pnpm workspaces. npm and yarn are not currently supported.
 >
 > **Build Dependencies:** You'll need build tools for native modules (gcc, g++, make, python3). On Ubuntu/Debian: `sudo apt install build-essential python3`
