@@ -82,11 +82,12 @@ echo "OPENAI_API_KEY=sk-..." >> .env
 
 #### Credential storage errors
 ```bash
-# On Linux without keyring, set master password
-export CV_MASTER_PASSWORD=your-password
-
 # Check credential status
 cv doctor
+
+# Credentials are stored in:
+# - OS keychain (macOS/Windows/Linux with libsecret)
+# - ~/.cv-git/credentials.json (fallback, chmod 600)
 ```
 
 ### Sync Issues

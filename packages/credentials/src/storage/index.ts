@@ -5,3 +5,4 @@
 export { CredentialStorage, StorageBackend } from './interface.js';
 export { KeychainStorage } from './keychain.js';
 export { EncryptedFileStorage } from './encrypted.js';
+export { PlainFileStorage } from './plain-file.js';

@@ -51,6 +51,7 @@ import { handleDo, handleReview } from './tools/modify.js';
 import { handleSync } from './tools/sync.js';
 import { handlePRCreate, handlePRList, handlePRReview, handleReleaseCreate } from './tools/platform.js';
 import { handleConfigGet, handleStatus, handleDoctor } from './tools/system.js';
+import { handleContext, ContextArgs } from './tools/context.js';
 
 /**
  * Tool definitions
@@ -84,6 +85,51 @@ const tools: Tool[] = [
         file: {
           type: 'string',
           description: 'Filter by file path (partial match)',
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'cv_context',
+    description: 'Generate rich context about a codebase for AI coding assistants. Searches for relevant code, includes relationships from the knowledge graph, and optionally includes full file contents. Perfect for understanding code before making changes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'What you want to understand or work on (natural language, e.g., "authentication flow", "error handling in API routes")',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of code chunks to include',
+          default: 10,
+        },
+        depth: {
+          type: 'number',
+          description: 'Graph traversal depth for relationships (callers/callees)',
+          default: 2,
+        },
+        includeGraph: {
+          type: 'boolean',
+          description: 'Include code relationships from knowledge graph',
+          default: true,
+        },
+        includeFiles: {
+          type: 'boolean',
+          description: 'Include full file contents for matched code',
+          default: true,
+        },
+        minScore: {
+          type: 'number',
+          description: 'Minimum similarity score (0-1)',
+          default: 0.5,
+        },
+        format: {
+          type: 'string',
+          enum: ['markdown', 'xml', 'json'],
+          description: 'Output format',
+          default: 'markdown',
         },
       },
       required: ['query'],
@@ -469,6 +515,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'cv_find':
         validateArgs(args, ['query']);
         result = await handleFind(args as unknown as FindArgs);
+        break;
+
+      case 'cv_context':
+        validateArgs(args, ['query']);
+        result = await handleContext(args as unknown as ContextArgs);
         break;
 
       case 'cv_explain':

@@ -183,6 +183,9 @@ importers:
       '@cv-git/core':
         specifier: workspace:*
         version: link:../core
+      '@cv-git/credentials':
+        specifier: workspace:*
+        version: link:../credentials
       '@cv-git/shared':
         specifier: workspace:*
         version: link:../shared

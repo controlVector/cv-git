@@ -57,4 +57,5 @@ export interface CredentialStorage {
 export enum StorageBackend {
   KEYCHAIN = 'keychain',
   ENCRYPTED_FILE = 'encrypted-file',
+  PLAIN_FILE = 'plain-file',
 }

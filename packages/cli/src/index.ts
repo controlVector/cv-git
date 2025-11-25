@@ -23,6 +23,7 @@ import { statusCommand } from './commands/status.js';
 import { doctorCommand } from './commands/doctor.js';
 import { cloneCommand } from './commands/clone.js';
 import { cloneGroupCommand } from './commands/clone-group.js';
+import { contextCommand } from './commands/context.js';
 
 const program = new Command();
 
@@ -40,6 +41,7 @@ program.addCommand(prCommand());            // Pull request management
 program.addCommand(releaseCommand());       // Release management
 program.addCommand(cloneCommand());          // Clone and initialize
 program.addCommand(cloneGroupCommand());     // Clone entire group/subgroup
+program.addCommand(contextCommand());        // Generate AI context
 program.addCommand(initCommand());
 program.addCommand(syncCommand());
 program.addCommand(doCommand());

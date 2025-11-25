@@ -16,7 +16,7 @@ import * as os from 'os';
 import {
   CredentialStorage,
   KeychainStorage,
-  EncryptedFileStorage,
+  PlainFileStorage,
 } from './storage/index.js';
 import {
   Credential,
@@ -36,63 +36,44 @@ export interface CredentialManagerOptions {
 
   /** Path to metadata file */
   metadataPath?: string;
-
-  /** Master password for encrypted storage (if used) */
-  masterPassword?: string;
 }
 
 export class CredentialManager {
   private storage: CredentialStorage;
   private metadataPath: string;
+  private initialized: boolean = false;
 
   constructor(options?: CredentialManagerOptions) {
     this.metadataPath =
       options?.metadataPath ||
-      path.join(os.homedir(), '.cv', 'credentials-metadata.json');
+      path.join(os.homedir(), '.cv-git', 'credentials-metadata.json');
 
-    // Use provided storage or auto-detect best option
-    if (options?.storage) {
-      this.storage = options.storage;
-    } else {
-      this.storage = this.detectStorage(options?.masterPassword);
-    }
-  }
-
-  /**
-   * Auto-detect best available storage backend
-   */
-  private detectStorage(masterPassword?: string): CredentialStorage {
-    // Try keychain first (most secure)
-    const keychain = new KeychainStorage();
-
-    // We can't use async in constructor, so we'll validate on first use
-    // For now, default to keychain and fall back if needed
-
-    return keychain;
+    // Use provided storage or start with keychain (will validate on init)
+    this.storage = options?.storage || new KeychainStorage();
   }
 
   /**
    * Initialize storage and validate it's available
+   * Automatically falls back to plain file storage if keychain unavailable
    */
   async init(): Promise<void> {
+    if (this.initialized) return;
+
     const isAvailable = await this.storage.isAvailable();
 
-    if (!isAvailable) {
-      console.warn(
-        `⚠️  ${this.storage.getName()} storage not available, falling back to encrypted file`
-      );
-
-      // Fall back to encrypted file storage
-      const masterPassword =
-        process.env.CV_MASTER_PASSWORD ||
-        (() => {
-          throw new Error(
-            'Keychain not available. Set CV_MASTER_PASSWORD environment variable.'
-          );
-        })();
-
-      this.storage = new EncryptedFileStorage(masterPassword);
+    if (!isAvailable && this.storage.getName() === 'keychain') {
+      // Fall back to plain file storage (like aws, gh, gcloud)
+      this.storage = new PlainFileStorage();
     }
+
+    this.initialized = true;
+  }
+
+  /**
+   * Get the current storage backend name
+   */
+  getStorageBackend(): string {
+    return this.storage.getName();
   }
 
   /**
