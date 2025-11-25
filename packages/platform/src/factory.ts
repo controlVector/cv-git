@@ -10,6 +10,8 @@ import type { CredentialManager } from '@cv-git/credentials';
 import { GitPlatform } from '@cv-git/credentials';
 import type { GitPlatformAdapter } from './adapter.js';
 import { GitHubAdapter } from './adapters/github.js';
+import { GitLabAdapter } from './adapters/gitlab.js';
+import { BitbucketAdapter } from './adapters/bitbucket.js';
 
 /**
  * Platform configuration
@@ -45,12 +47,16 @@ export function createPlatformAdapter(
       throw new Error('CV Platform adapter not yet implemented');
 
     case GitPlatform.GITLAB:
-      // TODO: Implement GitLab adapter (future)
-      throw new Error('GitLab adapter not yet implemented');
+      return new GitLabAdapter(credentials, {
+        apiUrl: config.apiUrl,
+        webUrl: config.webUrl,
+      });
 
     case GitPlatform.BITBUCKET:
-      // TODO: Implement Bitbucket adapter (future)
-      throw new Error('Bitbucket adapter not yet implemented');
+      return new BitbucketAdapter(credentials, {
+        apiUrl: config.apiUrl,
+        webUrl: config.webUrl,
+      });
 
     default:
       throw new Error(`Unknown platform type: ${config.type}`);

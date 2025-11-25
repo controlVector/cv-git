@@ -22,30 +22,73 @@ export interface VectorCollections {
   commits: string;
 }
 
+// Embedding model configurations with their vector dimensions
+const EMBEDDING_MODELS: Record<string, { dimension: number; provider: 'openai' | 'openrouter' | 'ollama' }> = {
+  // OpenAI models (direct)
+  'text-embedding-3-small': { dimension: 1536, provider: 'openai' },
+  'text-embedding-3-large': { dimension: 3072, provider: 'openai' },
+  'text-embedding-ada-002': { dimension: 1536, provider: 'openai' },
+  // OpenRouter models (uses OpenAI-compatible API)
+  'openai/text-embedding-3-small': { dimension: 1536, provider: 'openrouter' },
+  'openai/text-embedding-3-large': { dimension: 3072, provider: 'openrouter' },
+  'openai/text-embedding-ada-002': { dimension: 1536, provider: 'openrouter' },
+  // Ollama models (local)
+  'nomic-embed-text': { dimension: 768, provider: 'ollama' },
+  'mxbai-embed-large': { dimension: 1024, provider: 'ollama' },
+  'all-minilm': { dimension: 384, provider: 'ollama' },
+  'snowflake-arctic-embed': { dimension: 1024, provider: 'ollama' }
+};
+
+// Model fallback order (try these in sequence)
+const MODEL_FALLBACK_ORDER = [
+  'text-embedding-3-small',
+  'text-embedding-ada-002'
+];
+
+// Ollama fallback order
+const OLLAMA_MODEL_ORDER = [
+  'nomic-embed-text',
+  'mxbai-embed-large',
+  'all-minilm'
+];
+
 export class VectorManager {
   private client: QdrantClient | null = null;
   private openai: OpenAI | null = null;
+  private openrouter: OpenAI | null = null;
   private collections: VectorCollections;
   private embeddingModel: string;
+  private embeddingProvider: 'openai' | 'openrouter' | 'ollama';
+  private ollamaUrl: string;
+  private openrouterApiKey?: string;
   private vectorSize: number;
   private connected: boolean = false;
+  private modelValidated: boolean = false;
 
   constructor(
     private url: string,
     private openaiApiKey?: string,
-    collections?: Partial<VectorCollections>
+    collections?: Partial<VectorCollections>,
+    embeddingModel?: string
   ) {
     this.collections = {
       codeChunks: collections?.codeChunks || 'code_chunks',
       docstrings: collections?.docstrings || 'docstrings',
       commits: collections?.commits || 'commits'
     };
-    this.embeddingModel = 'text-embedding-3-small';
-    this.vectorSize = 1536; // text-embedding-3-small dimension
+    // Allow override via parameter or env var
+    this.embeddingModel = embeddingModel || process.env.CV_EMBEDDING_MODEL || 'text-embedding-3-small';
+    this.ollamaUrl = process.env.OLLAMA_URL || 'http://localhost:11434';
+    this.openrouterApiKey = process.env.OPENROUTER_API_KEY;
+
+    // Determine provider from model name
+    const modelConfig = EMBEDDING_MODELS[this.embeddingModel];
+    this.embeddingProvider = modelConfig?.provider || 'openai';
+    this.vectorSize = modelConfig?.dimension || 1536;
   }
 
   /**
-   * Connect to Qdrant and initialize OpenAI
+   * Connect to Qdrant and initialize embedding provider
    */
   async connect(): Promise<void> {
     try {
@@ -55,12 +98,26 @@ export class VectorManager {
       // Test connection
       await this.client.getCollections();
 
-      // Initialize OpenAI
-      if (!this.openaiApiKey) {
-        throw new VectorError('OpenAI API key not provided');
+      // Initialize embedding provider
+      if (this.embeddingProvider === 'ollama') {
+        // Check if Ollama is available and has the model
+        await this.initOllama();
+      } else if (this.embeddingProvider === 'openrouter') {
+        // Initialize OpenRouter (OpenAI-compatible)
+        if (!this.openrouterApiKey) {
+          throw new VectorError('OpenRouter API key not provided. Set OPENROUTER_API_KEY environment variable.');
+        }
+        this.openrouter = new OpenAI({
+          apiKey: this.openrouterApiKey,
+          baseURL: 'https://openrouter.ai/api/v1'
+        });
+      } else {
+        // Initialize OpenAI
+        if (!this.openaiApiKey) {
+          throw new VectorError('OpenAI API key not provided');
+        }
+        this.openai = new OpenAI({ apiKey: this.openaiApiKey });
       }
-
-      this.openai = new OpenAI({ apiKey: this.openaiApiKey });
 
       this.connected = true;
 
@@ -69,6 +126,116 @@ export class VectorManager {
 
     } catch (error: any) {
       throw new VectorError(`Failed to connect to Qdrant: ${error.message}`, error);
+    }
+  }
+
+  /**
+   * Initialize Ollama and verify model availability
+   */
+  private async initOllama(): Promise<void> {
+    // Check if Ollama is running
+    try {
+      const response = await fetch(`${this.ollamaUrl}/api/tags`, {
+        signal: AbortSignal.timeout(5000)
+      });
+
+      if (!response.ok) {
+        throw new Error('Ollama not responding');
+      }
+
+      const data = await response.json() as { models?: Array<{ name: string }> };
+      const availableModels = data.models?.map(m => m.name.split(':')[0]) || [];
+
+      // Check if our model is available, try fallbacks
+      let modelFound = false;
+      for (const model of [this.embeddingModel, ...OLLAMA_MODEL_ORDER]) {
+        if (availableModels.some(m => m === model || m.startsWith(model))) {
+          if (model !== this.embeddingModel) {
+            console.log(`Ollama: Using ${model} (${this.embeddingModel} not found)`);
+            this.embeddingModel = model;
+            const modelConfig = EMBEDDING_MODELS[model];
+            if (modelConfig) {
+              this.vectorSize = modelConfig.dimension;
+            }
+          }
+          modelFound = true;
+          break;
+        }
+      }
+
+      if (!modelFound) {
+        throw new Error(
+          `No embedding model found in Ollama. Install one with: ollama pull nomic-embed-text`
+        );
+      }
+
+    } catch (error: any) {
+      if (error.message.includes('fetch failed') || error.message.includes('ECONNREFUSED')) {
+        throw new VectorError(
+          'Ollama not running. Start with: ollama serve\n' +
+          'Or install: curl -fsSL https://ollama.com/install.sh | sh'
+        );
+      }
+      throw new VectorError(`Failed to initialize Ollama: ${error.message}`, error);
+    }
+  }
+
+  /**
+   * Generate embedding using Ollama
+   */
+  private async embedWithOllama(text: string): Promise<number[]> {
+    const response = await fetch(`${this.ollamaUrl}/api/embeddings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: this.embeddingModel,
+        prompt: text
+      }),
+      signal: AbortSignal.timeout(30000)
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Ollama embedding failed: ${error}`);
+    }
+
+    const data = await response.json() as { embedding: number[] };
+    return data.embedding;
+  }
+
+  /**
+   * Generate embeddings for multiple texts using Ollama (sequential)
+   */
+  private async embedBatchWithOllama(texts: string[]): Promise<number[][]> {
+    const embeddings: number[][] = [];
+    for (const text of texts) {
+      const embedding = await this.embedWithOllama(text);
+      embeddings.push(embedding);
+    }
+    return embeddings;
+  }
+
+  /**
+   * Generate embeddings using OpenRouter (OpenAI-compatible API)
+   */
+  private async embedWithOpenRouter(input: string | string[]): Promise<{ embeddings: number[][]; model: string }> {
+    if (!this.openrouter) {
+      throw new VectorError('OpenRouter client not initialized');
+    }
+
+    try {
+      const response = await this.openrouter.embeddings.create({
+        model: this.embeddingModel,
+        input,
+        encoding_format: 'float'
+      });
+
+      return {
+        embeddings: response.data.map(d => d.embedding),
+        model: this.embeddingModel
+      };
+    } catch (error: any) {
+      throw new VectorError(`OpenRouter embedding failed: ${error.message}`, error);
     }
   }
 
@@ -139,9 +306,139 @@ export class VectorManager {
   }
 
   /**
+   * Check if Ollama is available
+   */
+  private async isOllamaAvailable(): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.ollamaUrl}/api/tags`, {
+        signal: AbortSignal.timeout(2000)
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Try to generate embeddings with automatic model fallback (including OpenRouter and Ollama)
+   */
+  private async tryEmbeddingWithFallback(input: string | string[]): Promise<{ embeddings: number[][]; model: string }> {
+    // If using Ollama provider, use it directly
+    if (this.embeddingProvider === 'ollama') {
+      const texts = Array.isArray(input) ? input : [input];
+      const embeddings = await this.embedBatchWithOllama(texts);
+      return { embeddings, model: this.embeddingModel };
+    }
+
+    // If using OpenRouter provider, use it directly
+    if (this.embeddingProvider === 'openrouter') {
+      return this.embedWithOpenRouter(input);
+    }
+
+    if (!this.openai) {
+      throw new VectorError('OpenAI client not initialized');
+    }
+
+    // If model already validated, use it directly
+    if (this.modelValidated) {
+      const response = await this.openai.embeddings.create({
+        model: this.embeddingModel,
+        input,
+        encoding_format: 'float'
+      });
+      return {
+        embeddings: response.data.map(d => d.embedding),
+        model: this.embeddingModel
+      };
+    }
+
+    // Try models in fallback order
+    const modelsToTry = this.embeddingModel === MODEL_FALLBACK_ORDER[0]
+      ? MODEL_FALLBACK_ORDER
+      : [this.embeddingModel, ...MODEL_FALLBACK_ORDER.filter(m => m !== this.embeddingModel)];
+
+    let lastError: Error | null = null;
+    let allOpenAIFailed = true;
+
+    for (const model of modelsToTry) {
+      try {
+        const response = await this.openai.embeddings.create({
+          model,
+          input,
+          encoding_format: 'float'
+        });
+
+        // Model works! Update settings
+        if (model !== this.embeddingModel) {
+          console.log(`Switched to embedding model: ${model}`);
+          this.embeddingModel = model;
+          this.vectorSize = EMBEDDING_MODELS[model]?.dimension || 1536;
+        }
+        this.modelValidated = true;
+        allOpenAIFailed = false;
+
+        return {
+          embeddings: response.data.map(d => d.embedding),
+          model
+        };
+      } catch (error: any) {
+        lastError = error;
+        // Check if it's an access/permission error (403)
+        if (error.status === 403 || error.message?.includes('403') || error.message?.includes('does not have access')) {
+          console.log(`Model ${model} not accessible, trying fallback...`);
+          continue;
+        }
+        // Other errors should be thrown immediately
+        throw error;
+      }
+    }
+
+    // All OpenAI models failed with 403 - try OpenRouter first if available
+    if (allOpenAIFailed && this.openrouterApiKey) {
+      console.log('OpenAI models not accessible. Trying OpenRouter as fallback...');
+      try {
+        this.openrouter = new OpenAI({
+          apiKey: this.openrouterApiKey,
+          baseURL: 'https://openrouter.ai/api/v1'
+        });
+        this.embeddingProvider = 'openrouter';
+        this.embeddingModel = 'openai/text-embedding-3-small';
+        this.vectorSize = 1536;
+        const result = await this.embedWithOpenRouter(input);
+        this.modelValidated = true;
+        return result;
+      } catch (openrouterError: any) {
+        console.log(`OpenRouter fallback failed: ${openrouterError.message}`);
+      }
+    }
+
+    // Try Ollama as last resort
+    if (allOpenAIFailed && await this.isOllamaAvailable()) {
+      console.log('Trying Ollama as fallback...');
+      try {
+        await this.initOllama();
+        this.embeddingProvider = 'ollama';
+        const texts = Array.isArray(input) ? input : [input];
+        const embeddings = await this.embedBatchWithOllama(texts);
+        this.modelValidated = true;
+        return { embeddings, model: this.embeddingModel };
+      } catch (ollamaError: any) {
+        console.log(`Ollama fallback failed: ${ollamaError.message}`);
+      }
+    }
+
+    throw new VectorError(`Failed to generate embeddings with any model: ${lastError?.message}`, lastError);
+  }
+
+  /**
    * Generate embeddings for multiple texts in batches
    */
   async embedBatch(texts: string[]): Promise<number[][]> {
+    // If using Ollama, use Ollama batch
+    if (this.embeddingProvider === 'ollama') {
+      return this.embedBatchWithOllama(texts);
+    }
+
     if (!this.openai) {
       throw new VectorError('OpenAI client not initialized');
     }
@@ -153,13 +450,8 @@ export class VectorManager {
       const allEmbeddings: number[][] = [];
 
       for (const batch of batches) {
-        const response = await this.openai.embeddings.create({
-          model: this.embeddingModel,
-          input: batch,
-          encoding_format: 'float'
-        });
-
-        allEmbeddings.push(...response.data.map(d => d.embedding));
+        const result = await this.tryEmbeddingWithFallback(batch);
+        allEmbeddings.push(...result.embeddings);
       }
 
       return allEmbeddings;

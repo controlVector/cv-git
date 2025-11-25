@@ -91,8 +91,10 @@ export function detectLanguage(filePath: string): string {
   const languageMap: Record<string, string> = {
     '.ts': 'typescript',
     '.tsx': 'typescript',
-    '.js': 'javascript',
-    '.jsx': 'javascript',
+    '.js': 'typescript',  // JS uses same parser as TS
+    '.jsx': 'typescript', // JSX uses same parser as TSX
+    '.mjs': 'typescript',
+    '.cjs': 'typescript',
     '.py': 'python',
     '.go': 'go',
     '.rs': 'rust',

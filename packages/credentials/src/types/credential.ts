@@ -13,6 +13,7 @@ export enum CredentialType {
   // AI service providers
   ANTHROPIC_API = 'anthropic_api',
   OPENAI_API = 'openai_api',
+  OPENROUTER_API = 'openrouter_api',
 
   // Generic credentials
   API_KEY = 'api_key',
@@ -119,6 +120,16 @@ export interface OpenAIAPICredential extends BaseCredential {
 }
 
 /**
+ * OpenRouter API key credential
+ */
+export interface OpenRouterAPICredential extends BaseCredential {
+  type: CredentialType.OPENROUTER_API;
+
+  /** API key */
+  apiKey: string;
+}
+
+/**
  * Generic API key credential
  */
 export interface APIKeyCredential extends BaseCredential {
@@ -142,6 +153,7 @@ export type Credential =
   | GitPlatformSSHCredential
   | AnthropicAPICredential
   | OpenAIAPICredential
+  | OpenRouterAPICredential
   | APIKeyCredential;
 
 /**

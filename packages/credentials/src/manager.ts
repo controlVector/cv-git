@@ -27,6 +27,7 @@ import {
   GitPlatformTokenCredential,
   AnthropicAPICredential,
   OpenAIAPICredential,
+  OpenRouterAPICredential,
 } from './types/index.js';
 
 export interface CredentialManagerOptions {
@@ -261,6 +262,14 @@ export class CredentialManager {
   async getOpenAIKey(): Promise<string | null> {
     const cred = await this.retrieve(CredentialType.OPENAI_API);
     return cred ? (cred as OpenAIAPICredential).apiKey : null;
+  }
+
+  /**
+   * Get OpenRouter API key
+   */
+  async getOpenRouterKey(): Promise<string | null> {
+    const cred = await this.retrieve(CredentialType.OPENROUTER_API);
+    return cred ? (cred as OpenRouterAPICredential).apiKey : null;
   }
 
   // ============================================================================

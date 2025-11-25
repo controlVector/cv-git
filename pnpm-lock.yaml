@@ -15,20 +15,20 @@ importers:
         specifier: ^0.21.1
         version: 0.21.1
       tree-sitter-go:
-        specifier: ^0.25.0
-        version: 0.25.0(tree-sitter@0.21.1)
+        specifier: ^0.21.2
+        version: 0.21.2(tree-sitter@0.21.1)
       tree-sitter-java:
-        specifier: ^0.23.5
-        version: 0.23.5(tree-sitter@0.21.1)
+        specifier: ^0.21.0
+        version: 0.21.0(tree-sitter@0.21.1)
       tree-sitter-javascript:
-        specifier: ^0.25.0
-        version: 0.25.0(tree-sitter@0.21.1)
+        specifier: ^0.21.1
+        version: 0.21.4(tree-sitter@0.21.1)
       tree-sitter-python:
         specifier: ^0.21.0
         version: 0.21.0(tree-sitter@0.21.1)
       tree-sitter-rust:
-        specifier: ^0.24.0
-        version: 0.24.0(tree-sitter@0.21.1)
+        specifier: ^0.21.0
+        version: 0.21.0(tree-sitter@0.21.1)
       tree-sitter-typescript:
         specifier: ^0.21.2
         version: 0.21.2(tree-sitter@0.21.1)
@@ -137,22 +137,22 @@ importers:
         specifier: ^3.21.0
         version: 3.30.0
       tree-sitter:
-        specifier: ^0.21.0
+        specifier: ^0.21.1
         version: 0.21.1
       tree-sitter-go:
-        specifier: ^0.25.0
-        version: 0.25.0(tree-sitter@0.21.1)
+        specifier: ^0.21.2
+        version: 0.21.2(tree-sitter@0.21.1)
       tree-sitter-java:
-        specifier: ^0.23.5
-        version: 0.23.5(tree-sitter@0.21.1)
+        specifier: ^0.21.0
+        version: 0.21.0(tree-sitter@0.21.1)
       tree-sitter-python:
         specifier: ^0.21.0
         version: 0.21.0(tree-sitter@0.21.1)
       tree-sitter-rust:
-        specifier: ^0.24.0
-        version: 0.24.0(tree-sitter@0.21.1)
-      tree-sitter-typescript:
         specifier: ^0.21.0
+        version: 0.21.0(tree-sitter@0.21.1)
+      tree-sitter-typescript:
+        specifier: ^0.21.2
         version: 0.21.2(tree-sitter@0.21.1)
     devDependencies:
       '@types/node':
@@ -2191,28 +2191,31 @@ packages:
   tr46@0.0.3:
     resolution: {integrity: sha512-N3WMsuqV66lT30CrXNbEjx4GEwlow3v6rr4mCcv6prnfwhS01rkgyFdjPNBYd9br7LpXV1+Emh01fHnq2Gdgrw==}
 
-  tree-sitter-go@0.25.0:
-    resolution: {integrity: sha512-APBc/Dq3xz/e35Xpkhb1blu5UgW+2E3RyGWawZSCNcbGwa7jhSQPS8KsUupuzBla8PCo8+lz9W/JDJjmfRa2tw==}
+  tree-sitter-go@0.21.2:
+    resolution: {integrity: sha512-aMFwjsB948nWhURiIxExK8QX29JYKs96P/IfXVvluVMRJZpL04SREHsdOZHYqJr1whkb7zr3/gWHqqvlkczmvw==}
     peerDependencies:
-      tree-sitter: ^0.25.0
+      tree-sitter: ^0.21.0
+      tree_sitter: '*'
     peerDependenciesMeta:
-      tree-sitter:
+      tree_sitter:
         optional: true
 
-  tree-sitter-java@0.23.5:
-    resolution: {integrity: sha512-Yju7oQ0Xx7GcUT01mUglPP+bYfvqjNCGdxqigTnew9nLGoII42PNVP3bHrYeMxswiCRM0yubWmN5qk+zsg0zMA==}
+  tree-sitter-java@0.21.0:
+    resolution: {integrity: sha512-CKJiTo1uc3SUsgEcaZgufGx8my6dzihy8JR/JsJH40Tj3uSe2/eFLk+0q+fpbosGAyY4YiXJtEoFB2O4bS2yOw==}
+    peerDependencies:
+      tree-sitter: ^0.21.0
+      tree_sitter: '*'
+    peerDependenciesMeta:
+      tree_sitter:
+        optional: true
+
+  tree-sitter-javascript@0.21.4:
+    resolution: {integrity: sha512-Lrk8yahebwrwc1sWJE9xPcz1OnnqiEV7Dh5fbN6EN3wNAdu9r06HpTqLqDwUUbnG4EB46Sfk+FJFAOldfoKLOw==}
     peerDependencies:
       tree-sitter: ^0.21.1
+      tree_sitter: '*'
     peerDependenciesMeta:
-      tree-sitter:
-        optional: true
-
-  tree-sitter-javascript@0.25.0:
-    resolution: {integrity: sha512-1fCbmzAskZkxcZzN41sFZ2br2iqTYP3tKls1b/HKGNPQUVOpsUxpmGxdN/wMqAk3jYZnYBR1dd/y/0avMeU7dw==}
-    peerDependencies:
-      tree-sitter: ^0.25.0
-    peerDependenciesMeta:
-      tree-sitter:
+      tree_sitter:
         optional: true
 
   tree-sitter-python@0.21.0:
@@ -2224,12 +2227,13 @@ packages:
       tree_sitter:
         optional: true
 
-  tree-sitter-rust@0.24.0:
-    resolution: {integrity: sha512-NWemUDf629Tfc90Y0Z55zuwPCAHkLxWnMf2RznYu4iBkkrQl2o/CHGB7Cr52TyN5F1DAx8FmUnDtCy9iUkXZEQ==}
+  tree-sitter-rust@0.21.0:
+    resolution: {integrity: sha512-unVr73YLn3VC4Qa/GF0Nk+Wom6UtI526p5kz9Rn2iZSqwIFedyCZ3e0fKCEmUJLIPGrTb/cIEdu3ZUNGzfZx7A==}
     peerDependencies:
-      tree-sitter: ^0.22.1
+      tree-sitter: ^0.21.1
+      tree_sitter: '*'
     peerDependenciesMeta:
-      tree-sitter:
+      tree_sitter:
         optional: true
 
   tree-sitter-typescript@0.21.2:
@@ -4263,25 +4267,22 @@ snapshots:
 
   tr46@0.0.3: {}
 
-  tree-sitter-go@0.25.0(tree-sitter@0.21.1):
+  tree-sitter-go@0.21.2(tree-sitter@0.21.1):
     dependencies:
       node-addon-api: 8.5.0
       node-gyp-build: 4.8.4
-    optionalDependencies:
       tree-sitter: 0.21.1
 
-  tree-sitter-java@0.23.5(tree-sitter@0.21.1):
+  tree-sitter-java@0.21.0(tree-sitter@0.21.1):
     dependencies:
       node-addon-api: 8.5.0
       node-gyp-build: 4.8.4
-    optionalDependencies:
       tree-sitter: 0.21.1
 
-  tree-sitter-javascript@0.25.0(tree-sitter@0.21.1):
+  tree-sitter-javascript@0.21.4(tree-sitter@0.21.1):
     dependencies:
       node-addon-api: 8.5.0
       node-gyp-build: 4.8.4
-    optionalDependencies:
       tree-sitter: 0.21.1
 
   tree-sitter-python@0.21.0(tree-sitter@0.21.1):
@@ -4290,11 +4291,10 @@ snapshots:
       node-gyp-build: 4.8.4
       tree-sitter: 0.21.1
 
-  tree-sitter-rust@0.24.0(tree-sitter@0.21.1):
+  tree-sitter-rust@0.21.0(tree-sitter@0.21.1):
     dependencies:
-      node-addon-api: 8.5.0
+      node-addon-api: 7.1.1
       node-gyp-build: 4.8.4
-    optionalDependencies:
       tree-sitter: 0.21.1
 
   tree-sitter-typescript@0.21.2(tree-sitter@0.21.1):

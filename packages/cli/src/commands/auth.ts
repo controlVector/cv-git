@@ -16,8 +16,9 @@ import {
   GitPlatformTokenCredential,
   AnthropicAPICredential,
   OpenAIAPICredential,
+  OpenRouterAPICredential,
 } from '@cv-git/credentials';
-import { GitHubAdapter } from '@cv-git/platform';
+import { GitHubAdapter, GitLabAdapter, BitbucketAdapter } from '@cv-git/platform';
 import { randomBytes } from 'crypto';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -66,7 +67,7 @@ export function authCommand(): Command {
   cmd
     .command('setup [service]')
     .description(
-      'Set up authentication (services: github, anthropic, openai, openrouter, all)'
+      'Set up authentication (services: github, gitlab, bitbucket, anthropic, openai, openrouter, all)'
     )
     .option('--no-browser', 'Do not open browser automatically')
     .action(async (service?: string, cmdOptions?: { browser?: boolean }) => {
@@ -97,6 +98,14 @@ export function authCommand(): Command {
 
       if (setupAll || service === 'github') {
         await setupGitHub(credentials, autoBrowser);
+      }
+
+      if (setupAll || service === 'gitlab') {
+        await setupGitLab(credentials, autoBrowser);
+      }
+
+      if (setupAll || service === 'bitbucket') {
+        await setupBitbucket(credentials, autoBrowser);
       }
 
       if (setupAll || service === 'anthropic') {
@@ -163,7 +172,7 @@ export function authCommand(): Command {
   // cv auth test
   cmd
     .command('test <service>')
-    .description('Test authentication for a service (github, anthropic, openai)')
+    .description('Test authentication for a service (github, gitlab, bitbucket, anthropic, openai)')
     .action(async (service: string) => {
       const credentials = new CredentialManager();
       await credentials.init();
@@ -183,6 +192,38 @@ export function authCommand(): Command {
           const user = await adapter.validateToken(token);
 
           spinner.succeed(chalk.green('GitHub authentication valid'));
+          console.log(
+            chalk.gray('  Authenticated as: ') +
+              chalk.white(`${user.username} (${user.name || 'no name'})`)
+          );
+        } else if (service === 'gitlab') {
+          const token = await credentials.getGitPlatformToken(GitPlatform.GITLAB);
+          if (!token) {
+            spinner.fail(chalk.red('GitLab token not found'));
+            console.log(chalk.gray('Run: ') + chalk.cyan('cv auth setup gitlab'));
+            return;
+          }
+
+          const adapter = new GitLabAdapter(credentials);
+          const user = await adapter.validateToken(token);
+
+          spinner.succeed(chalk.green('GitLab authentication valid'));
+          console.log(
+            chalk.gray('  Authenticated as: ') +
+              chalk.white(`${user.username} (${user.name || 'no name'})`)
+          );
+        } else if (service === 'bitbucket') {
+          const token = await credentials.getGitPlatformToken(GitPlatform.BITBUCKET);
+          if (!token) {
+            spinner.fail(chalk.red('Bitbucket app password not found'));
+            console.log(chalk.gray('Run: ') + chalk.cyan('cv auth setup bitbucket'));
+            return;
+          }
+
+          const adapter = new BitbucketAdapter(credentials);
+          const user = await adapter.validateToken(token);
+
+          spinner.succeed(chalk.green('Bitbucket authentication valid'));
           console.log(
             chalk.gray('  Authenticated as: ') +
               chalk.white(`${user.username} (${user.name || 'no name'})`)
@@ -453,11 +494,310 @@ async function setupOpenRouter(credentials: CredentialManager, autoBrowser: bool
     },
   ]);
 
-  await credentials.store<OpenAIAPICredential>({
-    type: CredentialType.OPENAI_API,
-    name: 'openrouter',
+  await credentials.store<OpenRouterAPICredential>({
+    type: CredentialType.OPENROUTER_API,
+    name: 'default',
     apiKey,
   });
 
   console.log(chalk.green('✅ OpenRouter authentication configured!\n'));
+}
+
+/**
+ * Detect GitLab token type by testing various API endpoints
+ */
+async function detectGitLabTokenType(token: string): Promise<{
+  type: 'personal' | 'group' | 'project' | 'unknown';
+  username?: string;
+  groupPath?: string;
+  projectPath?: string;
+  scopes: string[];
+}> {
+  const headers = {
+    'PRIVATE-TOKEN': token,
+    'Accept': 'application/json',
+  };
+
+  // Try /user endpoint - only works with Personal Access Tokens
+  try {
+    const userResponse = await fetch('https://gitlab.com/api/v4/user', { headers });
+    if (userResponse.ok) {
+      const user = await userResponse.json() as { username: string };
+
+      // Get scopes from personal access token info
+      let scopes: string[] = [];
+      try {
+        const tokenResponse = await fetch('https://gitlab.com/api/v4/personal_access_tokens/self', { headers });
+        if (tokenResponse.ok) {
+          const tokenInfo = await tokenResponse.json() as { scopes: string[] };
+          scopes = tokenInfo.scopes || [];
+        }
+      } catch {}
+
+      return {
+        type: 'personal',
+        username: user.username,
+        scopes,
+      };
+    }
+  } catch {}
+
+  // If /user fails, try to detect group/project token by checking accessible groups
+  try {
+    const groupsResponse = await fetch('https://gitlab.com/api/v4/groups?min_access_level=10&per_page=1', { headers });
+    if (groupsResponse.ok) {
+      const groups = await groupsResponse.json() as Array<{ full_path: string }>;
+      if (groups.length > 0) {
+        return {
+          type: 'group',
+          groupPath: groups[0].full_path,
+          scopes: ['api', 'read_api'], // Group tokens typically have these
+        };
+      }
+    }
+  } catch {}
+
+  // Try to detect project token
+  try {
+    const projectsResponse = await fetch('https://gitlab.com/api/v4/projects?membership=true&per_page=1', { headers });
+    if (projectsResponse.ok) {
+      const projects = await projectsResponse.json() as Array<{ path_with_namespace: string }>;
+      if (projects.length > 0) {
+        return {
+          type: 'project',
+          projectPath: projects[0].path_with_namespace,
+          scopes: [],
+        };
+      }
+    }
+  } catch {}
+
+  return { type: 'unknown', scopes: [] };
+}
+
+async function setupGitLab(credentials: CredentialManager, autoBrowser: boolean = true): Promise<void> {
+  console.log(chalk.bold('──────────────────────────────────────────'));
+  console.log(chalk.bold.cyan('GitLab Authentication'));
+  console.log(chalk.bold('──────────────────────────────────────────\n'));
+
+  // Explain token types
+  console.log(chalk.yellow('GitLab Token Types:\n'));
+  console.log(chalk.green('  Personal Access Token (Recommended)'));
+  console.log(chalk.gray('    - Full access to all your projects and groups'));
+  console.log(chalk.gray('    - Can list projects, clone, push, and use APIs'));
+  console.log(chalk.gray('    - Created at: gitlab.com/-/user_settings/personal_access_tokens'));
+  console.log();
+  console.log(chalk.cyan('  Group Access Token'));
+  console.log(chalk.gray('    - Limited to a specific group and its projects'));
+  console.log(chalk.gray('    - Cannot use /user API (cv auth test will fail)'));
+  console.log(chalk.gray('    - Created at: Group → Settings → Access Tokens'));
+  console.log();
+  console.log(chalk.cyan('  Project Access Token'));
+  console.log(chalk.gray('    - Limited to a single project'));
+  console.log(chalk.gray('    - Most restrictive - only for single repo access'));
+  console.log(chalk.gray('    - Created at: Project → Settings → Access Tokens'));
+  console.log();
+
+  const url = 'https://gitlab.com/-/user_settings/personal_access_tokens?scopes=api,read_user,read_repository,write_repository';
+
+  if (autoBrowser) {
+    console.log(chalk.cyan('Opening browser to create Personal Access Token...'));
+    await openBrowser(url);
+    console.log();
+  }
+
+  console.log(chalk.gray('URL: ') + chalk.blue(url));
+  console.log(chalk.gray('Required scopes: ') + chalk.white('api, read_user, read_repository, write_repository'));
+  console.log();
+
+  const { token } = await inquirer.prompt([
+    {
+      type: 'password',
+      name: 'token',
+      message: 'Enter your GitLab token:',
+      validate: (input: string) => {
+        if (!input || !input.trim()) {
+          return 'Token is required';
+        }
+        if (!input.startsWith('glpat-')) {
+          return 'Invalid GitLab token format (should start with glpat-)';
+        }
+        return true;
+      },
+    },
+  ]);
+
+  const spinner = ora('Detecting token type...').start();
+
+  try {
+    const tokenInfo = await detectGitLabTokenType(token);
+
+    if (tokenInfo.type === 'personal') {
+      spinner.succeed(chalk.green(`Personal Access Token detected`));
+      console.log(chalk.gray('  User: ') + chalk.white(tokenInfo.username));
+      if (tokenInfo.scopes.length > 0) {
+        console.log(chalk.gray('  Scopes: ') + chalk.white(tokenInfo.scopes.join(', ')));
+      }
+
+      // Check for required scopes
+      const requiredScopes = ['api', 'read_api'];
+      const hasRequiredScopes = requiredScopes.some(s => tokenInfo.scopes.includes(s));
+      if (!hasRequiredScopes && tokenInfo.scopes.length > 0) {
+        console.log();
+        console.log(chalk.yellow('⚠ Warning: Token may be missing "api" or "read_api" scope'));
+        console.log(chalk.gray('  Some features like "cv clone-group" require API access'));
+      }
+
+      // Store token
+      await credentials.store<GitPlatformTokenCredential>({
+        type: CredentialType.GIT_PLATFORM_TOKEN,
+        name: `gitlab-${tokenInfo.username}`,
+        platform: GitPlatform.GITLAB,
+        token,
+        scopes: tokenInfo.scopes,
+        username: tokenInfo.username,
+      });
+
+      console.log(chalk.green('\n✅ GitLab authentication configured!\n'));
+
+    } else if (tokenInfo.type === 'group') {
+      spinner.warn(chalk.yellow(`Group Access Token detected`));
+      console.log(chalk.gray('  Group: ') + chalk.white(tokenInfo.groupPath));
+      console.log();
+      console.log(chalk.yellow('⚠ Limitations of Group Access Tokens:'));
+      console.log(chalk.gray('  - "cv auth test gitlab" will fail (no /user access)'));
+      console.log(chalk.gray('  - "cv clone-group" may have limited functionality'));
+      console.log(chalk.gray('  - Can only access projects within this group'));
+      console.log();
+
+      const { proceed } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'proceed',
+          message: 'Continue with Group Access Token? (Personal Access Token is recommended)',
+          default: true,
+        },
+      ]);
+
+      if (proceed) {
+        await credentials.store<GitPlatformTokenCredential>({
+          type: CredentialType.GIT_PLATFORM_TOKEN,
+          name: `gitlab-group-${tokenInfo.groupPath?.replace(/\//g, '-') || 'unknown'}`,
+          platform: GitPlatform.GITLAB,
+          token,
+          scopes: tokenInfo.scopes,
+        });
+        console.log(chalk.green('\n✅ GitLab Group Token configured!\n'));
+      } else {
+        console.log(chalk.gray('\nPlease create a Personal Access Token at:'));
+        console.log(chalk.blue(url));
+        console.log();
+      }
+
+    } else if (tokenInfo.type === 'project') {
+      spinner.warn(chalk.yellow(`Project Access Token detected`));
+      console.log(chalk.gray('  Project: ') + chalk.white(tokenInfo.projectPath));
+      console.log();
+      console.log(chalk.yellow('⚠ Limitations of Project Access Tokens:'));
+      console.log(chalk.gray('  - Can only access a single project'));
+      console.log(chalk.gray('  - "cv clone-group" will not work'));
+      console.log(chalk.gray('  - Limited API functionality'));
+      console.log();
+
+      const { proceed } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'proceed',
+          message: 'Continue with Project Access Token? (Personal Access Token is recommended)',
+          default: false,
+        },
+      ]);
+
+      if (proceed) {
+        await credentials.store<GitPlatformTokenCredential>({
+          type: CredentialType.GIT_PLATFORM_TOKEN,
+          name: `gitlab-project-${tokenInfo.projectPath?.replace(/\//g, '-') || 'unknown'}`,
+          platform: GitPlatform.GITLAB,
+          token,
+          scopes: [],
+        });
+        console.log(chalk.green('\n✅ GitLab Project Token configured!\n'));
+      } else {
+        console.log(chalk.gray('\nPlease create a Personal Access Token at:'));
+        console.log(chalk.blue(url));
+        console.log();
+      }
+
+    } else {
+      spinner.fail(chalk.red('Could not validate token'));
+      console.log(chalk.yellow('\nThe token could not be validated. Possible reasons:'));
+      console.log(chalk.gray('  - Token is invalid or expired'));
+      console.log(chalk.gray('  - Token has insufficient permissions'));
+      console.log(chalk.gray('  - Network connectivity issue'));
+      console.log();
+      console.log(chalk.gray('Please create a new Personal Access Token at:'));
+      console.log(chalk.blue(url));
+      console.log();
+    }
+  } catch (error: any) {
+    spinner.fail(chalk.red(`Token validation failed: ${error.message}`));
+    console.log(chalk.yellow('\nPlease try again with a valid token.\n'));
+  }
+}
+
+async function setupBitbucket(credentials: CredentialManager, autoBrowser: boolean = true): Promise<void> {
+  console.log(chalk.bold('──────────────────────────────────────────'));
+  console.log(chalk.bold.cyan('Bitbucket Authentication'));
+  console.log(chalk.bold('──────────────────────────────────────────\n'));
+
+  const url = 'https://bitbucket.org/account/settings/app-passwords/new';
+
+  if (autoBrowser) {
+    console.log(chalk.cyan('Opening browser to create app password...'));
+    await openBrowser(url);
+    console.log();
+  }
+
+  console.log(chalk.gray('URL: ') + chalk.blue(url));
+  console.log(chalk.gray('1. Create an App Password with permissions: Repositories (Read, Write), Pull requests (Read, Write)'));
+  console.log(chalk.gray('2. Copy the generated app password'));
+  console.log();
+
+  const { token } = await inquirer.prompt([
+    {
+      type: 'password',
+      name: 'token',
+      message: 'Enter your Bitbucket app password:',
+      validate: (input: string) => {
+        if (!input || !input.trim()) {
+          return 'App password is required';
+        }
+        return true;
+      },
+    },
+  ]);
+
+  const spinner = ora('Validating app password...').start();
+
+  try {
+    const adapter = new BitbucketAdapter(credentials);
+    const user = await adapter.validateToken(token);
+
+    spinner.succeed(chalk.green(`App password validated for user: ${user.username}`));
+
+    // Store token
+    await credentials.store<GitPlatformTokenCredential>({
+      type: CredentialType.GIT_PLATFORM_TOKEN,
+      name: `bitbucket-${user.username}`,
+      platform: GitPlatform.BITBUCKET,
+      token,
+      scopes: ['repository', 'pullrequest'],
+      username: user.username,
+    });
+
+    console.log(chalk.green('✅ Bitbucket authentication configured!\n'));
+  } catch (error: any) {
+    spinner.fail(chalk.red(`App password validation failed: ${error.message}`));
+    console.log(chalk.yellow('\nPlease try again with a valid app password.\n'));
+  }
 }

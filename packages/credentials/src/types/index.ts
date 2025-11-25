@@ -10,6 +10,7 @@ export {
   type GitPlatformSSHCredential,
   type AnthropicAPICredential,
   type OpenAIAPICredential,
+  type OpenRouterAPICredential,
   type APIKeyCredential,
   type Credential,
   type CreateCredentialInput,

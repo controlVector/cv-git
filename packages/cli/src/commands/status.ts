@@ -9,6 +9,7 @@ import { simpleGit } from 'simple-git';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { getConfig } from '../config.js';
+import { checkCredentials, displayConfigStatus } from '../utils/config-check.js';
 
 export function statusCommand(): Command {
   const cmd = new Command('status');
@@ -40,6 +41,9 @@ export function statusCommand(): Command {
       // Check service health
       const services = await checkServices(cvConfig);
 
+      // Check credentials
+      const credentialStatus = await checkCredentials();
+
       if (options.json) {
         console.log(JSON.stringify({
           git: {
@@ -57,6 +61,7 @@ export function statusCommand(): Command {
             stats,
           },
           services,
+          credentials: credentialStatus,
         }, null, 2));
       } else {
         // Git status
@@ -120,7 +125,8 @@ export function statusCommand(): Command {
           }
         }
 
-        console.log();
+        // Credentials
+        displayConfigStatus(credentialStatus);
       }
     } catch (error: any) {
       console.error(chalk.red('✗ Error getting status:'), error.message);

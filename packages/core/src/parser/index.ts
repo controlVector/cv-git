@@ -36,17 +36,17 @@ export class CodeParser {
     const pythonParser = createPythonParser();
     this.registerParser('python', pythonParser);
 
-    // Go parser (disabled - needs native build)
-    // const goParser = createGoParser();
-    // this.registerParser('go', goParser);
+    // Go parser
+    const goParser = createGoParser();
+    this.registerParser('go', goParser);
 
-    // Rust parser (disabled - needs native build)
-    // const rustParser = createRustParser();
-    // this.registerParser('rust', rustParser);
+    // Rust parser
+    const rustParser = createRustParser();
+    this.registerParser('rust', rustParser);
 
-    // Java parser (disabled - needs native build)
-    // const javaParser = createJavaParser();
-    // this.registerParser('java', javaParser);
+    // Java parser
+    const javaParser = createJavaParser();
+    this.registerParser('java', javaParser);
   }
 
   /**

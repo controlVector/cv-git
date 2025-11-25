@@ -21,6 +21,8 @@ import { releaseCommand } from './commands/release.js';
 import { configCommand } from './commands/config.js';
 import { statusCommand } from './commands/status.js';
 import { doctorCommand } from './commands/doctor.js';
+import { cloneCommand } from './commands/clone.js';
+import { cloneGroupCommand } from './commands/clone-group.js';
 
 const program = new Command();
 
@@ -36,6 +38,8 @@ program.addCommand(doctorCommand());        // Health diagnostics
 program.addCommand(authCommand());          // Credential management
 program.addCommand(prCommand());            // Pull request management
 program.addCommand(releaseCommand());       // Release management
+program.addCommand(cloneCommand());          // Clone and initialize
+program.addCommand(cloneGroupCommand());     // Clone entire group/subgroup
 program.addCommand(initCommand());
 program.addCommand(syncCommand());
 program.addCommand(doCommand());

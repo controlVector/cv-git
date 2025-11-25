@@ -45,3 +45,5 @@ export {
 
 // Adapters
 export { GitHubAdapter } from './adapters/github.js';
+export { GitLabAdapter } from './adapters/gitlab.js';
+export { BitbucketAdapter } from './adapters/bitbucket.js';
