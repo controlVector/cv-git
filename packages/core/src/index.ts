@@ -8,5 +8,6 @@ export * from './parser/index.js';
 export * from './graph/index.js';
 export * from './vector/index.js';
 export * from './ai/index.js';
+export * from './ai/openrouter.js';
 export * from './sync/index.js';
 export * from './config/index.js';
