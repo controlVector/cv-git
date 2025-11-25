@@ -68,12 +68,12 @@ CV-Git is an intelligent wrapper around Git that adds a knowledge graph, semanti
   sudo apt install -y libsecret-1-dev build-essential python3
   ```
 
-  # Fedora/RHEL
+  ### Fedora/RHEL
   ```bash
   sudo dnf install libsecret-devel gcc-c++ make python3
   ```
 
-  # Arch Linux
+  ### Arch Linux
   ```bash
   sudo pacman -S libsecret base-devel python
   ```
@@ -85,7 +85,7 @@ CV-Git is an intelligent wrapper around Git that adds a knowledge graph, semanti
 
   macOS Users
 
-  # Xcode Command Line Tools (includes build tools)
+  ### Xcode Command Line Tools (includes build tools)
   ```bash
   xcode-select --install
   ```
