@@ -79,13 +79,23 @@ export class ContextManager {
 
     // 2. Vector search for relevant code chunks
     if (this.vector) {
+      if (process.env.CV_DEBUG) {
+        console.log(`[ContextManager] Starting vector search for: "${query.slice(0, 50)}..."`);
+      }
       try {
         const maxChunks = options.maxChunks || 10;
-        const minScore = options.minScore || 0.5;
+        const minScore = options.minScore || 0.2; // Lower threshold for better recall on general queries
 
         const vectorResults = await this.vector.searchCode(query, maxChunks, {
           minScore,
         });
+
+        if (process.env.CV_DEBUG) {
+          console.log(`[ContextManager] Vector search returned ${vectorResults.length} results`);
+          if (vectorResults.length > 0) {
+            console.log(`[ContextManager] Top result: score=${vectorResults[0].score.toFixed(3)}, file=${vectorResults[0].payload?.file}`);
+          }
+        }
 
         for (const result of vectorResults) {
           const symbolContext: SymbolContext = {
@@ -111,8 +121,11 @@ export class ContextManager {
             snapshot.symbols.push(symbolContext);
           }
         }
-      } catch {
+      } catch (error: any) {
         // Vector search failed, continue without it
+        if (process.env.CV_DEBUG) {
+          console.error(`[ContextManager] Vector search failed: ${error.message}`);
+        }
       }
     }
 
@@ -132,10 +145,18 @@ export class ContextManager {
       await this.enrichWithGraphContext(snapshot, options);
     }
 
-    // 4. Calculate token count
+    // 5. Fallback: if no context found, load key project files
+    if (snapshot.symbols.length === 0 && snapshot.files.length === 0) {
+      if (process.env.CV_DEBUG) {
+        console.log(`[ContextManager] No context found, loading key project files as fallback`);
+      }
+      await this.loadKeyProjectFiles(snapshot);
+    }
+
+    // 6. Calculate token count
     snapshot.tokenCount = this.estimateTokens(snapshot);
 
-    // 5. Localize if over budget
+    // 7. Localize if over budget
     if (snapshot.tokenCount > this.tokenLimit) {
       return this.localizeContext(snapshot, query);
     }
@@ -299,6 +320,14 @@ export class ContextManager {
           { keyword, limit: Math.ceil(maxGraphResults / keywords.length) }
         );
 
+        // Safety check for undefined results
+        if (!symbolResults || !Array.isArray(symbolResults)) {
+          if (process.env.CV_DEBUG) {
+            console.log(`[ContextManager] No results for '${keyword}' (undefined or not array)`);
+          }
+          continue;
+        }
+
         if (process.env.CV_DEBUG) {
           console.log(`[ContextManager] Found ${symbolResults.length} symbols for '${keyword}'`);
           if (symbolResults.length > 0) {
@@ -312,12 +341,12 @@ export class ContextManager {
           const symbolContext: SymbolContext & { absolutePath?: string } = {
             name: result.name,
             qualifiedName: result.qualifiedName || result.name,
-            file: result.file,
+            file: result.file || '',
             kind: result.kind || 'function',
             code: result.signature || `// ${result.name}`,
-            startLine: result.startLine,
-            endLine: result.endLine,
-            docstring: result.docstring,
+            startLine: result.startLine || 0,
+            endLine: result.endLine || 0,
+            docstring: result.docstring || undefined,
             relevanceScore: 0.6, // Graph results get moderate relevance
           };
           // Store absolutePath for file loading in workspace mode
@@ -345,6 +374,11 @@ export class ContextManager {
           `,
           { keyword }
         );
+
+        // Safety check for undefined results
+        if (!fileResults || !Array.isArray(fileResults)) {
+          continue;
+        }
 
         for (const result of fileResults) {
           if (!result.path) continue;
@@ -404,6 +438,97 @@ export class ContextManager {
       if (process.env.CV_DEBUG) {
         console.error(`[ContextManager] Graph search failed: ${error.message}`);
       }
+    }
+  }
+
+  /**
+   * Load key project files as fallback when no specific context is found
+   * This provides basic project understanding for general queries
+   */
+  private async loadKeyProjectFiles(snapshot: ContextSnapshot): Promise<void> {
+    // Priority order for key project files
+    const keyFiles = [
+      // Documentation
+      'README.md',
+      'readme.md',
+      'README.rst',
+      // Python entry points
+      'run.py',
+      'app.py',
+      'main.py',
+      'wsgi.py',
+      '__init__.py',
+      'apps/__init__.py',
+      'src/__init__.py',
+      // JavaScript/TypeScript entry points
+      'index.ts',
+      'index.js',
+      'src/index.ts',
+      'src/index.js',
+      'app.ts',
+      'app.js',
+      // Configuration files
+      'package.json',
+      'pyproject.toml',
+      'setup.py',
+    ];
+
+    let loaded = 0;
+    const maxFiles = 5; // Limit to avoid overloading context
+
+    for (const filePath of keyFiles) {
+      if (loaded >= maxFiles) break;
+
+      try {
+        const fileContext = await this.loadFile(filePath, 'fallback');
+        snapshot.files.push(fileContext);
+        loaded++;
+        if (process.env.CV_DEBUG) {
+          console.log(`[ContextManager] Loaded fallback file: ${filePath}`);
+        }
+      } catch {
+        // File doesn't exist, try next
+      }
+    }
+
+    // Also try to load some files from the graph if available
+    if (this.graph?.isConnected() && loaded < maxFiles) {
+      try {
+        const fileResults = await this.graph.query(
+          `MATCH (f:File)
+           WHERE f.language IN ['python', 'typescript', 'javascript']
+           RETURN f.path as path, f.absolutePath as absolutePath
+           ORDER BY f.path
+           LIMIT $limit`,
+          { limit: maxFiles - loaded }
+        );
+
+        if (fileResults && Array.isArray(fileResults)) {
+          for (const result of fileResults) {
+            if (!result.path || loaded >= maxFiles) continue;
+            try {
+              const fileContext = result.absolutePath
+                ? await this.loadFileAbsolute(result.absolutePath, result.path, 'fallback')
+                : await this.loadFile(result.path, 'fallback');
+              snapshot.files.push(fileContext);
+              loaded++;
+              if (process.env.CV_DEBUG) {
+                console.log(`[ContextManager] Loaded fallback file from graph: ${result.path}`);
+              }
+            } catch {
+              // Skip files we can't load
+            }
+          }
+        }
+      } catch (error: any) {
+        if (process.env.CV_DEBUG) {
+          console.error(`[ContextManager] Failed to load fallback files from graph: ${error.message}`);
+        }
+      }
+    }
+
+    if (process.env.CV_DEBUG) {
+      console.log(`[ContextManager] Loaded ${loaded} fallback files`);
     }
   }
 
@@ -575,9 +700,9 @@ export class ContextManager {
    * Estimate tokens for a single symbol
    */
   private estimateSymbolTokens(symbol: SymbolContext): number {
-    let chars = symbol.code.length;
-    chars += symbol.qualifiedName.length + 20;
-    chars += symbol.file.length + 10;
+    let chars = symbol.code?.length || 0;
+    chars += (symbol.qualifiedName?.length || 0) + 20;
+    chars += (symbol.file?.length || 0) + 10;
     if (symbol.docstring) chars += symbol.docstring.length;
     if (symbol.signature) chars += symbol.signature.length;
 

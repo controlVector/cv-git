@@ -22,6 +22,7 @@ import {
   EditResult,
   ProcessResult,
   CodeCallbacks,
+  CodePhase,
   ContextSnapshot,
   FileDiff,
 } from './types.js';
@@ -158,6 +159,7 @@ export class CodeAssistant {
     }
 
     // 1. Build context for this message
+    callbacks?.onStatus?.('searching', 'Searching codebase...');
     const contextSnapshot = await this.context.buildContext(
       userMessage,
       currentSession.activeContext,
@@ -178,11 +180,17 @@ export class CodeAssistant {
     );
 
     // 4. Stream AI response
+    callbacks?.onStatus?.('thinking', 'Thinking...');
     let fullResponse = '';
+    let hasStartedGenerating = false;
 
     try {
       await this.aiClient.chatStream(messages, systemPrompt, {
         onToken: (token) => {
+          if (!hasStartedGenerating) {
+            hasStartedGenerating = true;
+            callbacks?.onStatus?.('generating', 'Generating response...');
+          }
           fullResponse += token;
           callbacks?.onToken?.(token);
         },
@@ -199,6 +207,7 @@ export class CodeAssistant {
     }
 
     // 5. Parse edits from response
+    callbacks?.onStatus?.('parsing', 'Parsing edits...');
     const messageId = uuidv4();
     const edits = this.editParser.parseResponse(fullResponse, messageId);
 
@@ -237,6 +246,8 @@ export class CodeAssistant {
 
     // Save session
     await this.session.save();
+
+    callbacks?.onStatus?.('done');
 
     return {
       response: fullResponse,

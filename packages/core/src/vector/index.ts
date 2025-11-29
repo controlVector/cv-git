@@ -566,8 +566,16 @@ export class VectorManager {
     }
 
     try {
+      if (process.env.CV_DEBUG) {
+        console.log(`[VectorManager] Searching collection '${collection}' for query: "${query.slice(0, 50)}..."`);
+      }
+
       // Generate embedding for query
       const queryVector = await this.embed(query);
+
+      if (process.env.CV_DEBUG) {
+        console.log(`[VectorManager] Generated embedding of length ${queryVector.length}`);
+      }
 
       // Search
       const results = await this.client.search(collection, {
@@ -577,12 +585,22 @@ export class VectorManager {
         with_payload: true
       });
 
+      if (process.env.CV_DEBUG) {
+        console.log(`[VectorManager] Search returned ${results.length} raw results`);
+        if (results.length > 0) {
+          console.log(`[VectorManager] Top score: ${results[0].score.toFixed(4)}`);
+        }
+      }
+
       return results.map(result => ({
         id: result.payload?._id as string || String(result.id),
         score: result.score,
         payload: result.payload as T
       }));
     } catch (error: any) {
+      if (process.env.CV_DEBUG) {
+        console.error(`[VectorManager] Search error: ${error.message}`);
+      }
       throw new VectorError(`Search failed: ${error.message}`, error);
     }
   }

@@ -1,6 +1,6 @@
 {
   "name": "@cv-git/cli",
-  "version": "0.3.2",
+  "version": "0.3.5",
   "description": "CV-Git command-line interface",
   "type": "module",
   "bin": {

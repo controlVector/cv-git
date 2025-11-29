@@ -30,12 +30,15 @@ import {
   GraphManager,
   GitManager,
   CodeAssistant,
+  CodePhase,
   Edit,
 } from '@cv-git/core';
 import { findRepoRoot, loadWorkspace, findWorkspaceRoot, CVWorkspace } from '@cv-git/shared';
 import { CredentialManager } from '@cv-git/credentials';
 import { addGlobalOptions, createOutput } from '../utils/output.js';
 import { ensureInfrastructure, checkSyncState } from '../utils/infrastructure.js';
+import { getEditPromptText, parseEditAction, formatEditSummary, EditAction } from '../utils/prompts.js';
+import { divider, labeledDivider, statusLine, colorizeDiff } from '../utils/formatting.js';
 
 interface CodeOptions {
   model?: string;
@@ -313,20 +316,24 @@ export function codeCommand(): Command {
       // Initialize or resume session
       await assistant.initSession(branch, commitSha, options.resume);
 
-      // Show startup info
+      // Show startup info with visual hierarchy
       console.log();
-      console.log(chalk.bold.cyan('cv code') + chalk.gray(` - using ${assistant.getModel()}`));
+      console.log(divider('light'));
+      console.log(chalk.bold.cyan('  cv code') + chalk.gray(` - AI-powered code editing`));
+      console.log(divider('light'));
+      console.log();
+      console.log(chalk.gray('  Model:     ') + chalk.white(assistant.getModel()));
       if (workspace) {
-        console.log(chalk.cyan(`Workspace: ${workspace.name}`) + chalk.gray(` (${workspace.repos.length} repos)`));
-        console.log(chalk.gray(`  Repos: ${workspace.repos.map(r => r.name).join(', ')}`));
+        console.log(chalk.gray('  Workspace: ') + chalk.cyan(workspace.name) + chalk.gray(` (${workspace.repos.length} repos)`));
+        console.log(chalk.gray('  Repos:     ') + chalk.gray(workspace.repos.map(r => r.name).join(', ')));
       }
-      console.log(chalk.gray(`Branch: ${branch} @ ${commitSha.slice(0, 7)}`));
+      console.log(chalk.gray('  Branch:    ') + chalk.white(branch) + chalk.gray(` @ ${commitSha.slice(0, 7)}`));
       if (vector && graph) {
-        console.log(chalk.green('✓') + chalk.gray(` Knowledge graph: ${graphDatabase}`));
+        console.log(chalk.gray('  Context:   ') + statusLine('success', `Knowledge graph: ${graphDatabase}`));
       } else if (graph) {
-        console.log(chalk.green('✓') + chalk.gray(` Graph context: ${graphDatabase}`) + chalk.yellow(' (no embeddings)'));
+        console.log(chalk.gray('  Context:   ') + statusLine('success', `Graph: ${graphDatabase}`) + chalk.yellow(' (no embeddings)'));
       } else {
-        console.log(chalk.yellow('○') + chalk.gray(' No context (run `cv sync` first)'));
+        console.log(chalk.gray('  Context:   ') + statusLine('pending', 'No context (run `cv sync` first)'));
       }
       console.log();
 
@@ -515,6 +522,20 @@ export function codeCommand(): Command {
 }
 
 /**
+ * Get spinner text for each phase
+ */
+function getPhaseSpinnerText(phase: CodePhase, message?: string): string {
+  const phaseTexts: Record<CodePhase, string> = {
+    searching: 'Searching codebase...',
+    thinking: 'Thinking...',
+    generating: 'Generating response...',
+    parsing: 'Parsing edits...',
+    done: 'Done',
+  };
+  return message || phaseTexts[phase];
+}
+
+/**
  * Handle a single instruction (one-shot mode)
  */
 async function handleSingleInstruction(
@@ -522,16 +543,66 @@ async function handleSingleInstruction(
   assistant: CodeAssistant,
   autoApprove: boolean
 ): Promise<void> {
-  const spinner = ora('Thinking...').start();
+  const spinner = ora({ text: 'Initializing...', spinner: 'dots' }).start();
+  let responseStarted = false;
+  let inCodeBlock = false;
+  let codeBlockBuffer = '';
 
   try {
     const result = await assistant.processMessage(instruction, {
-      onToken: (token) => {
-        if (spinner.isSpinning) {
-          spinner.stop();
-          process.stdout.write('\r\x1b[K'); // Clear line
+      onStatus: (phase, message) => {
+        if (phase === 'generating' || phase === 'done') {
+          // Stop spinner when AI starts generating or when done
+          if (spinner.isSpinning) {
+            spinner.stop();
+            process.stdout.write('\r\x1b[K'); // Clear line
+          }
+        } else if (spinner.isSpinning) {
+          // Update spinner text for other phases
+          spinner.text = getPhaseSpinnerText(phase, message);
         }
-        process.stdout.write(token);
+      },
+      onToken: (token) => {
+        if (!responseStarted) {
+          responseStarted = true;
+          if (spinner.isSpinning) {
+            spinner.stop();
+            process.stdout.write('\r\x1b[K'); // Clear line
+          }
+        }
+
+        // Filter out code blocks containing SEARCH/REPLACE markers
+        codeBlockBuffer += token;
+
+        // Check for code block start
+        if (!inCodeBlock && codeBlockBuffer.includes('```')) {
+          const beforeBlock = codeBlockBuffer.split('```')[0];
+          process.stdout.write(beforeBlock);
+          inCodeBlock = true;
+          codeBlockBuffer = '```' + codeBlockBuffer.split('```').slice(1).join('```');
+        }
+
+        // If in code block, check for end
+        if (inCodeBlock) {
+          const parts = codeBlockBuffer.split('```');
+          if (parts.length >= 3) {
+            const blockContent = parts[1];
+            if (blockContent.includes('<<<<<<< SEARCH') || blockContent.includes('>>>>>>> REPLACE')) {
+              process.stdout.write(chalk.gray('[edit block - see formatted diff below]'));
+            } else {
+              process.stdout.write('```' + blockContent + '```');
+            }
+            inCodeBlock = false;
+            codeBlockBuffer = parts.slice(2).join('```');
+            if (codeBlockBuffer) {
+              process.stdout.write(codeBlockBuffer);
+              codeBlockBuffer = '';
+            }
+          }
+        } else if (!codeBlockBuffer.includes('`')) {
+          process.stdout.write(codeBlockBuffer);
+          codeBlockBuffer = '';
+        }
       },
       onEdit: (edit) => {
         // Will handle after response
@@ -542,12 +613,20 @@ async function handleSingleInstruction(
       },
     });
 
+    // Flush any remaining buffer
+    if (codeBlockBuffer && !inCodeBlock) {
+      process.stdout.write(codeBlockBuffer);
+    }
+
     console.log('\n');
 
-    // Show pending edits
+    // Show pending edits with visual separation
     if (result.edits.length > 0) {
       await showAndApplyEdits(assistant, result.edits, autoApprove);
+    } else {
+      console.log(divider('light'));
     }
+    console.log();
   } catch (error: any) {
     spinner.stop();
     throw error;
@@ -566,7 +645,7 @@ async function interactiveMode(
     output: process.stdout,
   });
 
-  console.log(chalk.gray('Commands: /apply, /diff, /undo, /help, /quit (Ctrl+C to exit)\n'));
+  console.log(chalk.gray('Edit prompts: y/n/a/d/s/q • Commands: /diff, /undo, /help, /quit\n'));
 
   const askQuestion = (): void => {
     rl.question(chalk.green('> '), async (input) => {
@@ -588,16 +667,71 @@ async function interactiveMode(
       }
 
       // Process instruction
-      const spinner = ora('Thinking...').start();
+      const spinner = ora({ text: 'Initializing...', spinner: 'dots' }).start();
+      let responseStarted = false;
+      let inCodeBlock = false;
+      let codeBlockBuffer = '';
 
       try {
         const result = await assistant.processMessage(trimmed, {
-          onToken: (token) => {
-            if (spinner.isSpinning) {
-              spinner.stop();
-              process.stdout.write('\r\x1b[K'); // Clear line
+          onStatus: (phase, message) => {
+            if (phase === 'generating' || phase === 'done') {
+              if (spinner.isSpinning) {
+                spinner.stop();
+                process.stdout.write('\r\x1b[K'); // Clear line
+              }
+            } else if (spinner.isSpinning) {
+              spinner.text = getPhaseSpinnerText(phase, message);
             }
-            process.stdout.write(token);
+          },
+          onToken: (token) => {
+            if (!responseStarted) {
+              responseStarted = true;
+              if (spinner.isSpinning) {
+                spinner.stop();
+                process.stdout.write('\r\x1b[K'); // Clear line
+              }
+            }
+
+            // Filter out code blocks containing SEARCH/REPLACE markers
+            codeBlockBuffer += token;
+
+            // Check for code block start
+            if (!inCodeBlock && codeBlockBuffer.includes('```')) {
+              const beforeBlock = codeBlockBuffer.split('```')[0];
+              process.stdout.write(beforeBlock);
+              inCodeBlock = true;
+              codeBlockBuffer = '```' + codeBlockBuffer.split('```').slice(1).join('```');
+            }
+
+            // If in code block, check for end
+            if (inCodeBlock) {
+              // Look for closing ``` (but not the opening one)
+              const parts = codeBlockBuffer.split('```');
+              if (parts.length >= 3) {
+                // We have opening ```, content, and closing ```
+                // Check if this block contains SEARCH/REPLACE markers
+                const blockContent = parts[1];
+                if (blockContent.includes('<<<<<<< SEARCH') || blockContent.includes('>>>>>>> REPLACE')) {
+                  // Suppress this edit block, just show a placeholder
+                  process.stdout.write(chalk.gray('[edit block - see formatted diff below]'));
+                } else {
+                  // Not an edit block, output it
+                  process.stdout.write('```' + blockContent + '```');
+                }
+                inCodeBlock = false;
+                codeBlockBuffer = parts.slice(2).join('```');
+                // Output any remaining content after the block
+                if (codeBlockBuffer) {
+                  process.stdout.write(codeBlockBuffer);
+                  codeBlockBuffer = '';
+                }
+              }
+            } else if (!codeBlockBuffer.includes('`')) {
+              // No backticks pending, safe to output
+              process.stdout.write(codeBlockBuffer);
+              codeBlockBuffer = '';
+            }
           },
           onError: (error) => {
             spinner.stop();
@@ -605,12 +739,20 @@ async function interactiveMode(
           },
         });
 
+        // Flush any remaining buffer
+        if (codeBlockBuffer && !inCodeBlock) {
+          process.stdout.write(codeBlockBuffer);
+        }
+
         console.log('\n');
 
-        // Show pending edits
+        // Show pending edits with visual separation
         if (result.edits.length > 0) {
           await showAndApplyEdits(assistant, result.edits, autoApprove);
+        } else {
+          console.log(divider('light'));
         }
+        console.log();
       } catch (error: any) {
         spinner.stop();
         console.error(chalk.red(`Error: ${error.message}`));
@@ -647,11 +789,19 @@ async function handleCommand(
   switch (cmd) {
     case '/help':
       console.log(chalk.gray(`
+After AI proposes edits, you'll be prompted for each:
+  ${chalk.yellow('y')} - Apply this edit
+  ${chalk.yellow('n')} - Reject this edit
+  ${chalk.yellow('a')} - Apply all remaining edits
+  ${chalk.yellow('d')} - Show diff again
+  ${chalk.yellow('s')} - Skip (keep pending)
+  ${chalk.yellow('q')} - Quit prompting
+
 Commands:
   /add <file>      Add file to explicit context
   /drop <file>     Remove file from context
   /diff            Show pending changes as unified diff
-  /apply           Apply all pending edits
+  /apply           Apply all pending edits (batch mode)
   /undo            Revert last applied edit
   /context         Show current context summary
   /clear           Clear conversation history
@@ -751,6 +901,39 @@ Commands:
 }
 
 /**
+ * Format a single edit with visual styling
+ */
+function formatEditDisplay(edit: Edit, diffText: string): string {
+  const typeLabels: Record<string, string> = {
+    create: chalk.green.bold('CREATE'),
+    modify: chalk.yellow.bold('MODIFY'),
+    delete: chalk.red.bold('DELETE'),
+  };
+  const typeColors: Record<string, typeof chalk> = {
+    create: chalk.green,
+    modify: chalk.yellow,
+    delete: chalk.red,
+  };
+
+  const color = typeColors[edit.type] || chalk.white;
+  const label = typeLabels[edit.type] || edit.type.toUpperCase();
+  const header = `${label} ${color(edit.file)}`;
+
+  const lines: string[] = [];
+  lines.push(color('┌─') + ' ' + header);
+
+  // Add colorized diff
+  const coloredDiff = colorizeDiff(diffText);
+  for (const line of coloredDiff.split('\n')) {
+    lines.push(color('│') + ' ' + line);
+  }
+
+  lines.push(color('└' + '─'.repeat(40)));
+
+  return lines.join('\n');
+}
+
+/**
  * Show pending diffs
  */
 async function showPendingDiffs(assistant: CodeAssistant): Promise<void> {
@@ -761,38 +944,90 @@ async function showPendingDiffs(assistant: CodeAssistant): Promise<void> {
     return;
   }
 
-  console.log(chalk.bold(`\n${edits.length} pending edit(s):\n`));
+  console.log();
+  console.log(labeledDivider(`${edits.length} Pending Edit${edits.length > 1 ? 's' : ''}`, 'light'));
+  console.log();
 
   for (const edit of edits) {
     const diff = await assistant.generateDiff(edit);
-    console.log(assistant.formatDiffForDisplay(diff));
+    const diffText = assistant.formatDiffForDisplay(diff);
+    console.log(formatEditDisplay(edit, diffText));
+    console.log();
   }
 }
 
 /**
- * Show and optionally apply edits
+ * Prompt for edit action using raw stdin (single keypress)
+ */
+function promptForEditAction(
+  editNumber: number,
+  totalEdits: number,
+  fileName: string
+): Promise<EditAction> {
+  return new Promise((resolve) => {
+    const promptText = getEditPromptText(editNumber, totalEdits, fileName);
+    process.stdout.write(promptText);
+
+    // Use raw mode for single keypress
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(true);
+    }
+    process.stdin.resume();
+
+    const onData = (key: Buffer) => {
+      const char = key.toString().toLowerCase();
+
+      // Handle Ctrl+C
+      if (key[0] === 3) {
+        process.stdout.write('\n');
+        process.exit(0);
+      }
+
+      // Echo the character and newline
+      process.stdout.write(char + '\n');
+
+      // Cleanup
+      process.stdin.removeListener('data', onData);
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode(false);
+      }
+
+      const result = parseEditAction(char);
+      resolve(result.action);
+    };
+
+    process.stdin.once('data', onData);
+  });
+}
+
+/**
+ * Show and optionally apply edits with interactive confirmation
  */
 async function showAndApplyEdits(
   assistant: CodeAssistant,
   edits: Edit[],
   autoApprove: boolean
 ): Promise<void> {
-  console.log(chalk.bold(`${edits.length} edit(s) proposed:\n`));
-
-  // Show each edit
-  for (const edit of edits) {
-    const diff = await assistant.generateDiff(edit);
-    console.log(assistant.formatDiffForDisplay(diff));
-  }
+  console.log();
+  console.log(labeledDivider(`${edits.length} Edit${edits.length > 1 ? 's' : ''} Proposed`, 'heavy'));
+  console.log();
 
   if (autoApprove) {
-    // Auto-apply all
+    // Auto-apply all without prompting
+    for (const edit of edits) {
+      const diff = await assistant.generateDiff(edit);
+      const diffText = assistant.formatDiffForDisplay(diff);
+      console.log(formatEditDisplay(edit, diffText));
+      console.log();
+    }
+
     assistant.approveAllEdits();
     const results = await assistant.applyEdits({ autoApprove: true });
 
     const success = results.filter(r => r.success).length;
     const failed = results.length - success;
 
+    console.log(divider('light'));
     if (success > 0) {
       console.log(chalk.green(`✓ Applied ${success} edit(s)`));
     }
@@ -803,9 +1038,96 @@ async function showAndApplyEdits(
       }
     }
     console.log();
-  } else {
-    console.log(chalk.gray('Use /apply to apply these changes, or /diff to review again.\n'));
+    return;
   }
+
+  // Interactive mode - prompt for each edit
+  let applied = 0;
+  let rejected = 0;
+  let skipped = 0;
+  let applyAll = false;
+
+  for (let i = 0; i < edits.length; i++) {
+    const edit = edits[i];
+
+    // Show diff for this edit with visual styling
+    const diff = await assistant.generateDiff(edit);
+    const diffText = assistant.formatDiffForDisplay(diff);
+    console.log(formatEditDisplay(edit, diffText));
+    console.log();
+
+    // If applyAll was selected, apply without prompting
+    if (applyAll) {
+      assistant.approveEdit(edit.id);
+      const results = await assistant.applyEdits({ editIds: [edit.id] });
+      if (results[0]?.success) {
+        console.log(chalk.green(`✓ Applied ${edit.file}`));
+        applied++;
+      } else {
+        console.log(chalk.red(`✗ Failed: ${results[0]?.error}`));
+      }
+      continue;
+    }
+
+    // Prompt for action
+    let action: EditAction;
+    do {
+      action = await promptForEditAction(i + 1, edits.length, edit.file);
+
+      if (action === 'diff') {
+        // Re-show the diff
+        console.log(formatEditDisplay(edit, diffText));
+        console.log();
+      }
+    } while (action === 'diff');
+
+    switch (action) {
+      case 'yes':
+        assistant.approveEdit(edit.id);
+        const applyResult = await assistant.applyEdits({ editIds: [edit.id] });
+        if (applyResult[0]?.success) {
+          console.log(chalk.green(`✓ Applied ${edit.file}\n`));
+          applied++;
+        } else {
+          console.log(chalk.red(`✗ Failed: ${applyResult[0]?.error}\n`));
+        }
+        break;
+
+      case 'no':
+        assistant.rejectEdit(edit.id);
+        console.log(chalk.red(`✗ Rejected ${edit.file}\n`));
+        rejected++;
+        break;
+
+      case 'all':
+        applyAll = true;
+        assistant.approveEdit(edit.id);
+        const allResult = await assistant.applyEdits({ editIds: [edit.id] });
+        if (allResult[0]?.success) {
+          console.log(chalk.green(`✓ Applied ${edit.file}`));
+          applied++;
+        } else {
+          console.log(chalk.red(`✗ Failed: ${allResult[0]?.error}`));
+        }
+        break;
+
+      case 'skip':
+        console.log(chalk.yellow(`○ Skipped ${edit.file}\n`));
+        skipped++;
+        break;
+
+      case 'quit':
+        skipped += edits.length - i;
+        console.log(chalk.gray(`\nQuitting. ${edits.length - i} edit(s) left pending.\n`));
+        console.log(chalk.gray('Summary: ') + formatEditSummary(applied, rejected, skipped) + '\n');
+        return;
+    }
+  }
+
+  // Show final summary
+  console.log(divider('light'));
+  console.log(chalk.gray('Summary: ') + formatEditSummary(applied, rejected, skipped));
+  console.log();
 }
 
 /**

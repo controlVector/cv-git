@@ -109,7 +109,7 @@ export interface FileContext {
   startLine?: number;
   endLine?: number;
   relevanceScore: number;
-  source: 'explicit' | 'vector' | 'graph' | 'dependency' | 'related';
+  source: 'explicit' | 'vector' | 'graph' | 'dependency' | 'related' | 'fallback';
 }
 
 /**
@@ -275,6 +275,16 @@ export interface ProcessResult {
 }
 
 /**
+ * Status phases for progress reporting
+ */
+export type CodePhase =
+  | 'searching'    // Searching codebase for context
+  | 'thinking'     // Waiting for AI to start responding
+  | 'generating'   // AI is streaming response
+  | 'parsing'      // Parsing edits from response
+  | 'done';        // Processing complete
+
+/**
  * Callbacks for streaming and events
  */
 export interface CodeCallbacks {
@@ -289,6 +299,9 @@ export interface CodeCallbacks {
 
   /** Called on error */
   onError?: (error: Error) => void;
+
+  /** Called when processing phase changes */
+  onStatus?: (phase: CodePhase, message?: string) => void;
 }
 
 // ============================================================================

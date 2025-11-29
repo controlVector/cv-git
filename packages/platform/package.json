@@ -1,6 +1,6 @@
 {
   "name": "@cv-git/platform",
-  "version": "0.3.2",
+  "version": "0.3.5",
   "description": "Platform-agnostic git hosting adapter for CV-Git",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
