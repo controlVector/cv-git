@@ -634,6 +634,15 @@ async function handleSingleInstruction(
 }
 
 /**
+ * Promisified readline question
+ */
+function question(rl: readline.Interface, prompt: string): Promise<string> {
+  return new Promise((resolve) => {
+    rl.question(prompt, resolve);
+  });
+}
+
+/**
  * Interactive REPL mode
  */
 async function interactiveMode(
@@ -647,123 +656,6 @@ async function interactiveMode(
 
   console.log(chalk.gray('Edit prompts: y/n/a/d/s/q • Commands: /diff, /undo, /help, /quit\n'));
 
-  const askQuestion = (): void => {
-    rl.question(chalk.green('> '), async (input) => {
-      const trimmed = input.trim();
-
-      if (!trimmed) {
-        askQuestion();
-        return;
-      }
-
-      // Handle commands
-      if (trimmed.startsWith('/')) {
-        const shouldContinue = await handleCommand(trimmed, assistant, rl, autoApprove);
-        if (!shouldContinue) {
-          return;
-        }
-        askQuestion();
-        return;
-      }
-
-      // Process instruction
-      const spinner = ora({ text: 'Initializing...', spinner: 'dots' }).start();
-      let responseStarted = false;
-      let inCodeBlock = false;
-      let codeBlockBuffer = '';
-
-      try {
-        const result = await assistant.processMessage(trimmed, {
-          onStatus: (phase, message) => {
-            if (phase === 'generating' || phase === 'done') {
-              if (spinner.isSpinning) {
-                spinner.stop();
-                process.stdout.write('\r\x1b[K'); // Clear line
-              }
-            } else if (spinner.isSpinning) {
-              spinner.text = getPhaseSpinnerText(phase, message);
-            }
-          },
-          onToken: (token) => {
-            if (!responseStarted) {
-              responseStarted = true;
-              if (spinner.isSpinning) {
-                spinner.stop();
-                process.stdout.write('\r\x1b[K'); // Clear line
-              }
-            }
-
-            // Filter out code blocks containing SEARCH/REPLACE markers
-            codeBlockBuffer += token;
-
-            // Check for code block start
-            if (!inCodeBlock && codeBlockBuffer.includes('```')) {
-              const beforeBlock = codeBlockBuffer.split('```')[0];
-              process.stdout.write(beforeBlock);
-              inCodeBlock = true;
-              codeBlockBuffer = '```' + codeBlockBuffer.split('```').slice(1).join('```');
-            }
-
-            // If in code block, check for end
-            if (inCodeBlock) {
-              // Look for closing ``` (but not the opening one)
-              const parts = codeBlockBuffer.split('```');
-              if (parts.length >= 3) {
-                // We have opening ```, content, and closing ```
-                // Check if this block contains SEARCH/REPLACE markers
-                const blockContent = parts[1];
-                if (blockContent.includes('<<<<<<< SEARCH') || blockContent.includes('>>>>>>> REPLACE')) {
-                  // Suppress this edit block, just show a placeholder
-                  process.stdout.write(chalk.gray('[edit block - see formatted diff below]'));
-                } else {
-                  // Not an edit block, output it
-                  process.stdout.write('```' + blockContent + '```');
-                }
-                inCodeBlock = false;
-                codeBlockBuffer = parts.slice(2).join('```');
-                // Output any remaining content after the block
-                if (codeBlockBuffer) {
-                  process.stdout.write(codeBlockBuffer);
-                  codeBlockBuffer = '';
-                }
-              }
-            } else if (!codeBlockBuffer.includes('`')) {
-              // No backticks pending, safe to output
-              process.stdout.write(codeBlockBuffer);
-              codeBlockBuffer = '';
-            }
-          },
-          onError: (error) => {
-            spinner.stop();
-            console.error(chalk.red(`\nError: ${error.message}`));
-          },
-        });
-
-        // Flush any remaining buffer
-        if (codeBlockBuffer && !inCodeBlock) {
-          process.stdout.write(codeBlockBuffer);
-        }
-
-        console.log('\n');
-
-        // Show pending edits with visual separation
-        if (result.edits.length > 0) {
-          await showAndApplyEdits(assistant, result.edits, autoApprove);
-        } else {
-          console.log(divider('light'));
-        }
-        console.log();
-      } catch (error: any) {
-        spinner.stop();
-        console.error(chalk.red(`Error: ${error.message}`));
-      }
-
-      askQuestion();
-    });
-  };
-
-  askQuestion();
-
   // Handle Ctrl+C gracefully
   rl.on('close', async () => {
     console.log(chalk.gray('\nSaving session...'));
@@ -771,6 +663,110 @@ async function interactiveMode(
     console.log(chalk.gray('Goodbye!'));
     process.exit(0);
   });
+
+  // Main REPL loop
+  while (true) {
+    const input = await question(rl, chalk.green('> '));
+    const trimmed = input.trim();
+
+    if (!trimmed) {
+      continue;
+    }
+
+    // Handle commands
+    if (trimmed.startsWith('/')) {
+      const shouldContinue = await handleCommand(trimmed, assistant, rl, autoApprove);
+      if (!shouldContinue) {
+        break;
+      }
+      continue;
+    }
+
+    // Process instruction
+    const spinner = ora({ text: 'Initializing...', spinner: 'dots' }).start();
+    let responseStarted = false;
+    let inCodeBlock = false;
+    let codeBlockBuffer = '';
+
+    try {
+      const result = await assistant.processMessage(trimmed, {
+        onStatus: (phase, message) => {
+          if (phase === 'generating' || phase === 'done') {
+            if (spinner.isSpinning) {
+              spinner.stop();
+              process.stdout.write('\r\x1b[K'); // Clear line
+            }
+          } else if (spinner.isSpinning) {
+            spinner.text = getPhaseSpinnerText(phase, message);
+          }
+        },
+        onToken: (token) => {
+          if (!responseStarted) {
+            responseStarted = true;
+            if (spinner.isSpinning) {
+              spinner.stop();
+              process.stdout.write('\r\x1b[K'); // Clear line
+            }
+          }
+
+          // Filter out code blocks containing SEARCH/REPLACE markers
+          codeBlockBuffer += token;
+
+          // Check for code block start
+          if (!inCodeBlock && codeBlockBuffer.includes('```')) {
+            const beforeBlock = codeBlockBuffer.split('```')[0];
+            process.stdout.write(beforeBlock);
+            inCodeBlock = true;
+            codeBlockBuffer = '```' + codeBlockBuffer.split('```').slice(1).join('```');
+          }
+
+          // If in code block, check for end
+          if (inCodeBlock) {
+            const parts = codeBlockBuffer.split('```');
+            if (parts.length >= 3) {
+              const blockContent = parts[1];
+              if (blockContent.includes('<<<<<<< SEARCH') || blockContent.includes('>>>>>>> REPLACE')) {
+                process.stdout.write(chalk.gray('[edit block - see formatted diff below]'));
+              } else {
+                process.stdout.write('```' + blockContent + '```');
+              }
+              inCodeBlock = false;
+              codeBlockBuffer = parts.slice(2).join('```');
+              if (codeBlockBuffer) {
+                process.stdout.write(codeBlockBuffer);
+                codeBlockBuffer = '';
+              }
+            }
+          } else if (!codeBlockBuffer.includes('`')) {
+            process.stdout.write(codeBlockBuffer);
+            codeBlockBuffer = '';
+          }
+        },
+        onError: (error) => {
+          spinner.stop();
+          console.error(chalk.red(`\nError: ${error.message}`));
+        },
+      });
+
+      // Flush any remaining buffer
+      if (codeBlockBuffer && !inCodeBlock) {
+        process.stdout.write(codeBlockBuffer);
+      }
+
+      console.log('\n');
+
+      // Show pending edits with visual separation
+      if (result.edits.length > 0) {
+        await showAndApplyEdits(assistant, result.edits, autoApprove, rl);
+      } else {
+        console.log(divider('light'));
+      }
+      console.log();
+    } catch (error: any) {
+      spinner.stop();
+      console.error(chalk.red(`Error: ${error.message}`));
+    }
+  }
 }
 
 /**
@@ -957,46 +953,21 @@ async function showPendingDiffs(assistant: CodeAssistant): Promise<void> {
 }
 
 /**
- * Prompt for edit action using raw stdin (single keypress)
+ * Prompt for edit action using the main readline
  */
 function promptForEditAction(
+  rl: readline.Interface,
   editNumber: number,
   totalEdits: number,
   fileName: string
 ): Promise<EditAction> {
   return new Promise((resolve) => {
     const promptText = getEditPromptText(editNumber, totalEdits, fileName);
-    process.stdout.write(promptText);
 
-    // Use raw mode for single keypress
-    if (process.stdin.isTTY) {
-      process.stdin.setRawMode(true);
-    }
-    process.stdin.resume();
-
-    const onData = (key: Buffer) => {
-      const char = key.toString().toLowerCase();
-
-      // Handle Ctrl+C
-      if (key[0] === 3) {
-        process.stdout.write('\n');
-        process.exit(0);
-      }
-
-      // Echo the character and newline
-      process.stdout.write(char + '\n');
-
-      // Cleanup
-      process.stdin.removeListener('data', onData);
-      if (process.stdin.isTTY) {
-        process.stdin.setRawMode(false);
-      }
-
-      const result = parseEditAction(char);
+    rl.question(promptText, (answer) => {
+      const result = parseEditAction(answer);
       resolve(result.action);
-    };
-
-    process.stdin.once('data', onData);
+    });
   });
 }
 
@@ -1006,7 +977,8 @@ function promptForEditAction(
 async function showAndApplyEdits(
   assistant: CodeAssistant,
   edits: Edit[],
-  autoApprove: boolean
+  autoApprove: boolean,
+  rl?: readline.Interface
 ): Promise<void> {
   console.log();
   console.log(labeledDivider(`${edits.length} Edit${edits.length > 1 ? 's' : ''} Proposed`, 'heavy'));
@@ -1041,6 +1013,22 @@ async function showAndApplyEdits(
     return;
   }
 
+  // If no readline provided, auto-approve (non-interactive mode)
+  if (!rl) {
+    for (const edit of edits) {
+      const diff = await assistant.generateDiff(edit);
+      const diffText = assistant.formatDiffForDisplay(diff);
+      console.log(formatEditDisplay(edit, diffText));
+      console.log();
+    }
+    console.log(chalk.yellow('No interactive input available - auto-applying edits'));
+    assistant.approveAllEdits();
+    const results = await assistant.applyEdits({ autoApprove: true });
+    const success = results.filter(r => r.success).length;
+    console.log(chalk.green(`✓ Applied ${success} edit(s)`));
+    return;
+  }
+
   // Interactive mode - prompt for each edit
   let applied = 0;
   let rejected = 0;
@@ -1072,7 +1060,7 @@ async function showAndApplyEdits(
     // Prompt for action
     let action: EditAction;
     do {
-      action = await promptForEditAction(i + 1, edits.length, edit.file);
+      action = await promptForEditAction(rl, i + 1, edits.length, edit.file);
 
       if (action === 'diff') {
         // Re-show the diff
