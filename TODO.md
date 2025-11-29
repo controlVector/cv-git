@@ -1,6 +1,20 @@
 # CV-Git TODO
 
-## v0.3.2 - CLI UX Improvements
+## Next Up - Testing & GitHub Experience
+
+### Testing with VehicleIQ Flask App
+- [ ] **Test full init/sync flow** with `/home/jwscho/github/flask-berry-admin-dashboard`
+  - Verify preferences are saved and credentials detected
+  - Confirm exclude patterns filter out site-packages (should be ~50-100 files, not 678)
+  - Test `cv find`, `cv code` commands against the codebase
+
+### GitHub Experience Improvements
+- [ ] **Improve GitHub integration** - feedback from user testing
+  - TBD based on testing results
+
+---
+
+## v0.3.3 - CLI UX Improvements
 
 ### High Priority
 
@@ -36,12 +50,18 @@
   - Handle edge cases in SEARCH/REPLACE block parsing
   - Better error messages when edits fail to apply
 
+---
+
 ## Completed in v0.3.2
 
 - [x] **User Preferences System** - Pick preferred git platform, AI provider, and embedding provider during init
 - [x] `cv preferences` command to view/update preferences
-- [x] Targeted auth setup - only asks for API keys for services the user selected
+- [x] Global credential detection - only prompts for missing credentials during init
 - [x] Preference-aware `cv auth setup` - uses saved preferences to determine which services to configure
+- [x] **FalkorDB fixes** - String escaping for newlines/special chars, reserved keyword conflicts
+- [x] **Improved glob matching** - Fixed `**` patterns for deep path matching
+- [x] **Expanded exclude patterns** - site-packages, virtualenvs, vendor dirs, minified JS
+- [x] Default embedding provider changed to OpenRouter
 
 ## Completed in v0.3.1
 
