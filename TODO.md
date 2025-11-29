@@ -31,13 +31,17 @@ The knowledge graph needs to stay in sync as code changes during development. Pr
 ### Completed
 
 - [x] **Fix interactive edit prompts** - CLI was exiting instead of waiting for input
-  - Switched to raw stdin with `setRawMode(true)` for single-keypress capture
-  - Works independently of readline interface used by main REPL
+  - Refactored REPL from recursive callbacks to async/await while loop
+  - Added promisified `question()` helper for readline
+  - Edit prompts now use main readline directly
 
 - [x] **Hide duplicate edit blocks in output**
   - AI response was showing raw SEARCH/REPLACE blocks AND formatted diff
   - Now filters out raw edit blocks, shows only `[edit block - see formatted diff below]`
   - Formatted colorized diff shown once after response completes
+
+### Known Issues (to verify)
+- [ ] CLI may still exit after edit prompts - needs testing
 
 ---
 
