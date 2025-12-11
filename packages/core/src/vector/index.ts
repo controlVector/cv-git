@@ -39,8 +39,15 @@ const EMBEDDING_MODELS: Record<string, { dimension: number; provider: 'openai' |
   'snowflake-arctic-embed': { dimension: 1024, provider: 'ollama' }
 };
 
-// Model fallback order (try these in sequence)
-const MODEL_FALLBACK_ORDER = [
+// Model fallback order for OpenRouter (preferred)
+const OPENROUTER_MODEL_ORDER = [
+  'openai/text-embedding-3-small',
+  'openai/text-embedding-ada-002',
+  'openai/text-embedding-3-large'
+];
+
+// Model fallback order for direct OpenAI (if OpenRouter unavailable)
+const OPENAI_MODEL_ORDER = [
   'text-embedding-3-small',
   'text-embedding-ada-002'
 ];
@@ -52,6 +59,21 @@ const OLLAMA_MODEL_ORDER = [
   'all-minilm'
 ];
 
+export interface VectorManagerOptions {
+  /** Qdrant URL */
+  url: string;
+  /** OpenRouter API key (preferred for embeddings) */
+  openrouterApiKey?: string;
+  /** OpenAI API key (fallback) */
+  openaiApiKey?: string;
+  /** Collection names */
+  collections?: Partial<VectorCollections>;
+  /** Embedding model to use */
+  embeddingModel?: string;
+  /** Ollama URL for local embeddings */
+  ollamaUrl?: string;
+}
+
 export class VectorManager {
   private client: QdrantClient | null = null;
   private openai: OpenAI | null = null;
@@ -61,34 +83,72 @@ export class VectorManager {
   private embeddingProvider: 'openai' | 'openrouter' | 'ollama';
   private ollamaUrl: string;
   private openrouterApiKey?: string;
+  private openaiApiKey?: string;
   private vectorSize: number;
   private connected: boolean = false;
   private modelValidated: boolean = false;
+  private url: string;
 
+  constructor(options: VectorManagerOptions);
+  /** @deprecated Use options object instead */
+  constructor(url: string, openaiApiKey?: string, collections?: Partial<VectorCollections>, embeddingModel?: string);
   constructor(
-    private url: string,
-    private openaiApiKey?: string,
+    urlOrOptions: string | VectorManagerOptions,
+    openaiApiKey?: string,
     collections?: Partial<VectorCollections>,
     embeddingModel?: string
   ) {
-    this.collections = {
-      codeChunks: collections?.codeChunks || 'code_chunks',
-      docstrings: collections?.docstrings || 'docstrings',
-      commits: collections?.commits || 'commits'
-    };
-    // Allow override via parameter or env var
-    this.embeddingModel = embeddingModel || process.env.CV_EMBEDDING_MODEL || 'text-embedding-3-small';
-    this.ollamaUrl = process.env.OLLAMA_URL || 'http://localhost:11434';
-    this.openrouterApiKey = process.env.OPENROUTER_API_KEY;
+    // Handle both old and new constructor signatures
+    let opts: VectorManagerOptions;
+    if (typeof urlOrOptions === 'string') {
+      // Legacy constructor
+      opts = {
+        url: urlOrOptions,
+        openaiApiKey,
+        collections,
+        embeddingModel,
+        openrouterApiKey: process.env.OPENROUTER_API_KEY
+      };
+    } else {
+      opts = urlOrOptions;
+    }
 
-    // Determine provider from model name
+    this.url = opts.url;
+    this.openaiApiKey = opts.openaiApiKey;
+    this.openrouterApiKey = opts.openrouterApiKey || process.env.OPENROUTER_API_KEY;
+    this.ollamaUrl = opts.ollamaUrl || process.env.OLLAMA_URL || 'http://localhost:11434';
+
+    this.collections = {
+      codeChunks: opts.collections?.codeChunks || 'code_chunks',
+      docstrings: opts.collections?.docstrings || 'docstrings',
+      commits: opts.collections?.commits || 'commits'
+    };
+
+    // Default to OpenRouter model if OpenRouter key available, otherwise OpenAI
+    const defaultModel = this.openrouterApiKey
+      ? 'openai/text-embedding-3-small'
+      : 'text-embedding-3-small';
+
+    this.embeddingModel = opts.embeddingModel || process.env.CV_EMBEDDING_MODEL || defaultModel;
+
+    // Determine provider from model name or available keys
     const modelConfig = EMBEDDING_MODELS[this.embeddingModel];
-    this.embeddingProvider = modelConfig?.provider || 'openai';
+    if (modelConfig) {
+      this.embeddingProvider = modelConfig.provider;
+    } else if (this.openrouterApiKey) {
+      this.embeddingProvider = 'openrouter';
+    } else if (this.openaiApiKey) {
+      this.embeddingProvider = 'openai';
+    } else {
+      this.embeddingProvider = 'ollama';
+    }
+
     this.vectorSize = modelConfig?.dimension || 1536;
   }
 
   /**
    * Connect to Qdrant and initialize embedding provider
+   * Provider priority: OpenRouter > OpenAI > Ollama
    */
   async connect(): Promise<void> {
     try {
@@ -98,25 +158,43 @@ export class VectorManager {
       // Test connection
       await this.client.getCollections();
 
-      // Initialize embedding provider
+      // Initialize embedding provider based on what's available
+      // Priority: OpenRouter > OpenAI > Ollama
       if (this.embeddingProvider === 'ollama') {
-        // Check if Ollama is available and has the model
+        // Explicit Ollama request
         await this.initOllama();
-      } else if (this.embeddingProvider === 'openrouter') {
-        // Initialize OpenRouter (OpenAI-compatible)
-        if (!this.openrouterApiKey) {
-          throw new VectorError('OpenRouter API key not provided. Set OPENROUTER_API_KEY environment variable.');
-        }
+      } else if (this.openrouterApiKey) {
+        // OpenRouter available - use it (preferred)
         this.openrouter = new OpenAI({
           apiKey: this.openrouterApiKey,
           baseURL: 'https://openrouter.ai/api/v1'
         });
-      } else {
-        // Initialize OpenAI
-        if (!this.openaiApiKey) {
-          throw new VectorError('OpenAI API key not provided');
+        this.embeddingProvider = 'openrouter';
+        // Use OpenRouter model naming
+        if (!this.embeddingModel.includes('/')) {
+          this.embeddingModel = `openai/${this.embeddingModel}`;
         }
+      } else if (this.openaiApiKey) {
+        // Fall back to OpenAI
         this.openai = new OpenAI({ apiKey: this.openaiApiKey });
+        this.embeddingProvider = 'openai';
+        // Use OpenAI model naming (strip openai/ prefix if present)
+        if (this.embeddingModel.startsWith('openai/')) {
+          this.embeddingModel = this.embeddingModel.replace('openai/', '');
+        }
+      } else {
+        // No cloud API keys - try Ollama
+        const ollamaAvailable = await this.isOllamaAvailable();
+        if (ollamaAvailable) {
+          await this.initOllama();
+        } else {
+          throw new VectorError(
+            'No embedding API key provided.\n' +
+            'Run: cv auth setup openrouter (recommended)\n' +
+            'Or:  cv auth setup openai\n' +
+            'Or:  Start Ollama for local embeddings'
+          );
+        }
       }
 
       this.connected = true;
@@ -367,9 +445,9 @@ export class VectorManager {
     }
 
     // Try models in fallback order
-    const modelsToTry = this.embeddingModel === MODEL_FALLBACK_ORDER[0]
-      ? MODEL_FALLBACK_ORDER
-      : [this.embeddingModel, ...MODEL_FALLBACK_ORDER.filter(m => m !== this.embeddingModel)];
+    const modelsToTry = this.embeddingModel === OPENAI_MODEL_ORDER[0]
+      ? OPENAI_MODEL_ORDER
+      : [this.embeddingModel, ...OPENAI_MODEL_ORDER.filter(m => m !== this.embeddingModel)];
 
     let lastError: Error | null = null;
     let allOpenAIFailed = true;
@@ -760,11 +838,19 @@ export class VectorManager {
 
 /**
  * Create a VectorManager instance
+ * @param options - VectorManagerOptions or legacy positional args
  */
+export function createVectorManager(options: VectorManagerOptions): VectorManager;
+/** @deprecated Use options object: createVectorManager({ url, openrouterApiKey, openaiApiKey, collections }) */
+export function createVectorManager(url: string, openaiApiKey?: string, collections?: Partial<VectorCollections>): VectorManager;
 export function createVectorManager(
-  url: string,
+  urlOrOptions: string | VectorManagerOptions,
   openaiApiKey?: string,
   collections?: Partial<VectorCollections>
 ): VectorManager {
-  return new VectorManager(url, openaiApiKey, collections);
+  if (typeof urlOrOptions === 'string') {
+    // Legacy signature - still works but OpenRouter will be preferred if OPENROUTER_API_KEY env var is set
+    return new VectorManager(urlOrOptions, openaiApiKey, collections);
+  }
+  return new VectorManager(urlOrOptions);
 }

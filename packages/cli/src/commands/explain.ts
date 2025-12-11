@@ -15,6 +15,7 @@ import {
 } from '@cv-git/core';
 import { findRepoRoot } from '@cv-git/shared';
 import { addGlobalOptions } from '../utils/output.js';
+import { getAnthropicApiKey, getOpenAIApiKey } from '../utils/credentials.js';
 
 export function explainCommand(): Command {
   const cmd = new Command('explain');
@@ -41,18 +42,18 @@ export function explainCommand(): Command {
         // Load configuration
         const config = await configManager.load(repoRoot);
 
-        // Check for API keys
-        const anthropicApiKey = config.ai.apiKey || process.env.ANTHROPIC_API_KEY;
+        // Check for API keys (CredentialManager -> config -> env var)
+        const anthropicApiKey = await getAnthropicApiKey(config.ai.apiKey);
         if (!anthropicApiKey) {
           spinner.fail(chalk.red('Anthropic API key not found'));
           console.error();
           console.error(chalk.yellow('Set your Anthropic API key:'));
+          console.error(chalk.gray('  cv auth setup anthropic'));
           console.error(chalk.gray('  export ANTHROPIC_API_KEY=sk-ant-...'));
-          console.error(chalk.gray('Or add it to .cv/config.json'));
           process.exit(1);
         }
 
-        const openaiApiKey = config.ai.apiKey || process.env.OPENAI_API_KEY;
+        const openaiApiKey = await getOpenAIApiKey(config.ai.apiKey);
 
         // Initialize components
         spinner.text = 'Connecting to services...';

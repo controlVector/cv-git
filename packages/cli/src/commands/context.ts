@@ -19,6 +19,7 @@ import {
 } from '@cv-git/core';
 import { findRepoRoot, VectorSearchResult, CodeChunkPayload, SymbolNode } from '@cv-git/shared';
 import { addGlobalOptions, createOutput } from '../utils/output.js';
+import { getEmbeddingApiKey } from '../utils/credentials.js';
 
 interface ContextOptions {
   limit: string;
@@ -66,11 +67,11 @@ export function contextCommand(): Command {
 
       const config = await configManager.load(repoRoot);
 
-      // Check for API key (needed for embeddings)
-      const openaiApiKey = config.ai.apiKey || process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY;
+      // Check for API key (needed for embeddings) - CredentialManager -> config -> env var
+      const openaiApiKey = await getEmbeddingApiKey({ openaiKey: config.ai.apiKey });
       if (!openaiApiKey) {
         if (spinner) spinner.fail(chalk.red('No embedding API key found'));
-        else console.error('Error: Set OPENAI_API_KEY or OPENROUTER_API_KEY');
+        else console.error('Error: Run `cv auth setup openai` or set OPENAI_API_KEY');
         process.exit(1);
       }
 

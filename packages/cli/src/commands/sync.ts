@@ -134,8 +134,9 @@ export function syncCommand(): Command {
         }
 
         // Configure embedding provider for VectorManager
-        if (openrouterApiKey && !openaiApiKey) {
-          // Use OpenRouter for embeddings when no OpenAI key is available
+        // OpenRouter is preferred due to better model availability
+        if (openrouterApiKey) {
+          // Use OpenRouter for embeddings (preferred)
           if (!process.env.OPENROUTER_API_KEY) {
             process.env.OPENROUTER_API_KEY = openrouterApiKey;
           }
@@ -348,9 +349,9 @@ async function syncWorkspace(
   // Set up vector if available
   let vector: any = null;
   if (qdrantUrl && (openaiApiKey || openrouterApiKey)) {
-    // Configure embedding provider
-    if (openrouterApiKey && !openaiApiKey) {
-      // Use OpenRouter for embeddings when no OpenAI key is available
+    // Configure embedding provider - OpenRouter preferred
+    if (openrouterApiKey) {
+      // Use OpenRouter for embeddings (preferred)
       if (!process.env.OPENROUTER_API_KEY) {
         process.env.OPENROUTER_API_KEY = openrouterApiKey;
       }

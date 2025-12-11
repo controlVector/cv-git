@@ -12,6 +12,7 @@ import {
 import { findRepoRoot } from '@cv-git/shared';
 import { VectorSearchResult, CodeChunkPayload } from '@cv-git/shared';
 import { addGlobalOptions, createOutput } from '../utils/output.js';
+import { getEmbeddingCredentials } from '../utils/credentials.js';
 
 export function findCommand(): Command {
   const cmd = new Command('find');
@@ -42,24 +43,26 @@ export function findCommand(): Command {
         // Load configuration
         const config = await configManager.load(repoRoot);
 
-        // Check for OpenAI API key
-        const openaiApiKey = config.ai.apiKey || process.env.OPENAI_API_KEY;
-        if (!openaiApiKey) {
-          spinner.fail(chalk.red('OpenAI API key not found'));
-          console.error();
-          console.error(chalk.yellow('Set your OpenAI API key:'));
-          console.error(chalk.gray('  export OPENAI_API_KEY=sk-...'));
-          console.error(chalk.gray('Or add it to .cv/config.json'));
-          process.exit(1);
+        // Get embedding credentials (OpenRouter > OpenAI > Ollama)
+        const embeddingCreds = await getEmbeddingCredentials({
+          openRouterKey: config.embedding?.apiKey,
+          openaiKey: config.ai?.apiKey
+        });
+
+        if (embeddingCreds.provider === 'ollama') {
+          spinner.text = 'Using Ollama for embeddings (no API key found)...';
+        } else {
+          spinner.text = `Using ${embeddingCreds.provider} for embeddings...`;
         }
 
-        // Initialize vector manager
+        // Initialize vector manager with proper credentials
         spinner.text = 'Connecting to Qdrant...';
-        const vector = createVectorManager(
-          config.vector.url,
-          openaiApiKey,
-          config.vector.collections
-        );
+        const vector = createVectorManager({
+          url: config.vector.url,
+          openrouterApiKey: embeddingCreds.openrouterApiKey,
+          openaiApiKey: embeddingCreds.openaiApiKey,
+          collections: config.vector.collections
+        });
 
         await vector.connect();
         spinner.succeed('Connected to vector database');

@@ -29,9 +29,9 @@ const DEFAULT_CONFIG: CVConfig = {
     temperature: 0.2
   },
   embedding: {
-    provider: 'openai',
-    model: 'text-embedding-3-small',
-    apiKey: process.env.CV_OPENAI_KEY || process.env.OPENAI_API_KEY,
+    provider: 'openrouter',
+    model: 'openai/text-embedding-3-small',
+    apiKey: process.env.CV_OPENROUTER_KEY || process.env.OPENROUTER_API_KEY,
     dimensions: 1536
   },
   graph: {

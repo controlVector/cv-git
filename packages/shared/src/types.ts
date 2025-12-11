@@ -381,7 +381,7 @@ export interface CVConfig {
     temperature: number;
   };
   embedding: {
-    provider: 'openai' | 'ollama';
+    provider: 'openrouter' | 'openai' | 'ollama';
     model: string;
     apiKey?: string;
     dimensions: number;

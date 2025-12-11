@@ -30,6 +30,7 @@ import { hooksCommand } from './commands/hooks.js';
 import { designCommand } from './commands/design.js';
 import { codeCommand } from './commands/code.js';
 import { preferencesCommand } from './commands/preferences.js';
+import { createPRDCommand } from './commands/prd.js';
 
 const program = new Command();
 
@@ -62,6 +63,7 @@ program.addCommand(explainCommand());
 program.addCommand(reviewCommand());
 program.addCommand(graphCommand());
 program.addCommand(gitCommand());
+program.addCommand(createPRDCommand());     // PRD management (cv prd)
 
 // Error handler
 program.exitOverride((err) => {
