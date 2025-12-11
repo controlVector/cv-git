@@ -23,7 +23,10 @@ import {
   isWorkspace,
   CVWorkspace,
   WorkspaceRepo,
+  getCVDir,
 } from '@cv-git/shared';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import { CredentialManager } from '@cv-git/credentials';
 import { addGlobalOptions, createOutput } from '../utils/output.js';
 import { checkCredentials, displayCompactStatus } from '../utils/config-check.js';
@@ -272,6 +275,20 @@ export function syncCommand(): Command {
           } catch (exportError: any) {
             spinner.warn(`Export to .cv/ failed: ${exportError.message}`);
             output.debug(exportError.stack);
+          }
+
+          // Auto-import cv-prd exports if found
+          spinner = output.spinner('Checking for PRD exports...').start();
+          try {
+            const importedCount = await autoImportPRDExports(repoRoot, graph, vector, output);
+            if (importedCount > 0) {
+              spinner.succeed(`Auto-imported ${importedCount} PRD export(s)`);
+            } else {
+              spinner.stop();
+            }
+          } catch (importError: any) {
+            spinner.warn(`PRD auto-import failed: ${importError.message}`);
+            output.debug(importError.stack);
           }
         }
 
@@ -561,4 +578,196 @@ function displaySyncResults(syncState: any): void {
   console.log(chalk.gray('  • Search code:    '), chalk.cyan('cv find "authentication"'));
   console.log(chalk.gray('  • Get help:       '), chalk.cyan('cv explain AuthService'));
   console.log();
+}
+
+/**
+ * Find cv-prd exports in the repository root
+ * Looks for directories ending in .cv/ or .cv.zip files with cv-prd-export format
+ */
+async function findPRDExports(repoRoot: string): Promise<{ path: string; manifest: any }[]> {
+  const exports: { path: string; manifest: any }[] = [];
+
+  try {
+    const entries = await fs.readdir(repoRoot, { withFileTypes: true });
+
+    for (const entry of entries) {
+      // Skip .cv directory (that's cv-git's storage)
+      if (entry.name === '.cv') continue;
+
+      const fullPath = path.join(repoRoot, entry.name);
+
+      // Check for .cv directories (export-*.cv/)
+      if (entry.isDirectory() && entry.name.endsWith('.cv')) {
+        const manifestPath = path.join(fullPath, 'manifest.json');
+        try {
+          const content = await fs.readFile(manifestPath, 'utf-8');
+          const manifest = JSON.parse(content);
+          if (manifest.format === 'cv-prd-export') {
+            exports.push({ path: fullPath, manifest });
+          }
+        } catch {
+          // Not a valid export directory
+        }
+      }
+
+      // Check for .cv.zip files
+      if (entry.isFile() && entry.name.endsWith('.cv.zip')) {
+        // We'll just note the zip file exists - extraction happens during import
+        exports.push({ path: fullPath, manifest: { isZip: true } });
+      }
+    }
+  } catch {
+    // Error reading directory
+  }
+
+  return exports;
+}
+
+/**
+ * Auto-import PRD exports found in the repository
+ */
+async function autoImportPRDExports(
+  repoRoot: string,
+  graph: any,
+  vector: any,
+  output: any
+): Promise<number> {
+  const exports = await findPRDExports(repoRoot);
+  if (exports.length === 0) return 0;
+
+  let imported = 0;
+  const cvDir = getCVDir(repoRoot);
+  const importsDir = path.join(cvDir, 'imports');
+  await fs.mkdir(importsDir, { recursive: true });
+
+  // Check what's already been imported
+  let importedProjects: Set<string> = new Set();
+  try {
+    const importFiles = await fs.readdir(importsDir);
+    for (const file of importFiles) {
+      if (file.endsWith('.json')) {
+        const content = await fs.readFile(path.join(importsDir, file), 'utf-8');
+        const record = JSON.parse(content);
+        if (record.source?.project) {
+          importedProjects.add(record.source.project);
+        }
+      }
+    }
+  } catch {
+    // imports dir doesn't exist yet
+  }
+
+  for (const exp of exports) {
+    // Skip zip files in auto-import (user should run cv import manually)
+    if (exp.manifest.isZip) {
+      console.log(chalk.yellow(`  Found cv-prd export: ${path.basename(exp.path)}`));
+      console.log(chalk.gray(`    Run: cv import "${exp.path}"`));
+      continue;
+    }
+
+    // Check if already imported
+    const projectName = exp.manifest.source?.project;
+    if (projectName && importedProjects.has(projectName)) {
+      output.debug(`Skipping already imported: ${projectName}`);
+      continue;
+    }
+
+    console.log(chalk.cyan(`  Auto-importing: ${path.basename(exp.path)}`));
+
+    try {
+      // Import PRD nodes
+      const prdsPath = path.join(exp.path, 'prds', 'nodes.jsonl');
+      const prdNodes = await readJsonl(prdsPath);
+
+      for (const prd of prdNodes) {
+        await graph.query(`
+          MERGE (p:PRD {id: $id})
+          SET p.name = $name,
+              p.description = $description,
+              p.priority = $priority,
+              p.status = $status,
+              p.imported_at = timestamp()
+        `, {
+          id: (prd.id || '').replace('prd:', ''),
+          name: prd.name || '',
+          description: prd.description || '',
+          priority: prd.priority || 'medium',
+          status: prd.status || 'draft'
+        });
+      }
+
+      // Import chunks
+      const chunksPath = path.join(exp.path, 'prds', 'chunks.jsonl');
+      const chunkNodes = await readJsonl(chunksPath);
+
+      for (const chunk of chunkNodes) {
+        await graph.query(`
+          MERGE (c:Chunk {id: $id})
+          SET c.prd_id = $prd_id,
+              c.chunk_type = $chunk_type,
+              c.text = $text,
+              c.priority = $priority,
+              c.imported_at = timestamp()
+          WITH c
+          MATCH (p:PRD {id: $prd_id})
+          MERGE (p)-[:HAS_CHUNK]->(c)
+        `, {
+          id: (chunk.id || '').replace('chunk:', ''),
+          prd_id: chunk.prd_id || '',
+          chunk_type: chunk.chunk_type || '',
+          text: chunk.text || '',
+          priority: chunk.priority || 'medium'
+        });
+      }
+
+      // Import implementation links
+      const linksPath = path.join(exp.path, 'prds', 'links.jsonl');
+      const linkEdges = await readJsonl(linksPath);
+
+      for (const link of linkEdges) {
+        await graph.query(`
+          MATCH (c:Chunk {id: $chunk_id})
+          MERGE (s:Symbol {qualified_name: $symbol_id})
+          MERGE (s)-[r:IMPLEMENTS]->(c)
+        `, {
+          chunk_id: (link.target || '').replace('chunk:', ''),
+          symbol_id: link.source || ''
+        });
+      }
+
+      // Record the import
+      const importRecord = {
+        source: exp.manifest.source,
+        imported_at: new Date().toISOString(),
+        stats: exp.manifest.stats,
+        auto_imported: true
+      };
+
+      await fs.writeFile(
+        path.join(importsDir, `${projectName}-${Date.now()}.json`),
+        JSON.stringify(importRecord, null, 2)
+      );
+
+      console.log(chalk.green(`    ✓ Imported ${prdNodes.length} PRDs, ${chunkNodes.length} chunks`));
+      imported++;
+
+    } catch (error: any) {
+      console.log(chalk.red(`    ✗ Failed: ${error.message}`));
+    }
+  }
+
+  return imported;
+}
+
+/**
+ * Read JSONL file
+ */
+async function readJsonl(filepath: string): Promise<any[]> {
+  try {
+    const content = await fs.readFile(filepath, 'utf-8');
+    const lines = content.trim().split('\n').filter(line => line.length > 0);
+    return lines.map(line => JSON.parse(line));
+  } catch {
+    return [];
+  }
 }

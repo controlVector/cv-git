@@ -1,0 +1,71 @@
+name: cv-git
+version: '0.3.5'
+summary: AI-Native Version Control with Knowledge Graph
+description: |
+  CV-Git is an intelligent wrapper around Git that adds knowledge graph,
+  semantic search, and AI-powered code understanding to your development workflow.
+
+  Features:
+  - Knowledge graph of your codebase (functions, classes, relationships)
+  - Semantic code search using vector embeddings
+  - AI-powered code explanations and assistance
+  - PRD (Product Requirements Document) integration
+
+  After installation, run `cv doctor` to set up the required services.
+
+base: core22
+confinement: classic
+grade: stable
+license: MIT
+
+architectures:
+  - build-on: amd64
+
+apps:
+  cv:
+    command: bin/cv
+    environment:
+      NODE_ENV: production
+
+parts:
+  cv-git:
+    plugin: npm
+    npm-include-node: true
+    npm-node-version: "20.10.0"
+    source: .
+    build-environment:
+      - npm_config_unsafe_perm: "true"
+    build-packages:
+      - build-essential
+      - python3
+      - libsecret-1-dev
+      - pkg-config
+    stage-packages:
+      - libsecret-1-0
+      - git
+    override-build: |
+      # Install pnpm
+      npm install -g pnpm
+
+      # Install dependencies and build
+      pnpm install --frozen-lockfile
+      pnpm build
+
+      # Create bin directory
+      mkdir -p $SNAPCRAFT_PART_INSTALL/bin
+      mkdir -p $SNAPCRAFT_PART_INSTALL/lib/cv-git
+
+      # Copy the bundled CLI
+      cp packages/cli/dist/bundle.cjs $SNAPCRAFT_PART_INSTALL/lib/cv-git/cv.cjs
+
+      # Copy native modules
+      cp -r node_modules/keytar $SNAPCRAFT_PART_INSTALL/lib/cv-git/ 2>/dev/null || true
+      cp -r node_modules/tree-sitter $SNAPCRAFT_PART_INSTALL/lib/cv-git/ 2>/dev/null || true
+      cp -r node_modules/tree-sitter-* $SNAPCRAFT_PART_INSTALL/lib/cv-git/ 2>/dev/null || true
+
+      # Create wrapper script
+      cat > $SNAPCRAFT_PART_INSTALL/bin/cv << 'EOF'
+#!/bin/bash
+exec node "$SNAP/lib/cv-git/cv.cjs" "$@"
+EOF
+      chmod +x $SNAPCRAFT_PART_INSTALL/bin/cv

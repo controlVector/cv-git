@@ -1,0 +1,27 @@
+Source: cv-git
+Section: devel
+Priority: optional
+Maintainer: CV-Git Contributors <cv-git@controlvector.dev>
+Build-Depends: debhelper-compat (= 13), nodejs (>= 18.0.0), npm
+Standards-Version: 4.6.2
+Homepage: https://github.com/controlVector/cv-git
+Vcs-Browser: https://github.com/controlVector/cv-git
+Vcs-Git: https://github.com/controlVector/cv-git.git
+Rules-Requires-Root: no
+
+Package: cv-git
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, nodejs (>= 18.0.0), git
+Recommends: docker.io | docker-ce
+Description: AI-Native Version Control with Knowledge Graph
+ CV-Git is an intelligent wrapper around Git that adds knowledge graph,
+ semantic search, and AI-powered code understanding to your development
+ workflow.
+ .
+ Features include:
+  - Knowledge graph of your codebase (functions, classes, relationships)
+  - Semantic code search using vector embeddings
+  - AI-powered code explanations and assistance
+  - PRD (Product Requirements Document) integration
+ .
+ After installation, run 'cv doctor' to set up the required services.

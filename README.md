@@ -66,6 +66,78 @@ CV-Git is an intelligent wrapper around Git that adds a knowledge graph, semanti
 
 ---
 
+## 📦 Installation
+
+### Quick Install (Recommended)
+
+```bash
+# One-line install (installs Node.js and Docker if needed)
+curl -fsSL https://raw.githubusercontent.com/controlVector/cv-git/main/install.sh | bash
+```
+
+### Other Installation Methods
+
+<details>
+<summary><b>Debian/Ubuntu (.deb package)</b></summary>
+
+```bash
+# Download latest release
+wget https://github.com/controlVector/cv-git/releases/latest/download/cv-git_amd64.deb
+
+# Install
+sudo dpkg -i cv-git_amd64.deb
+sudo apt-get install -f  # Install dependencies
+```
+</details>
+
+<details>
+<summary><b>Snap Package</b></summary>
+
+```bash
+sudo snap install cv-git --classic
+```
+</details>
+
+<details>
+<summary><b>npm (Global Install)</b></summary>
+
+```bash
+npm install -g @cv-git/cli
+```
+</details>
+
+<details>
+<summary><b>From Source</b></summary>
+
+```bash
+git clone https://github.com/controlVector/cv-git.git
+cd cv-git
+pnpm install
+pnpm build
+pnpm link --global
+```
+</details>
+
+### After Installation
+
+```bash
+# Check system status
+cv doctor
+
+# Initialize in your project
+cd your-project
+cv init
+
+# Build the knowledge graph
+cv sync
+
+# Start exploring!
+cv find "authentication"
+cv explain src/auth/login.ts
+```
+
+---
+
   ## System Dependencies
 
   ### Linux/WSL Users

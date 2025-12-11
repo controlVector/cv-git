@@ -1,0 +1,20 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	npm install -g pnpm
+	pnpm install --frozen-lockfile
+	pnpm build
+
+override_dh_auto_install:
+	mkdir -p debian/cv-git/usr/lib/cv-git
+	mkdir -p debian/cv-git/usr/bin
+	cp packages/cli/dist/bundle.cjs debian/cv-git/usr/lib/cv-git/cv.cjs
+	echo '#!/bin/bash' > debian/cv-git/usr/bin/cv
+	echo 'exec node /usr/lib/cv-git/cv.cjs "$$@"' >> debian/cv-git/usr/bin/cv
+	chmod +x debian/cv-git/usr/bin/cv
+
+override_dh_auto_test:
+	# Skip tests during package build

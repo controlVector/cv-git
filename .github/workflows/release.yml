@@ -1,0 +1,117 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Create release tarball
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          mkdir -p dist/release
+          tar -czf dist/release/cv-git-${VERSION}.tar.gz \
+            --transform "s|^|cv-git-${VERSION}/|" \
+            packages/cli/dist/bundle.cjs \
+            install.sh \
+            README.md \
+            LICENSE
+
+      - name: Build Debian package
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential devscripts debhelper
+          dpkg-buildpackage -us -uc -b
+          mv ../cv-git_*.deb dist/release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/release/*
+            install.sh
+          body: |
+            ## Installation
+
+            **Quick Install (recommended):**
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/controlVector/cv-git/main/install.sh | bash
+            ```
+
+            **Debian/Ubuntu:**
+            ```bash
+            # Download and install .deb
+            wget https://github.com/controlVector/cv-git/releases/download/${{ github.ref_name }}/cv-git_${{ github.ref_name }}_amd64.deb
+            sudo dpkg -i cv-git_*.deb
+            sudo apt-get install -f
+            ```
+
+            **Manual:**
+            ```bash
+            # Download tarball and run install script
+            tar -xzf cv-git-*.tar.gz
+            cd cv-git-*
+            ./install.sh
+            ```
+
+            ## After Installation
+            ```bash
+            cv doctor    # Check system status
+            cv init      # Initialize a repository
+            cv sync      # Build knowledge graph
+            ```
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-npm:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install and build
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Publish to npm
+        run: |
+          cd packages/cli
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        continue-on-error: true  # Don't fail if npm publish fails
