@@ -9,9 +9,36 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import { spawn, execSync } from 'child_process';
-import { findRepoRoot } from '@cv-git/shared';
+import * as fs from 'fs';
+import * as path from 'path';
 import { addGlobalOptions } from '../utils/output.js';
 import { CredentialManager, CredentialType, GitPlatform } from '@cv-git/credentials';
+
+/**
+ * Find git repository root (works with any git repo, not just CV-initialized)
+ */
+function findGitRoot(startDir: string = process.cwd()): string | null {
+  let currentDir = path.resolve(startDir);
+  const root = path.parse(currentDir).root;
+
+  while (currentDir !== root) {
+    const gitDir = path.join(currentDir, '.git');
+    if (fs.existsSync(gitDir)) {
+      return currentDir;
+    }
+    currentDir = path.dirname(currentDir);
+  }
+
+  return null;
+}
+
+/**
+ * Check if CV is initialized in a git repo
+ */
+function isCVInitialized(repoRoot: string): boolean {
+  const cvConfigPath = path.join(repoRoot, '.cv', 'config.json');
+  return fs.existsSync(cvConfigPath);
+}
 
 interface CommitOptions {
   message?: string;
@@ -35,10 +62,18 @@ export function commitCommand(): Command {
 
   cmd.action(async (options: CommitOptions, command: Command) => {
     try {
-      const repoRoot = await findRepoRoot();
+      const repoRoot = findGitRoot();
       if (!repoRoot) {
         console.error(chalk.red('Not in a git repository'));
         process.exit(1);
+      }
+
+      // Check if CV is initialized - warn if not but continue
+      const cvInitialized = isCVInitialized(repoRoot);
+      if (!cvInitialized) {
+        console.log(chalk.yellow('⚠ CV not initialized in this repo'));
+        console.log(chalk.gray('  Run `cv init` for knowledge graph sync, semantic search, and more'));
+        console.log();
       }
 
       // Get identity from stored credentials
