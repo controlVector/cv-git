@@ -8,7 +8,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/controlvector/cv-git.git"
+    "url": "git+https://github.com/controlVector/cv-git.git"
   },
   "keywords": [
     "git",
@@ -21,9 +21,9 @@
   "author": "Control Vector",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/controlvector/cv-git/issues"
+    "url": "https://github.com/controlVector/cv-git/issues"
   },
-  "homepage": "https://github.com/controlvector/cv-git#readme",
+  "homepage": "https://github.com/controlVector/cv-git#readme",
   "publishConfig": {
     "access": "public"
   },
