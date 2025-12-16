@@ -45,6 +45,7 @@ interface PushOptions {
   skipSync?: boolean;
   syncOnly?: boolean;
   force?: boolean;
+  tags?: boolean;
   verbose?: boolean;
   quiet?: boolean;
 }
@@ -59,6 +60,7 @@ export function pushCommand(): Command {
     .option('--skip-sync', 'Skip knowledge graph sync after push')
     .option('--sync-only', 'Only sync, do not push')
     .option('-f, --force', 'Force push (use with caution)')
+    .option('--tags', 'Push all tags')
     .allowUnknownOption(true); // Allow git passthrough options
 
   addGlobalOptions(cmd);
@@ -243,6 +245,11 @@ async function gitPush(
     // Add force flag
     if (options.force) {
       args.push('--force');
+    }
+
+    // Add tags flag
+    if (options.tags) {
+      args.push('--tags');
     }
 
     // Add remote and branch if specified
