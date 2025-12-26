@@ -52,6 +52,15 @@ import { handleSync } from './tools/sync.js';
 import { handlePRCreate, handlePRList, handlePRReview, handleReleaseCreate } from './tools/platform.js';
 import { handleConfigGet, handleStatus, handleDoctor } from './tools/system.js';
 import { handleContext, ContextArgs } from './tools/context.js';
+import {
+  handlePRDContext,
+  handleRequirementTrace,
+  handleTestCoverage,
+  handleDocCoverage,
+  PRDContextArgs,
+  RequirementTraceArgs,
+  CoverageArgs,
+} from './tools/prd.js';
 
 /**
  * Tool definitions
@@ -477,6 +486,83 @@ const tools: Tool[] = [
       properties: {},
     },
   },
+
+  // PRD Integration Tools
+  {
+    name: 'cv_prd_context',
+    description: 'Get unified PRD context for AI including requirements, test cases, documentation, and designs. Returns comprehensive context for understanding what to build and how it should be tested.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Natural language query to find relevant PRD artifacts',
+        },
+        prdId: {
+          type: 'string',
+          description: 'Optional PRD ID to filter results',
+        },
+        includeTypes: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Artifact types to include (requirement, test_case, documentation, etc.)',
+        },
+        depth: {
+          type: 'number',
+          description: 'Graph traversal depth for related artifacts',
+          default: 3,
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'cv_requirement_trace',
+    description: 'Get full traceability for a requirement: dependencies, tests, documentation, designs, and code implementations.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chunkId: {
+          type: 'string',
+          description: 'Requirement chunk ID to trace',
+        },
+        depth: {
+          type: 'number',
+          description: 'Graph traversal depth',
+          default: 3,
+        },
+      },
+      required: ['chunkId'],
+    },
+  },
+  {
+    name: 'cv_test_coverage',
+    description: 'Get test coverage metrics for a PRD. Shows how many requirements have test cases.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prdId: {
+          type: 'string',
+          description: 'PRD ID to get coverage for',
+        },
+      },
+      required: ['prdId'],
+    },
+  },
+  {
+    name: 'cv_doc_coverage',
+    description: 'Get documentation coverage metrics for a PRD. Shows how many requirements are documented.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prdId: {
+          type: 'string',
+          description: 'PRD ID to get coverage for',
+        },
+      },
+      required: ['prdId'],
+    },
+  },
 ];
 
 /**
@@ -607,6 +693,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'cv_doctor':
         result = await handleDoctor();
+        break;
+
+      // PRD Integration Tools
+      case 'cv_prd_context':
+        validateArgs(args, ['query']);
+        result = await handlePRDContext(args as unknown as PRDContextArgs);
+        break;
+
+      case 'cv_requirement_trace':
+        validateArgs(args, ['chunkId']);
+        result = await handleRequirementTrace(args as unknown as RequirementTraceArgs);
+        break;
+
+      case 'cv_test_coverage':
+        validateArgs(args, ['prdId']);
+        result = await handleTestCoverage(args as unknown as CoverageArgs);
+        break;
+
+      case 'cv_doc_coverage':
+        validateArgs(args, ['prdId']);
+        result = await handleDocCoverage(args as unknown as CoverageArgs);
         break;
 
       default:

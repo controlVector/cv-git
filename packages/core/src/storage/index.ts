@@ -12,3 +12,5 @@ export * from './vector-storage.js';
 export * from './repo-id.js';
 export * from './exporter.js';
 export * from './loader.js';
+export * from './authored.js';
+export * from './ingest.js';

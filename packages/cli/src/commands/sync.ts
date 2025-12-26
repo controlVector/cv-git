@@ -37,8 +37,11 @@ export function syncCommand(): Command {
 
   cmd
     .description('Synchronize the knowledge graph with the repository')
-    .option('--incremental', 'Only sync changed files')
-    .option('--force', 'Force full rebuild');
+    .option('--delta', 'Smart delta sync - only process changed files (default)')
+    .option('--incremental', 'Only sync changed files (legacy)')
+    .option('--full', 'Force full sync of all files')
+    .option('--force', 'Force full rebuild (clears graph first)')
+    .option('--reset-delta', 'Reset delta tracking (forces full sync next time)');
 
   addGlobalOptions(cmd);
 
@@ -175,12 +178,23 @@ export function syncCommand(): Command {
           if (qdrantUrl) {
             try {
               spinner = output.spinner('Connecting to Qdrant...').start();
-              vector = createVectorManager(
-                qdrantUrl,
+              vector = createVectorManager({
+                url: qdrantUrl,
+                openrouterApiKey,
                 openaiApiKey,
-                config.vector.collections
-              );
+                collections: config.vector.collections,
+                cacheDir: path.join(repoRoot, '.cv', 'embeddings')  // Content-addressed cache
+              });
               await vector.connect();
+
+              // Log cache status
+              if (vector.isCacheEnabled()) {
+                const cacheStats = await vector.getCacheStats();
+                if (cacheStats && cacheStats.totalEntries > 0) {
+                  output.debug(`Embedding cache: ${cacheStats.totalEntries} entries, ${cacheStats.hitRate.toFixed(1)}% hit rate`);
+                }
+              }
+
               spinner.succeed('Connected to Qdrant');
             } catch (error: any) {
               spinner.warn(`Could not connect to Qdrant: ${error.message}`);
@@ -196,24 +210,37 @@ export function syncCommand(): Command {
         // Sync engine
         const syncEngine = createSyncEngine(repoRoot, git, parser, graph, vector);
 
-        // Determine sync type
-        const forceFullSync = options.force;
-        let useIncremental = options.incremental && !forceFullSync;
+        // Handle delta reset
+        if (options.resetDelta) {
+          spinner = output.spinner('Resetting delta tracking...').start();
+          await syncEngine.resetDelta();
+          spinner.succeed('Delta tracking reset. Next sync will be a full sync.');
+          await graph.close();
+          if (vector) await vector.close();
+          return;
+        }
 
-        if (useIncremental) {
-          // Incremental sync
+        // Determine sync type
+        // Delta is default unless --full, --force, or --incremental specified
+        const forceFullSync = options.force;
+        const useFullSync = options.full || forceFullSync;
+        const useLegacyIncremental = options.incremental && !useFullSync;
+        const useDeltaSync = !useFullSync && !useLegacyIncremental;
+
+        if (useLegacyIncremental) {
+          // Legacy incremental sync (requires caller to track changed files)
           spinner = output.spinner('Getting changed files...').start();
 
           const lastState = await syncEngine.loadSyncState();
           if (!lastState || !lastState.lastCommitSynced) {
             spinner.warn('No previous sync found, performing full sync instead');
-            useIncremental = false;
           } else {
             const changedFiles = await git.getChangedFilesSince(lastState.lastCommitSynced);
 
             if (changedFiles.length === 0) {
               spinner.succeed('No changes to sync');
               await graph.close();
+              if (vector) await vector.close();
               return;
             }
 
@@ -231,65 +258,115 @@ export function syncCommand(): Command {
             );
 
             displaySyncResults(syncState);
+            await graph.close();
+            if (vector) await vector.close();
+            return;
           }
         }
 
-        if (!useIncremental) {
-          // Full sync
-          spinner = output.spinner('Starting full sync...').start();
+        if (useDeltaSync) {
+          // Smart delta sync (default) - automatically detects changes
+          spinner = output.spinner('Analyzing changes...').start();
+          spinner.stop();
 
-          // Clear graph if forcing full rebuild
-          if (forceFullSync) {
-            spinner.text = 'Clearing existing graph...';
-            await graph.clear();
-          }
-
-          spinner.stop(); // Stop spinner so sync engine can log progress
-
-          // Pass config patterns if defined, otherwise let sync engine use defaults
-          // undefined means "use defaults", empty array means "exclude nothing"
-          const syncState = await syncEngine.fullSync({
+          const syncState = await syncEngine.deltaSync({
             excludePatterns: config.sync?.excludePatterns?.length ? config.sync.excludePatterns : undefined,
             includeLanguages: config.sync?.includeLanguages?.length ? config.sync.includeLanguages : undefined
           });
 
-          console.log(); // Newline after sync logs
-          console.log(chalk.green('✔ Full sync completed'));
-
-          displaySyncResults(syncState);
-
-          // Export to .cv/ files for portability
           console.log();
-          spinner = output.spinner('Exporting to .cv/ storage...').start();
-          try {
-            const embeddingConfig = config.embedding ? {
-              provider: config.embedding.provider || 'openrouter',
-              model: config.embedding.model || 'openai/text-embedding-3-small',
-              dimensions: 1536
-            } : undefined;
 
-            const exportResult = await exportToStorage(repoRoot, graph, vector, embeddingConfig);
-            spinner.succeed(
-              `Exported to .cv/: ${exportResult.stats.files} files, ${exportResult.stats.symbols} symbols, ${exportResult.stats.vectors} vectors`
-            );
-          } catch (exportError: any) {
-            spinner.warn(`Export to .cv/ failed: ${exportError.message}`);
-            output.debug(exportError.stack);
+          if (syncState.delta.added.length === 0 &&
+              syncState.delta.modified.length === 0 &&
+              syncState.delta.deleted.length === 0) {
+            console.log(chalk.green('✔ No changes detected'));
+          } else {
+            console.log(chalk.green('✔ Delta sync completed'));
           }
 
-          // Auto-import cv-prd exports if found
-          spinner = output.spinner('Checking for PRD exports...').start();
-          try {
-            const importedCount = await autoImportPRDExports(repoRoot, graph, vector, output);
-            if (importedCount > 0) {
-              spinner.succeed(`Auto-imported ${importedCount} PRD export(s)`);
-            } else {
-              spinner.stop();
+          displayDeltaSyncResults(syncState);
+
+          // Export to .cv/ if anything changed
+          if (syncState.delta.added.length > 0 ||
+              syncState.delta.modified.length > 0 ||
+              syncState.delta.deleted.length > 0) {
+            spinner = output.spinner('Exporting to .cv/ storage...').start();
+            try {
+              const embeddingConfig = config.embedding ? {
+                provider: config.embedding.provider || 'openrouter',
+                model: config.embedding.model || 'openai/text-embedding-3-small',
+                dimensions: 1536
+              } : undefined;
+
+              const exportResult = await exportToStorage(repoRoot, graph, vector, embeddingConfig);
+              spinner.succeed(
+                `Exported to .cv/: ${exportResult.stats.files} files, ${exportResult.stats.symbols} symbols`
+              );
+            } catch (exportError: any) {
+              spinner.warn(`Export to .cv/ failed: ${exportError.message}`);
+              output.debug(exportError.stack);
             }
-          } catch (importError: any) {
-            spinner.warn(`PRD auto-import failed: ${importError.message}`);
-            output.debug(importError.stack);
           }
+
+          await graph.close();
+          if (vector) await vector.close();
+          return;
+        }
+
+        // Full sync (--full or --force)
+        spinner = output.spinner('Starting full sync...').start();
+
+        // Clear graph if forcing full rebuild
+        if (forceFullSync) {
+          spinner.text = 'Clearing existing graph...';
+          await graph.clear();
+        }
+
+        spinner.stop(); // Stop spinner so sync engine can log progress
+
+        // Pass config patterns if defined, otherwise let sync engine use defaults
+        // undefined means "use defaults", empty array means "exclude nothing"
+        const syncState = await syncEngine.fullSync({
+          excludePatterns: config.sync?.excludePatterns?.length ? config.sync.excludePatterns : undefined,
+          includeLanguages: config.sync?.includeLanguages?.length ? config.sync.includeLanguages : undefined
+        });
+
+        console.log(); // Newline after sync logs
+        console.log(chalk.green('✔ Full sync completed'));
+
+        displaySyncResults(syncState);
+
+        // Export to .cv/ files for portability
+        console.log();
+        spinner = output.spinner('Exporting to .cv/ storage...').start();
+        try {
+          const embeddingConfig = config.embedding ? {
+            provider: config.embedding.provider || 'openrouter',
+            model: config.embedding.model || 'openai/text-embedding-3-small',
+            dimensions: 1536
+          } : undefined;
+
+          const exportResult = await exportToStorage(repoRoot, graph, vector, embeddingConfig);
+          spinner.succeed(
+            `Exported to .cv/: ${exportResult.stats.files} files, ${exportResult.stats.symbols} symbols, ${exportResult.stats.vectors} vectors`
+          );
+        } catch (exportError: any) {
+          spinner.warn(`Export to .cv/ failed: ${exportError.message}`);
+          output.debug(exportError.stack);
+        }
+
+        // Auto-import cv-prd exports if found
+        spinner = output.spinner('Checking for PRD exports...').start();
+        try {
+          const importedCount = await autoImportPRDExports(repoRoot, graph, vector, output);
+          if (importedCount > 0) {
+            spinner.succeed(`Auto-imported ${importedCount} PRD export(s)`);
+          } else {
+            spinner.stop();
+          }
+        } catch (importError: any) {
+          spinner.warn(`PRD auto-import failed: ${importError.message}`);
+          output.debug(importError.stack);
         }
 
         // Close connections
@@ -386,22 +463,14 @@ async function syncWorkspace(
   // Set up vector if available
   let vector: any = null;
   if (qdrantUrl && (openaiApiKey || openrouterApiKey)) {
-    // Configure embedding provider - OpenRouter preferred
-    if (openrouterApiKey) {
-      // Use OpenRouter for embeddings (preferred)
-      if (!process.env.OPENROUTER_API_KEY) {
-        process.env.OPENROUTER_API_KEY = openrouterApiKey;
-      }
-      if (!process.env.CV_EMBEDDING_MODEL) {
-        process.env.CV_EMBEDDING_MODEL = 'openai/text-embedding-3-small';
-      }
-    }
     try {
-      vector = createVectorManager(
-        qdrantUrl,
+      vector = createVectorManager({
+        url: qdrantUrl,
+        openrouterApiKey,
         openaiApiKey,
-        config.vector?.collections || { codeChunks: 'code_chunks', docstrings: 'docstrings', commits: 'commits' }
-      );
+        collections: config.vector?.collections || { codeChunks: 'code_chunks', docstrings: 'docstrings', commits: 'commits' },
+        cacheDir: path.join(workspace.root, '.cv', 'embeddings')  // Content-addressed cache
+      });
       await vector.connect();
     } catch {
       output.warn('Vector DB not available, continuing without embeddings');
@@ -577,6 +646,49 @@ function displaySyncResults(syncState: any): void {
   console.log(chalk.gray('  • Query the graph:'), chalk.cyan('cv graph calls'));
   console.log(chalk.gray('  • Search code:    '), chalk.cyan('cv find "authentication"'));
   console.log(chalk.gray('  • Get help:       '), chalk.cyan('cv explain AuthService'));
+  console.log();
+}
+
+function displayDeltaSyncResults(syncState: any): void {
+  console.log();
+  console.log(chalk.bold('Delta Sync Results:'));
+  console.log(chalk.gray('─'.repeat(50)));
+
+  const delta = syncState.delta;
+  if (delta) {
+    if (delta.added.length > 0) {
+      console.log(chalk.green('  Added:      '), delta.added.length);
+    }
+    if (delta.modified.length > 0) {
+      console.log(chalk.yellow('  Modified:   '), delta.modified.length);
+    }
+    if (delta.deleted.length > 0) {
+      console.log(chalk.red('  Deleted:    '), delta.deleted.length);
+    }
+    if (delta.unchanged.length > 0) {
+      console.log(chalk.gray('  Unchanged:  '), delta.unchanged.length);
+    }
+  }
+
+  console.log(chalk.cyan('  Total files:       '), syncState.fileCount);
+  console.log(chalk.cyan('  Total symbols:     '), syncState.symbolCount);
+  console.log(chalk.cyan('  Relationships:     '), syncState.edgeCount);
+  if (syncState.vectorCount > 0) {
+    console.log(chalk.cyan('  Vectors:           '), syncState.vectorCount);
+  }
+  console.log(chalk.cyan('  Duration:          '), `${syncState.syncDuration?.toFixed(1)}s`);
+
+  if (syncState.errors && syncState.errors.length > 0) {
+    console.log();
+    console.log(chalk.yellow(`  Warnings: ${syncState.errors.length} files failed to process`));
+    if (process.env.CV_DEBUG) {
+      syncState.errors.forEach((err: string) => {
+        console.log(chalk.gray(`    - ${err}`));
+      });
+    }
+  }
+
+  console.log(chalk.gray('─'.repeat(50)));
   console.log();
 }
 

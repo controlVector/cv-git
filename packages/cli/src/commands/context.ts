@@ -18,6 +18,7 @@ import {
   createGraphManager,
 } from '@cv-git/core';
 import { findRepoRoot, VectorSearchResult, CodeChunkPayload, SymbolNode } from '@cv-git/shared';
+import { PRDClient } from '@cv-git/prd-client';
 import { addGlobalOptions, createOutput } from '../utils/output.js';
 import { getEmbeddingCredentials } from '../utils/credentials.js';
 
@@ -29,6 +30,9 @@ interface ContextOptions {
   includeGraph: boolean;
   includeFiles: boolean;
   prd: boolean;
+  includeTests: boolean;
+  includeDocs: boolean;
+  prdUrl: string;
   minScore: string;
 }
 
@@ -45,6 +49,9 @@ export function contextCommand(): Command {
     .option('--no-graph', 'Skip graph relationships')
     .option('--no-files', 'Skip full file contents')
     .option('--prd', 'Include PRD requirements context')
+    .option('--include-tests', 'Include test cases for PRD requirements (requires --prd)')
+    .option('--include-docs', 'Include documentation for PRD requirements (requires --prd)')
+    .option('--prd-url <url>', 'cv-prd API URL', 'http://localhost:8000')
     .option('--min-score <score>', 'Minimum similarity score (0-1)', '0.5');
 
   addGlobalOptions(cmd);
@@ -174,26 +181,104 @@ export function contextCommand(): Command {
         priority: string;
         prdId: string;
         score: number;
+        tests?: Array<{ id: string; text: string; type: string }>;
+        docs?: Array<{ id: string; text: string; type: string }>;
       }> = [];
 
       if (options.prd) {
         log('Searching for relevant requirements...');
-        try {
-          // Search prd_chunks collection
-          const prdResults = await vector.search('prd_chunks', query, 5);
 
-          for (const result of prdResults) {
-            const payload = result.payload as Record<string, unknown>;
-            prdRequirements.push({
-              id: result.id as string || 'unknown',
-              text: payload.text as string || '',
-              priority: payload.priority as string || 'medium',
-              prdId: payload.prd_id as string || '',
-              score: result.score
+        // Use PRDClient for unified context when tests/docs are requested
+        if (options.includeTests || options.includeDocs) {
+          try {
+            const prdClient = new PRDClient({
+              baseUrl: options.prdUrl || 'http://localhost:8000',
+              timeout: 30000,
             });
+
+            const available = await prdClient.isAvailable();
+            if (available) {
+              log('Getting unified PRD context with traceability...');
+              const unifiedContext = await prdClient.getUnifiedContext(query, {
+                depth: parseInt(options.depth, 10),
+              });
+
+              for (const result of unifiedContext.results) {
+                const req: typeof prdRequirements[0] = {
+                  id: result.chunk_id,
+                  text: result.text,
+                  priority: 'medium',
+                  prdId: '',
+                  score: result.score,
+                };
+
+                // Include tests if requested and available
+                if (options.includeTests && result.traceability?.tests) {
+                  req.tests = result.traceability.tests.map(t => ({
+                    id: t.chunk_id,
+                    text: t.text,
+                    type: t.chunk_type,
+                  }));
+                }
+
+                // Include docs if requested and available
+                if (options.includeDocs && result.traceability?.documentation) {
+                  req.docs = result.traceability.documentation.map(d => ({
+                    id: d.chunk_id,
+                    text: d.text,
+                    type: d.chunk_type,
+                  }));
+                }
+
+                prdRequirements.push(req);
+              }
+            } else {
+              // Fall back to vector search
+              log('cv-prd not available, falling back to vector search...');
+              const prdResults = await vector.search('prd_chunks', query, 5);
+              for (const result of prdResults) {
+                const payload = result.payload as Record<string, unknown>;
+                prdRequirements.push({
+                  id: result.id as string || 'unknown',
+                  text: payload.text as string || '',
+                  priority: payload.priority as string || 'medium',
+                  prdId: payload.prd_id as string || '',
+                  score: result.score
+                });
+              }
+            }
+          } catch (e) {
+            // Fall back to vector search on error
+            log('PRD client error, falling back to vector search...');
+            const prdResults = await vector.search('prd_chunks', query, 5);
+            for (const result of prdResults) {
+              const payload = result.payload as Record<string, unknown>;
+              prdRequirements.push({
+                id: result.id as string || 'unknown',
+                text: payload.text as string || '',
+                priority: payload.priority as string || 'medium',
+                prdId: payload.prd_id as string || '',
+                score: result.score
+              });
+            }
           }
-        } catch (e) {
-          // PRD collection may not exist
+        } else {
+          // Simple vector search without traceability
+          try {
+            const prdResults = await vector.search('prd_chunks', query, 5);
+            for (const result of prdResults) {
+              const payload = result.payload as Record<string, unknown>;
+              prdRequirements.push({
+                id: result.id as string || 'unknown',
+                text: payload.text as string || '',
+                priority: payload.priority as string || 'medium',
+                prdId: payload.prd_id as string || '',
+                score: result.score
+              });
+            }
+          } catch (e) {
+            // PRD collection may not exist
+          }
         }
       }
 
@@ -243,6 +328,8 @@ interface PRDRequirement {
   priority: string;
   prdId: string;
   score: number;
+  tests?: Array<{ id: string; text: string; type: string }>;
+  docs?: Array<{ id: string; text: string; type: string }>;
 }
 
 /**
@@ -334,6 +421,26 @@ function generateMarkdownContext(
       lines.push('');
       lines.push(req.text);
       lines.push('');
+
+      // Include test cases if available
+      if (req.tests && req.tests.length > 0) {
+        lines.push('#### Test Cases');
+        lines.push('');
+        for (const test of req.tests) {
+          lines.push(`- **[${test.type}]** ${test.text.slice(0, 200)}${test.text.length > 200 ? '...' : ''}`);
+        }
+        lines.push('');
+      }
+
+      // Include documentation if available
+      if (req.docs && req.docs.length > 0) {
+        lines.push('#### Documentation');
+        lines.push('');
+        for (const doc of req.docs) {
+          lines.push(`- **[${doc.type}]** ${doc.text.slice(0, 200)}${doc.text.length > 200 ? '...' : ''}`);
+        }
+        lines.push('');
+      }
     }
   }
 
@@ -381,6 +488,31 @@ function generateXMLContext(
       lines.push(`    <requirement priority="${req.priority}" match="${(req.score * 100).toFixed(0)}%">`);
       lines.push(`      <id>${escapeXML(req.id)}</id>`);
       lines.push(`      <text>${escapeXML(req.text)}</text>`);
+
+      // Include tests if available
+      if (req.tests && req.tests.length > 0) {
+        lines.push('      <tests>');
+        for (const test of req.tests) {
+          lines.push(`        <test type="${escapeXML(test.type)}">`);
+          lines.push(`          <id>${escapeXML(test.id)}</id>`);
+          lines.push(`          <text>${escapeXML(test.text)}</text>`);
+          lines.push('        </test>');
+        }
+        lines.push('      </tests>');
+      }
+
+      // Include docs if available
+      if (req.docs && req.docs.length > 0) {
+        lines.push('      <documentation>');
+        for (const doc of req.docs) {
+          lines.push(`        <doc type="${escapeXML(doc.type)}">`);
+          lines.push(`          <id>${escapeXML(doc.id)}</id>`);
+          lines.push(`          <text>${escapeXML(doc.text)}</text>`);
+          lines.push('        </doc>');
+        }
+        lines.push('      </documentation>');
+      }
+
       lines.push('    </requirement>');
     }
     lines.push('  </requirements>');
@@ -457,7 +589,9 @@ function generateJSONContext(
       text: req.text,
       priority: req.priority,
       prdId: req.prdId,
-      matchScore: req.score
+      matchScore: req.score,
+      tests: req.tests || [],
+      documentation: req.docs || [],
     })),
     chunks: chunks.map(chunk => ({
       file: chunk.payload.file,

@@ -11,7 +11,18 @@ import {
   SearchResult,
   Status,
   RelationshipType,
-  ImplementationLink
+  ImplementationLink,
+  ChunkType,
+  UnifiedContext,
+  FullTraceability,
+  TestCoverage,
+  DocCoverage,
+  GenerateTestsRequest,
+  GenerateTestsResponse,
+  GenerateDocsResponse,
+  GenerateReleaseNotesRequest,
+  ReleaseNotes,
+  ChunkContext,
 } from './types.js';
 
 export interface PRDClientConfig {
@@ -288,6 +299,163 @@ export class PRDClient {
     );
   }
 
+  // ========== Unified Context Operations (AI Traversal) ==========
+
+  /**
+   * Get unified context for AI traversal across all artifact types.
+   * Returns matching chunks with related tests, documentation, designs,
+   * and code implementations.
+   */
+  async getUnifiedContext(
+    query: string,
+    options?: {
+      prdId?: string;
+      includeTypes?: ChunkType[];
+      depth?: number;
+      format?: 'structured' | 'narrative';
+    }
+  ): Promise<UnifiedContext> {
+    return this.fetch<UnifiedContext>('/api/v1/context/unified', {
+      method: 'POST',
+      body: JSON.stringify({
+        query,
+        prd_id: options?.prdId,
+        include_types: options?.includeTypes,
+        depth: options?.depth || 3,
+        format: options?.format || 'structured'
+      })
+    });
+  }
+
+  /**
+   * Get complete traceability for a chunk.
+   * Returns dependencies, tests, documentation, designs, and implementations.
+   */
+  async getFullTraceability(
+    chunkId: string,
+    depth: number = 3
+  ): Promise<FullTraceability> {
+    return this.fetch<FullTraceability>(
+      `/api/v1/traceability/full/${chunkId}?depth=${depth}`
+    );
+  }
+
+  // ========== Test Operations ==========
+
+  /**
+   * Get test cases for a requirement
+   */
+  async getTestsForRequirement(chunkId: string): Promise<ChunkContext[]> {
+    return this.fetch<ChunkContext[]>(`/api/v1/chunks/${chunkId}/tests`);
+  }
+
+  /**
+   * Generate test cases for a requirement
+   */
+  async generateTests(
+    chunkId: string,
+    options?: GenerateTestsRequest
+  ): Promise<GenerateTestsResponse> {
+    return this.fetch<GenerateTestsResponse>(
+      `/api/v1/chunks/${chunkId}/generate-tests`,
+      {
+        method: 'POST',
+        body: JSON.stringify(options || {})
+      }
+    );
+  }
+
+  /**
+   * Generate a complete test suite for a PRD
+   */
+  async generateTestSuite(
+    prdId: string,
+    framework?: 'pytest' | 'jest' | 'mocha' | 'vitest'
+  ): Promise<{
+    prd_id: string;
+    total_requirements: number;
+    total_tests_generated: number;
+    test_cases: any[];
+    coverage: TestCoverage;
+  }> {
+    return this.fetch(`/api/v1/prds/${prdId}/generate-test-suite`, {
+      method: 'POST',
+      body: JSON.stringify({ framework })
+    });
+  }
+
+  /**
+   * Get test coverage metrics for a PRD
+   */
+  async getTestCoverage(prdId: string): Promise<TestCoverage> {
+    return this.fetch<TestCoverage>(`/api/v1/prds/${prdId}/test-coverage`);
+  }
+
+  // ========== Documentation Operations ==========
+
+  /**
+   * Get documentation for a requirement
+   */
+  async getDocumentationForRequirement(chunkId: string): Promise<ChunkContext[]> {
+    return this.fetch<ChunkContext[]>(`/api/v1/chunks/${chunkId}/documentation`);
+  }
+
+  /**
+   * Generate user manual from PRD
+   */
+  async generateUserManual(
+    prdId: string,
+    audience: string = 'end users'
+  ): Promise<GenerateDocsResponse> {
+    return this.fetch<GenerateDocsResponse>(
+      `/api/v1/prds/${prdId}/generate-user-manual?audience=${encodeURIComponent(audience)}`,
+      { method: 'POST' }
+    );
+  }
+
+  /**
+   * Generate API documentation from PRD
+   */
+  async generateApiDocs(prdId: string): Promise<GenerateDocsResponse> {
+    return this.fetch<GenerateDocsResponse>(
+      `/api/v1/prds/${prdId}/generate-api-docs`,
+      { method: 'POST' }
+    );
+  }
+
+  /**
+   * Generate technical specification from PRD
+   */
+  async generateTechnicalSpec(prdId: string): Promise<GenerateDocsResponse> {
+    return this.fetch<GenerateDocsResponse>(
+      `/api/v1/prds/${prdId}/generate-technical-spec`,
+      { method: 'POST' }
+    );
+  }
+
+  /**
+   * Generate release notes
+   */
+  async generateReleaseNotes(
+    prdId: string,
+    request: GenerateReleaseNotesRequest
+  ): Promise<ReleaseNotes> {
+    return this.fetch<ReleaseNotes>(
+      `/api/v1/prds/${prdId}/generate-release-notes`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request)
+      }
+    );
+  }
+
+  /**
+   * Get documentation coverage metrics for a PRD
+   */
+  async getDocumentationCoverage(prdId: string): Promise<DocCoverage> {
+    return this.fetch<DocCoverage>(`/api/v1/prds/${prdId}/documentation-coverage`);
+  }
+
   // ========== Utility Methods ==========
 
   /**
@@ -336,6 +504,75 @@ export class PRDClient {
       for (const rel of context.related) {
         parts.push(`- ${rel.text}`);
       }
+      parts.push('');
+    }
+
+    return parts.join('\n');
+  }
+
+  /**
+   * Format unified context for AI prompt with full traceability
+   */
+  static formatUnifiedContextForPrompt(context: UnifiedContext): string {
+    const parts: string[] = [];
+
+    parts.push(`## Query: ${context.query}`);
+    parts.push(`Found ${context.count} matching chunks`);
+    parts.push('');
+
+    // Coverage summary if available
+    if (context.coverage.test_coverage) {
+      parts.push(`## Coverage Summary`);
+      parts.push(`- Test Coverage: ${context.coverage.test_coverage.coverage_percent}%`);
+      if (context.coverage.doc_coverage) {
+        parts.push(`- Documentation Coverage: ${context.coverage.doc_coverage.coverage_percent}%`);
+      }
+      parts.push('');
+    }
+
+    // Results with traceability
+    for (const result of context.results) {
+      parts.push(`### ${result.chunk_type.toUpperCase()}`);
+      parts.push(result.text);
+      parts.push('');
+
+      if (result.traceability) {
+        const t = result.traceability;
+
+        if (t.tests.length > 0) {
+          parts.push(`**Tests (${t.tests.length}):**`);
+          for (const test of t.tests.slice(0, 3)) {
+            parts.push(`- ${test.text.slice(0, 100)}...`);
+          }
+          parts.push('');
+        }
+
+        if (t.documentation.length > 0) {
+          parts.push(`**Documentation (${t.documentation.length}):**`);
+          for (const doc of t.documentation.slice(0, 3)) {
+            parts.push(`- ${doc.text.slice(0, 100)}...`);
+          }
+          parts.push('');
+        }
+
+        if (t.implementations.length > 0) {
+          parts.push(`**Implementations (${t.implementations.length}):**`);
+          for (const impl of t.implementations.slice(0, 3)) {
+            parts.push(`- ${impl.symbols.join(', ')} in ${impl.files.join(', ')}`);
+          }
+          parts.push('');
+        }
+
+        if (t.dependencies.length > 0) {
+          parts.push(`**Dependencies (${t.dependencies.length}):**`);
+          for (const dep of t.dependencies.slice(0, 3)) {
+            parts.push(`- ${dep.text.slice(0, 100)}...`);
+          }
+          parts.push('');
+        }
+      }
+
+      parts.push('---');
       parts.push('');
     }
 

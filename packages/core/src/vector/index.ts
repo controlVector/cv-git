@@ -15,6 +15,7 @@ import {
   VectorPayload
 } from '@cv-git/shared';
 import { chunkArray } from '@cv-git/shared';
+import { EmbeddingCache, createEmbeddingCache, CacheStats } from './embedding-cache.js';
 
 export interface VectorCollections {
   codeChunks: string;
@@ -72,6 +73,10 @@ export interface VectorManagerOptions {
   embeddingModel?: string;
   /** Ollama URL for local embeddings */
   ollamaUrl?: string;
+  /** Enable content-addressed embedding cache */
+  enableCache?: boolean;
+  /** Cache directory (default: .cv/embeddings) */
+  cacheDir?: string;
 }
 
 export class VectorManager {
@@ -88,6 +93,9 @@ export class VectorManager {
   private connected: boolean = false;
   private modelValidated: boolean = false;
   private url: string;
+  private cache: EmbeddingCache | null = null;
+  private cacheEnabled: boolean = false;
+  private cacheDir: string;
 
   constructor(options: VectorManagerOptions);
   /** @deprecated Use options object instead */
@@ -123,6 +131,10 @@ export class VectorManager {
       docstrings: opts.collections?.docstrings || 'docstrings',
       commits: opts.collections?.commits || 'commits'
     };
+
+    // Cache settings
+    this.cacheEnabled = opts.enableCache ?? true;  // Enabled by default
+    this.cacheDir = opts.cacheDir ?? '.cv/embeddings';
 
     // Default to OpenRouter model if OpenRouter key available, otherwise OpenAI
     const defaultModel = this.openrouterApiKey
@@ -198,6 +210,16 @@ export class VectorManager {
       }
 
       this.connected = true;
+
+      // Initialize embedding cache if enabled
+      if (this.cacheEnabled) {
+        this.cache = createEmbeddingCache({
+          cacheDir: this.cacheDir,
+          model: this.embeddingModel,
+          dimensions: this.vectorSize
+        });
+        await this.cache.initialize();
+      }
 
       // Ensure collections exist
       await this.ensureCollections();
@@ -363,38 +385,54 @@ export class VectorManager {
   }
 
   /**
-   * Generate embedding for text
+   * Generate embedding for text (with content-addressed caching)
    */
   async embed(text: string): Promise<number[]> {
-    // Use the appropriate provider
-    if (this.embeddingProvider === 'ollama') {
-      return this.embedWithOllama(text);
+    // Check cache first
+    if (this.cache) {
+      const cached = await this.cache.get(text);
+      if (cached) {
+        return cached;
+      }
     }
 
-    if (this.embeddingProvider === 'openrouter') {
+    // Generate embedding
+    let embedding: number[];
+
+    // Use the appropriate provider
+    if (this.embeddingProvider === 'ollama') {
+      embedding = await this.embedWithOllama(text);
+    } else if (this.embeddingProvider === 'openrouter') {
       if (!this.openrouter) {
         throw new VectorError('OpenRouter client not initialized');
       }
       const result = await this.embedWithOpenRouter(text);
-      return result.embeddings[0];
+      embedding = result.embeddings[0];
+    } else {
+      // OpenAI direct
+      if (!this.openai) {
+        throw new VectorError('OpenAI client not initialized');
+      }
+
+      try {
+        const response = await this.openai.embeddings.create({
+          model: this.embeddingModel,
+          input: text,
+          encoding_format: 'float'
+        });
+
+        embedding = response.data[0].embedding;
+      } catch (error: any) {
+        throw new VectorError(`Failed to generate embedding: ${error.message}`, error);
+      }
     }
 
-    // OpenAI direct
-    if (!this.openai) {
-      throw new VectorError('OpenAI client not initialized');
+    // Store in cache
+    if (this.cache) {
+      await this.cache.set(text, embedding);
     }
 
-    try {
-      const response = await this.openai.embeddings.create({
-        model: this.embeddingModel,
-        input: text,
-        encoding_format: 'float'
-      });
-
-      return response.data[0].embedding;
-    } catch (error: any) {
-      throw new VectorError(`Failed to generate embedding: ${error.message}`, error);
-    }
+    return embedding;
   }
 
   /**
@@ -523,51 +561,90 @@ export class VectorManager {
   }
 
   /**
-   * Generate embeddings for multiple texts in batches
+   * Generate embeddings for multiple texts in batches (with content-addressed caching)
    */
   async embedBatch(texts: string[]): Promise<number[][]> {
-    // If using Ollama, use Ollama batch
-    if (this.embeddingProvider === 'ollama') {
-      return this.embedBatchWithOllama(texts);
-    }
+    // Check cache for existing embeddings
+    let textsToEmbed = texts;
+    const cachedEmbeddings = new Map<string, number[]>();
 
-    // If using OpenRouter, use OpenRouter batch
-    if (this.embeddingProvider === 'openrouter') {
-      if (!this.openrouter) {
-        throw new VectorError('OpenRouter client not initialized');
+    if (this.cache) {
+      const cacheResult = await this.cache.getBatch(texts);
+      for (const [text, embedding] of cacheResult.cached) {
+        cachedEmbeddings.set(text, embedding);
       }
-      const batchSize = 100;
-      const batches = chunkArray(texts, batchSize);
-      const allEmbeddings: number[][] = [];
+      textsToEmbed = cacheResult.missing;
 
-      for (const batch of batches) {
-        const result = await this.embedWithOpenRouter(batch);
-        allEmbeddings.push(...result.embeddings);
+      if (process.env.CV_DEBUG && cacheResult.cached.size > 0) {
+        console.log(`[VectorManager] Cache hit: ${cacheResult.cached.size}/${texts.length} embeddings`);
+      }
+    }
+
+    // Generate embeddings for missing texts
+    let newEmbeddings: number[][] = [];
+
+    if (textsToEmbed.length > 0) {
+      // If using Ollama, use Ollama batch
+      if (this.embeddingProvider === 'ollama') {
+        newEmbeddings = await this.embedBatchWithOllama(textsToEmbed);
+      }
+      // If using OpenRouter, use OpenRouter batch
+      else if (this.embeddingProvider === 'openrouter') {
+        if (!this.openrouter) {
+          throw new VectorError('OpenRouter client not initialized');
+        }
+        const batchSize = 100;
+        const batches = chunkArray(textsToEmbed, batchSize);
+
+        for (const batch of batches) {
+          const result = await this.embedWithOpenRouter(batch);
+          newEmbeddings.push(...result.embeddings);
+        }
+      }
+      // Using OpenAI directly
+      else {
+        if (!this.openai) {
+          throw new VectorError('OpenAI client not initialized');
+        }
+
+        try {
+          // OpenAI allows up to 2048 inputs per request
+          const batchSize = 100; // Use smaller batches to be safe
+          const batches = chunkArray(textsToEmbed, batchSize);
+
+          for (const batch of batches) {
+            const result = await this.tryEmbeddingWithFallback(batch);
+            newEmbeddings.push(...result.embeddings);
+          }
+        } catch (error: any) {
+          throw new VectorError(`Failed to generate batch embeddings: ${error.message}`, error);
+        }
       }
 
-      return allEmbeddings;
-    }
-
-    // Using OpenAI directly
-    if (!this.openai) {
-      throw new VectorError('OpenAI client not initialized');
-    }
-
-    try {
-      // OpenAI allows up to 2048 inputs per request
-      const batchSize = 100; // Use smaller batches to be safe
-      const batches = chunkArray(texts, batchSize);
-      const allEmbeddings: number[][] = [];
-
-      for (const batch of batches) {
-        const result = await this.tryEmbeddingWithFallback(batch);
-        allEmbeddings.push(...result.embeddings);
+      // Store new embeddings in cache
+      if (this.cache && newEmbeddings.length > 0) {
+        const newCache = new Map<string, number[]>();
+        for (let i = 0; i < textsToEmbed.length; i++) {
+          newCache.set(textsToEmbed[i], newEmbeddings[i]);
+        }
+        await this.cache.setBatch(newCache);
       }
-
-      return allEmbeddings;
-    } catch (error: any) {
-      throw new VectorError(`Failed to generate batch embeddings: ${error.message}`, error);
     }
+
+    // Reconstruct embeddings in original order
+    const result: number[][] = [];
+    let newIndex = 0;
+
+    for (const text of texts) {
+      const cached = cachedEmbeddings.get(text);
+      if (cached) {
+        result.push(cached);
+      } else {
+        result.push(newEmbeddings[newIndex++]);
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -831,9 +908,66 @@ export class VectorManager {
    * Close connection
    */
   async close(): Promise<void> {
+    // Save and close cache
+    if (this.cache) {
+      await this.cache.close();
+      this.cache = null;
+    }
+
     this.connected = false;
     this.client = null;
     this.openai = null;
+  }
+
+  /**
+   * Get embedding cache statistics
+   */
+  async getCacheStats(): Promise<CacheStats | null> {
+    if (!this.cache) return null;
+    return this.cache.getStats();
+  }
+
+  /**
+   * Export embeddings from cache for sharing
+   */
+  async exportEmbeddings(embeddingIds?: string[]): Promise<{
+    version: string;
+    model: string;
+    dimensions: number;
+    exportedAt: string;
+    embeddings: Array<{ id: string; textHash: string; vector: number[] }>;
+  } | null> {
+    if (!this.cache) return null;
+    return this.cache.export(embeddingIds);
+  }
+
+  /**
+   * Import embeddings into cache (from another developer or branch)
+   */
+  async importEmbeddings(data: {
+    model: string;
+    embeddings: Array<{ id: string; textHash: string; vector: number[] }>;
+  }): Promise<{ imported: number; skipped: number }> {
+    if (!this.cache) {
+      throw new VectorError('Embedding cache not enabled');
+    }
+    return this.cache.import(data);
+  }
+
+  /**
+   * Clear the embedding cache
+   */
+  async clearCache(): Promise<void> {
+    if (this.cache) {
+      await this.cache.clear();
+    }
+  }
+
+  /**
+   * Check if caching is enabled
+   */
+  isCacheEnabled(): boolean {
+    return this.cacheEnabled && this.cache !== null;
   }
 
   /**
@@ -904,3 +1038,7 @@ export function createVectorManager(
   }
   return new VectorManager(urlOrOptions);
 }
+
+// Re-export cache types for external use
+export { EmbeddingCache, createEmbeddingCache, CacheStats } from './embedding-cache.js';
+export type { EmbeddingMetadata, EmbeddingIndex, EmbeddingCacheConfig } from './embedding-cache.js';

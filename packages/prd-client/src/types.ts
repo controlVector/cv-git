@@ -4,6 +4,7 @@
  */
 
 export type ChunkType =
+  // Core PRD types
   | 'requirement'
   | 'feature'
   | 'constraint'
@@ -11,7 +12,24 @@ export type ChunkType =
   | 'metric'
   | 'dependency'
   | 'risk'
-  | 'assumption';
+  | 'assumption'
+  | 'objective'
+  | 'overview'
+  // Test artifacts
+  | 'test_case'
+  | 'unit_test_spec'
+  | 'integration_test_spec'
+  | 'acceptance_criteria'
+  // Documentation artifacts
+  | 'documentation'
+  | 'user_manual'
+  | 'api_doc'
+  | 'technical_spec'
+  | 'release_note'
+  // Design artifacts
+  | 'design_spec'
+  | 'screen_flow'
+  | 'wireframe';
 
 export type Priority = 'critical' | 'high' | 'medium' | 'low';
 
@@ -23,7 +41,16 @@ export type RelationshipType =
   | 'PARENT_OF'
   | 'IMPLEMENTS'
   | 'CONTRADICTS'
-  | 'RELATES_TO';
+  | 'RELATES_TO'
+  // Artifact relationships
+  | 'TESTS'
+  | 'DOCUMENTS'
+  | 'DESIGNS'
+  | 'BELONGS_TO'
+  // Document-specific relationships (for markdown knowledge graph)
+  | 'DESCRIBES'        // Document -> Code/Symbol (docs that describe code)
+  | 'REFERENCES_DOC'   // Document -> Document (doc references another doc)
+  | 'SUPERSEDES';      // Document -> Document (ADR supersedes older ADR)
 
 export interface ChunkMetadata {
   priority?: Priority;
@@ -119,4 +146,122 @@ export interface ImplementationLink {
   symbols: string[];
   files: string[];
   linked_at: string;
+}
+
+// =============================================================================
+// Unified Context Types (for AI traversal)
+// =============================================================================
+
+export interface TestCase {
+  id: string;
+  test_type: 'unit' | 'integration' | 'acceptance';
+  title: string;
+  description: string;
+  preconditions: string[];
+  steps: string[];
+  expected_result: string;
+  priority: Priority;
+  code_stub?: string;
+  source_requirement_id: string;
+}
+
+export interface CoverageMetrics {
+  prd_id: string;
+  total_requirements: number;
+  covered_requirements: number;
+  uncovered_requirements: number;
+  coverage_percent: number;
+}
+
+export interface TestCoverage extends CoverageMetrics {
+  total_tests: number;
+}
+
+export interface DocCoverage extends CoverageMetrics {
+  total_docs: number;
+}
+
+export interface FullTraceability {
+  chunk_id: string;
+  chunk: ChunkContext | null;
+  dependencies: ChunkContext[];
+  dependents: ChunkContext[];
+  tests: ChunkContext[];
+  documentation: ChunkContext[];
+  designs: ChunkContext[];
+  implementations: ImplementationLink[];
+}
+
+export interface UnifiedContextRequest {
+  query: string;
+  prd_id?: string;
+  include_types?: ChunkType[];
+  depth?: number;
+  format?: 'structured' | 'narrative';
+}
+
+export interface UnifiedContextResult {
+  chunk_id: string;
+  chunk_type: ChunkType;
+  text: string;
+  score: number;
+  traceability?: FullTraceability;
+}
+
+export interface UnifiedContext {
+  query: string;
+  prd_id?: string;
+  results: UnifiedContextResult[];
+  count: number;
+  coverage: {
+    test_coverage?: TestCoverage;
+    doc_coverage?: DocCoverage;
+  };
+  include_types: ChunkType[];
+}
+
+export interface GenerateTestsRequest {
+  test_type?: 'unit' | 'integration' | 'acceptance' | 'all';
+  framework?: 'pytest' | 'jest' | 'mocha' | 'vitest';
+  include_code_stub?: boolean;
+}
+
+export interface GenerateTestsResponse {
+  chunk_id: string;
+  test_cases: TestCase[];
+  count: number;
+}
+
+export interface GenerateDocsRequest {
+  doc_type: 'user_manual' | 'api_doc' | 'technical_spec';
+  audience?: string;
+}
+
+export interface GenerateDocsResponse {
+  prd_id: string;
+  doc_type: string;
+  sections: Chunk[];
+  count: number;
+}
+
+export interface GenerateReleaseNotesRequest {
+  version: string;
+  changes?: string[];
+}
+
+export interface ReleaseNotes {
+  version: string;
+  release_date: string;
+  summary: string;
+  highlights: string[];
+  sections: {
+    title: string;
+    items: {
+      title: string;
+      description: string;
+      related_requirement_ids: string[];
+    }[];
+  }[];
+  full_markdown: string;
+  chunk_id?: string;
 }

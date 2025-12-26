@@ -27,6 +27,7 @@
     "@modelcontextprotocol/sdk": "^0.5.0",
     "@cv-git/core": "workspace:*",
     "@cv-git/credentials": "workspace:*",
+    "@cv-git/prd-client": "workspace:*",
     "@cv-git/shared": "workspace:*"
   },
   "devDependencies": {

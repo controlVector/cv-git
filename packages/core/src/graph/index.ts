@@ -9,6 +9,8 @@ import {
   SymbolNode,
   CommitNode,
   ModuleNode,
+  DocumentNode,
+  DocumentType,
   GraphError,
   ImportsEdge,
   DefinesEdge,
@@ -142,6 +144,12 @@ export class GraphManager {
       await this.safeCreateIndex('Commit', 'sha');
       await this.safeCreateIndex('Commit', 'author');
       await this.safeCreateIndex('Commit', 'timestamp');
+
+      // Document indexes (for markdown knowledge graph)
+      await this.safeCreateIndex('Document', 'path');
+      await this.safeCreateIndex('Document', 'type');
+      await this.safeCreateIndex('Document', 'status');
+      await this.safeCreateIndex('Document', 'title');
 
     } catch (error: any) {
       // Only log unexpected errors (not "already indexed" which is handled by safeCreateIndex)
@@ -475,6 +483,232 @@ export class GraphManager {
     });
   }
 
+  // ========== Document Node Methods (Markdown Knowledge Graph) ==========
+
+  /**
+   * Create or update a Document node
+   * Used for indexing markdown documentation into the knowledge graph
+   */
+  async upsertDocumentNode(doc: DocumentNode): Promise<void> {
+    const cypher = `
+      MERGE (d:Document:Searchable {path: $path})
+      SET d.absolutePath = $absolutePath,
+          d.title = $title,
+          d.type = $type,
+          d.status = $status,
+          d.wordCount = $wordCount,
+          d.gitHash = $gitHash,
+          d.lastModified = $lastModified,
+          d.tags = $tags,
+          d.priority = $priority,
+          d.author = $author,
+          d.createdAt = $createdAt,
+          d.updatedAt = $updatedAt
+      RETURN d
+    `;
+
+    await this.query(cypher, {
+      path: doc.path,
+      absolutePath: doc.absolutePath,
+      title: doc.title,
+      type: doc.type,
+      status: doc.status,
+      wordCount: doc.wordCount,
+      gitHash: doc.gitHash,
+      lastModified: doc.lastModified,
+      tags: doc.frontmatter.tags || [],
+      priority: doc.frontmatter.priority || '',
+      author: doc.frontmatter.author || '',
+      createdAt: doc.createdAt,
+      updatedAt: Date.now()
+    });
+  }
+
+  /**
+   * Create DESCRIBES relationship (Document -> Code/Symbol)
+   * Links documentation to the code it describes
+   */
+  async createDescribesEdge(
+    docPath: string,
+    targetPath: string,
+    properties?: { section?: string; line?: number }
+  ): Promise<void> {
+    // First try to find a file, then try a symbol
+    const fileQuery = `
+      MATCH (d:Document {path: $docPath})
+      MATCH (f:File {path: $targetPath})
+      MERGE (d)-[r:DESCRIBES]->(f)
+      SET r.section = $section, r.line = $line
+      RETURN r
+    `;
+
+    try {
+      await this.query(fileQuery, {
+        docPath,
+        targetPath,
+        section: properties?.section || '',
+        line: properties?.line || 0
+      });
+    } catch {
+      // If file not found, try symbol
+      const symbolQuery = `
+        MATCH (d:Document {path: $docPath})
+        MATCH (s:Symbol {qualifiedName: $targetPath})
+        MERGE (d)-[r:DESCRIBES]->(s)
+        SET r.section = $section, r.line = $line
+        RETURN r
+      `;
+
+      try {
+        await this.query(symbolQuery, {
+          docPath,
+          targetPath,
+          section: properties?.section || '',
+          line: properties?.line || 0
+        });
+      } catch {
+        // Target doesn't exist yet - silently skip
+      }
+    }
+  }
+
+  /**
+   * Create REFERENCES_DOC relationship (Document -> Document)
+   * Links documentation that references other documentation
+   */
+  async createReferencesDocEdge(
+    fromPath: string,
+    toPath: string,
+    properties?: { anchor?: string }
+  ): Promise<void> {
+    const cypher = `
+      MATCH (from:Document {path: $fromPath})
+      MATCH (to:Document {path: $toPath})
+      MERGE (from)-[r:REFERENCES_DOC]->(to)
+      SET r.anchor = $anchor
+      RETURN r
+    `;
+
+    try {
+      await this.query(cypher, {
+        fromPath,
+        toPath,
+        anchor: properties?.anchor || ''
+      });
+    } catch {
+      // Target document doesn't exist yet - silently skip
+    }
+  }
+
+  /**
+   * Create SUPERSEDES relationship (ADR -> ADR)
+   * Links newer architecture decision records to ones they supersede
+   */
+  async createSupersedesEdge(
+    newDocPath: string,
+    oldDocPath: string
+  ): Promise<void> {
+    const cypher = `
+      MATCH (newDoc:Document {path: $newDocPath})
+      MATCH (oldDoc:Document {path: $oldDocPath})
+      MERGE (newDoc)-[r:SUPERSEDES]->(oldDoc)
+      RETURN r
+    `;
+
+    try {
+      await this.query(cypher, { newDocPath, oldDocPath });
+    } catch {
+      // Target document doesn't exist - silently skip
+    }
+  }
+
+  /**
+   * Get document node by path
+   */
+  async getDocumentNode(path: string): Promise<DocumentNode | null> {
+    const result = await this.query('MATCH (d:Document {path: $path}) RETURN d', { path });
+
+    if (result.length === 0) {
+      return null;
+    }
+
+    return result[0].d as DocumentNode;
+  }
+
+  /**
+   * Get all documents describing a file or symbol
+   */
+  async getDocumentsFor(targetPath: string): Promise<DocumentNode[]> {
+    const cypher = `
+      MATCH (d:Document)-[:DESCRIBES]->(target)
+      WHERE target.path = $targetPath OR target.qualifiedName = $targetPath
+      RETURN d
+    `;
+
+    const result = await this.query(cypher, { targetPath });
+    return result.map(r => r.d as DocumentNode);
+  }
+
+  /**
+   * Get all documents by type
+   */
+  async getDocumentsByType(type: DocumentType): Promise<DocumentNode[]> {
+    const result = await this.query(
+      'MATCH (d:Document {type: $type}) RETURN d ORDER BY d.path',
+      { type }
+    );
+
+    return result.map(r => r.d as DocumentNode);
+  }
+
+  /**
+   * Get all documents with a specific tag
+   */
+  async getDocumentsByTag(tag: string): Promise<DocumentNode[]> {
+    const cypher = `
+      MATCH (d:Document)
+      WHERE $tag IN d.tags
+      RETURN d
+      ORDER BY d.path
+    `;
+
+    const result = await this.query(cypher, { tag });
+    return result.map(r => r.d as DocumentNode);
+  }
+
+  /**
+   * Get documents related to a document (via REFERENCES_DOC)
+   */
+  async getRelatedDocuments(docPath: string): Promise<DocumentNode[]> {
+    const cypher = `
+      MATCH (d:Document {path: $docPath})-[:REFERENCES_DOC]->(related:Document)
+      RETURN related
+    `;
+
+    const result = await this.query(cypher, { docPath });
+    return result.map(r => r.related as DocumentNode);
+  }
+
+  /**
+   * Delete a file node and its relationships (including defined symbols)
+   */
+  async deleteFileNode(path: string): Promise<void> {
+    // Delete symbols defined in this file first
+    await this.query(
+      'MATCH (f:File {path: $path})-[:DEFINES]->(s:Symbol) DETACH DELETE s',
+      { path }
+    );
+    // Delete the file node
+    await this.query('MATCH (f:File {path: $path}) DETACH DELETE f', { path });
+  }
+
+  /**
+   * Delete a document node and its relationships
+   */
+  async deleteDocumentNode(path: string): Promise<void> {
+    await this.query('MATCH (d:Document {path: $path}) DETACH DELETE d', { path });
+  }
+
   /**
    * Create IMPORTS relationship
    */
@@ -710,6 +944,7 @@ export class GraphManager {
     classCount: number;
     commitCount: number;
     moduleCount: number;
+    documentCount: number;
     relationshipCount: number;
     nodesByLabel?: Record<string, number>;
     relationshipsByType?: Record<string, number>;
@@ -720,6 +955,7 @@ export class GraphManager {
     const classCount = await this.query('MATCH (c:Class) RETURN count(c) as count');
     const commitCount = await this.query('MATCH (c:Commit) RETURN count(c) as count');
     const moduleCount = await this.query('MATCH (m:Module) RETURN count(m) as count');
+    const documentCount = await this.query('MATCH (d:Document) RETURN count(d) as count');
     const relationshipCount = await this.query('MATCH ()-[r]->() RETURN count(r) as count');
 
     // FalkorDB pattern: Get detailed breakdown
@@ -733,6 +969,7 @@ export class GraphManager {
       classCount: classCount[0]?.count || 0,
       commitCount: commitCount[0]?.count || 0,
       moduleCount: moduleCount[0]?.count || 0,
+      documentCount: documentCount[0]?.count || 0,
       relationshipCount: relationshipCount[0]?.count || 0,
       nodesByLabel: this.parseBreakdown(nodesByLabel, 'label'),
       relationshipsByType: this.parseBreakdown(relationshipsByType, 'type')

@@ -47,7 +47,8 @@ const DEFAULT_CONFIG: CVConfig = {
     collections: {
       codeChunks: 'code_chunks',
       docstrings: 'docstrings',
-      commits: 'commits'
+      commits: 'commits',
+      documentChunks: 'document_chunks'
     }
   },
   sync: {
@@ -102,6 +103,13 @@ const DEFAULT_CONFIG: CVConfig = {
       'third_party/**',
     ],
     includeLanguages: ['typescript', 'javascript', 'python', 'go', 'rust']
+  },
+  docs: {
+    enabled: true,
+    patterns: ['**/*.md'],
+    excludePatterns: ['node_modules/**', 'dist/**', 'build/**', '.git/**'],
+    chunkByHeading: 2,
+    inferTypes: true
   },
   features: {
     enableChat: true,

@@ -105,6 +105,149 @@ export interface CommitNode {
   createdAt: number;
 }
 
+// ========== Document Types ==========
+
+/**
+ * Document classification types for markdown files
+ * Includes PRD-compatible types and cv-git specific types
+ */
+export type DocumentType =
+  // PRD types (for compatibility with cvPRD)
+  | 'technical_spec'
+  | 'design_spec'
+  | 'user_manual'
+  | 'api_doc'
+  | 'release_note'
+  // cv-git specific types
+  | 'roadmap'
+  | 'session_notes'
+  | 'phase_doc'
+  | 'adr'           // Architecture Decision Record
+  | 'changelog'
+  | 'readme'
+  | 'guide'
+  | 'tutorial'
+  | 'reference'
+  | 'unknown';
+
+export type DocumentStatus = 'draft' | 'active' | 'archived' | 'deprecated';
+
+export type DocumentPriority = 'low' | 'medium' | 'high' | 'critical';
+
+/**
+ * YAML frontmatter structure for markdown documents
+ */
+export interface DocumentFrontmatter {
+  type?: DocumentType;
+  status?: DocumentStatus;
+  tags?: string[];
+  relates_to?: string[];       // Paths to code files or other docs
+  priority?: DocumentPriority;
+  author?: string;
+  created?: string;            // ISO date string
+  updated?: string;            // ISO date string
+  version?: string;
+  custom_fields?: Record<string, unknown>;
+}
+
+/**
+ * Heading extracted from a markdown document
+ */
+export interface DocumentHeading {
+  level: number;               // 1-6 (h1-h6)
+  text: string;                // Heading text content
+  line: number;                // Line number in document
+  anchor: string;              // URL-friendly slug
+}
+
+/**
+ * Link extracted from a markdown document
+ */
+export interface DocumentLink {
+  text: string;                // Link display text
+  target: string;              // URL or relative path
+  line: number;                // Line number in document
+  isInternal: boolean;         // Links to files in repo
+  isCodeRef: boolean;          // Links to code (e.g., src/foo.ts)
+}
+
+/**
+ * A section of a markdown document (chunked by heading)
+ */
+export interface DocumentSection {
+  id: string;                  // Format: "doc:path:startLine-endLine"
+  heading?: DocumentHeading;
+  content: string;
+  startLine: number;
+  endLine: number;
+  links: DocumentLink[];
+}
+
+/**
+ * Document node for the knowledge graph
+ */
+export interface DocumentNode {
+  path: string;
+  absolutePath: string;
+  title: string;               // First H1 or filename
+  type: DocumentType;
+  status: DocumentStatus;
+  frontmatter: DocumentFrontmatter;
+  headings: DocumentHeading[];
+  links: DocumentLink[];
+  sections: DocumentSection[];
+  wordCount: number;
+  gitHash: string;
+  lastModified: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * Result of parsing a markdown document
+ */
+export interface ParsedDocument {
+  path: string;
+  absolutePath: string;
+  content: string;
+  frontmatter: DocumentFrontmatter;
+  headings: DocumentHeading[];
+  links: DocumentLink[];
+  sections: DocumentSection[];
+  inferredType: DocumentType;
+}
+
+/**
+ * Chunk of a document for vector embedding
+ */
+export interface DocumentChunk {
+  id: string;                  // Format: "doc:file:startLine-endLine"
+  file: string;
+  startLine: number;
+  endLine: number;
+  text: string;
+  heading?: string;
+  headingLevel?: number;
+  documentType: DocumentType;
+  tags: string[];
+}
+
+/**
+ * Vector payload for document chunks
+ */
+export interface DocumentChunkPayload extends VectorPayload {
+  documentType: DocumentType;
+  heading?: string;
+  headingLevel?: number;
+  startLine: number;
+  endLine: number;
+  text: string;
+  tags: string[];
+  status: DocumentStatus;
+  priority?: DocumentPriority;
+  lastModified: number;
+}
+
 // ========== Graph Edge Types ==========
 
 export interface ImportsEdge {
@@ -400,6 +543,7 @@ export interface CVConfig {
       codeChunks: string;
       docstrings: string;
       commits: string;
+      documentChunks: string;
     };
   };
   sync: {
@@ -407,6 +551,13 @@ export interface CVConfig {
     syncOnCommit: boolean;
     excludePatterns: string[];
     includeLanguages: string[];
+  };
+  docs: {
+    enabled: boolean;
+    patterns: string[];
+    excludePatterns: string[];
+    chunkByHeading: 1 | 2 | 3;
+    inferTypes: boolean;
   };
   features: {
     enableChat: boolean;
@@ -432,6 +583,10 @@ export interface SyncState {
   languages: Record<string, number>;
   syncDuration?: number;
   errors: string[];
+  // Document sync state
+  documentCount?: number;
+  documentSectionCount?: number;
+  documentVectorCount?: number;
 }
 
 // ========== Error Types ==========
