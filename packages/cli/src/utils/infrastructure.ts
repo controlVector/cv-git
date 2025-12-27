@@ -53,11 +53,11 @@ export function findAvailablePort(startPort: number): number {
 }
 
 /**
- * Get cv-falkordb container info
+ * Get cv-git-falkordb container info
  */
 function getCVFalkorDBInfo(): { running: boolean; port?: number; stopped?: boolean; created?: boolean; exists: boolean } {
   try {
-    const result = execSync('docker ps -a --filter name=^cv-falkordb$ --format "{{.Status}}|{{.Ports}}"', {
+    const result = execSync('docker ps -a --filter name=^cv-git-falkordb$ --format "{{.Status}}|{{.Ports}}"', {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'ignore']
     }).trim();
@@ -156,7 +156,7 @@ export async function ensureFalkorDB(options?: {
   // If our container exists but is stopped, start it
   if (containerInfo.stopped && containerInfo.port) {
     try {
-      execSync('docker start cv-falkordb', { stdio: 'ignore' });
+      execSync('docker start cv-git-falkordb', { stdio: 'ignore' });
 
       if (await waitForFalkorDB(containerInfo.port)) {
         return { url: `redis://localhost:${containerInfo.port}`, started: true };
@@ -169,7 +169,7 @@ export async function ensureFalkorDB(options?: {
   // If container is in "Created" state (never started successfully), remove it
   if (containerInfo.created || (containerInfo.exists && !containerInfo.running && !containerInfo.stopped)) {
     try {
-      execSync('docker rm -f cv-falkordb', { stdio: 'ignore' });
+      execSync('docker rm -f cv-git-falkordb', { stdio: 'ignore' });
     } catch {
       // Ignore removal errors
     }
@@ -179,15 +179,15 @@ export async function ensureFalkorDB(options?: {
   const port = findAvailablePort(6379);
 
   try {
-    execSync(`docker run -d --name cv-falkordb -p ${port}:6379 falkordb/falkordb:latest`, {
+    execSync(`docker run -d --name cv-git-falkordb -p ${port}:6379 falkordb/falkordb:latest`, {
       stdio: 'ignore'
     });
   } catch (error: any) {
     // Container might already exist with wrong state - remove and retry
     if (error.message?.includes('already in use') || error.status === 125) {
       try {
-        execSync('docker rm -f cv-falkordb', { stdio: 'ignore' });
-        execSync(`docker run -d --name cv-falkordb -p ${port}:6379 falkordb/falkordb:latest`, {
+        execSync('docker rm -f cv-git-falkordb', { stdio: 'ignore' });
+        execSync(`docker run -d --name cv-git-falkordb -p ${port}:6379 falkordb/falkordb:latest`, {
           stdio: 'ignore'
         });
       } catch {
@@ -206,11 +206,11 @@ export async function ensureFalkorDB(options?: {
 }
 
 /**
- * Get cv-qdrant container info
+ * Get cv-git-qdrant container info
  */
 function getCVQdrantInfo(): { running: boolean; port?: number; stopped?: boolean } {
   try {
-    const result = execSync('docker ps -a --filter name=cv-qdrant --format "{{.Status}}|{{.Ports}}"', {
+    const result = execSync('docker ps -a --filter name=cv-git-qdrant --format "{{.Status}}|{{.Ports}}"', {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'ignore']
     }).trim();
@@ -286,7 +286,7 @@ export async function ensureQdrant(options?: {
   // If our container exists but is stopped, start it
   if (containerInfo.stopped && containerInfo.port) {
     try {
-      execSync('docker start cv-qdrant', { stdio: 'ignore' });
+      execSync('docker start cv-git-qdrant', { stdio: 'ignore' });
 
       if (await waitForQdrant(containerInfo.port)) {
         return { url: `http://localhost:${containerInfo.port}`, started: true };
@@ -300,14 +300,14 @@ export async function ensureQdrant(options?: {
   const port = findAvailablePort(6333);
 
   try {
-    execSync(`docker run -d --name cv-qdrant -p ${port}:6333 qdrant/qdrant:latest`, {
+    execSync(`docker run -d --name cv-git-qdrant -p ${port}:6333 qdrant/qdrant:latest`, {
       stdio: 'ignore'
     });
   } catch (error: any) {
     if (error.message?.includes('already in use') || error.status === 125) {
       try {
-        execSync('docker rm -f cv-qdrant', { stdio: 'ignore' });
-        execSync(`docker run -d --name cv-qdrant -p ${port}:6333 qdrant/qdrant:latest`, {
+        execSync('docker rm -f cv-git-qdrant', { stdio: 'ignore' });
+        execSync(`docker run -d --name cv-git-qdrant -p ${port}:6333 qdrant/qdrant:latest`, {
           stdio: 'ignore'
         });
       } catch {
