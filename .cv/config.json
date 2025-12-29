@@ -1,0 +1,92 @@
+{
+  "version": "0.1.0",
+  "repository": {
+    "root": "/home/schmotz/project/cv-git",
+    "name": "cv-git",
+    "initDate": "2025-12-10T23:00:35.236Z"
+  },
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4",
+    "maxTokens": 4096,
+    "temperature": 0.2
+  },
+  "ai": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4",
+    "maxTokens": 4096,
+    "temperature": 0.2
+  },
+  "embedding": {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536
+  },
+  "graph": {
+    "provider": "falkordb",
+    "url": "redis://localhost:6379",
+    "embedded": true,
+    "database": "cv-git"
+  },
+  "vector": {
+    "provider": "qdrant",
+    "url": "http://localhost:6333",
+    "embedded": true,
+    "collections": {
+      "codeChunks": "code_chunks",
+      "docstrings": "docstrings",
+      "commits": "commits"
+    }
+  },
+  "sync": {
+    "autoSync": true,
+    "syncOnCommit": true,
+    "excludePatterns": [
+      "node_modules/**",
+      ".next/**",
+      ".nuxt/**",
+      "*.min.js",
+      "*.bundle.js",
+      "venv/**",
+      ".venv/**",
+      "env/**",
+      ".env/**",
+      "**/lib/python*/**",
+      "**/site-packages/**",
+      "__pycache__/**",
+      "*.pyc",
+      ".pytest_cache/**",
+      "*.egg-info/**",
+      "dist/**",
+      "build/**",
+      "out/**",
+      "target/**",
+      ".build/**",
+      "*.test.ts",
+      "*.test.js",
+      "*.spec.ts",
+      "*.spec.js",
+      "coverage/**",
+      ".git/**",
+      ".cache/**",
+      ".tmp/**",
+      "tmp/**",
+      ".idea/**",
+      ".vscode/**",
+      "vendor/**",
+      "third_party/**"
+    ],
+    "includeLanguages": [
+      "typescript",
+      "javascript",
+      "python",
+      "go",
+      "rust"
+    ]
+  },
+  "features": {
+    "enableChat": true,
+    "enableAutoCommit": false,
+    "enableTelemetry": false
+  }
+}
