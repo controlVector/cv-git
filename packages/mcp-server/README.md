@@ -6,7 +6,7 @@ Model Context Protocol (MCP) server for CV-Git, enabling AI assistants like Clau
 
 [Model Context Protocol](https://modelcontextprotocol.io/) is Anthropic's open protocol for connecting AI assistants to external tools and data sources. This MCP server exposes CV-Git's powerful code analysis capabilities as tools that Claude and other AI assistants can use.
 
-## Available Tools (20 total)
+## Available Tools (23 total)
 
 ### Code Understanding (5 tools)
 
@@ -107,6 +107,25 @@ Model Context Protocol (MCP) server for CV-Git, enabling AI assistants like Clau
 - Support for draft and pre-releases
 - Requires GitHub CLI (gh)
 
+### Documentation Knowledge Graph (3 tools)
+
+**cv_docs_search** - Search documentation
+- Semantic search across all documentation (including archived)
+- Find design docs, historical decisions, project documentation
+- Filter by document type or archived status
+- Example: "Find all design decisions about authentication"
+
+**cv_docs_ingest** - Ingest documentation
+- Add markdown documents to the knowledge graph
+- Creates document nodes, relationships, and embeddings
+- Supports optional archiving (store in .cv/ without cluttering repo)
+- Auto-extracts frontmatter, headings, and links
+
+**cv_docs_list** - List documents
+- View all documents in the knowledge graph
+- Filter by type (design_spec, readme, guide, etc.)
+- See archived vs active status
+
 ### System Operations (3 tools)
 
 **cv_config_get** - Get configuration values
@@ -134,9 +153,33 @@ pnpm install
 pnpm build
 ```
 
-### 2. Configure Claude Desktop
+### 2. Configure Claude Code (CLI)
 
-Add the MCP server to your Claude Desktop configuration:
+For Claude Code (CLI), create a `.mcp.json` file in your project root:
+
+```json
+{
+  "mcpServers": {
+    "cv-git": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/cv-git/packages/mcp-server/dist/index.js"
+      ],
+      "env": {
+        "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}",
+        "OPENAI_API_KEY": "${OPENAI_API_KEY}",
+        "OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+Then restart Claude Code to load the MCP server.
+
+### 3. Configure Claude Desktop (optional)
+
+For Claude Desktop, add the MCP server to your configuration:
 
 **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
@@ -159,7 +202,7 @@ Add the MCP server to your Claude Desktop configuration:
 }
 ```
 
-### 3. Restart Claude Desktop
+### 4. Restart Claude
 
 After updating the configuration, restart Claude Desktop to load the MCP server.
 

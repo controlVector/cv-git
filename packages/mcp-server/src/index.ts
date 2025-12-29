@@ -61,6 +61,14 @@ import {
   RequirementTraceArgs,
   CoverageArgs,
 } from './tools/prd.js';
+import {
+  handleDocsSearch,
+  handleDocsIngest,
+  handleDocsList,
+  DocsSearchArgs,
+  DocsIngestArgs,
+  DocsListArgs,
+} from './tools/docs.js';
 
 /**
  * Tool definitions
@@ -563,6 +571,95 @@ const tools: Tool[] = [
       required: ['prdId'],
     },
   },
+
+  // Documentation Knowledge Graph Tools
+  {
+    name: 'cv_docs_search',
+    description: 'Search documentation in the knowledge graph using semantic search. Includes both active and archived documents. Use this to find design docs, historical decisions, and project documentation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search query in natural language (e.g., "authentication design", "sync strategy")',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of results to return',
+          default: 10,
+        },
+        minScore: {
+          type: 'number',
+          description: 'Minimum similarity score (0-1)',
+          default: 0.5,
+        },
+        type: {
+          type: 'string',
+          description: 'Filter by document type (e.g., "design_spec", "readme", "guide", "api_doc")',
+        },
+        archivedOnly: {
+          type: 'boolean',
+          description: 'Only return results from archived documents',
+          default: false,
+        },
+        activeOnly: {
+          type: 'boolean',
+          description: 'Only return results from active (non-archived) documents',
+          default: false,
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'cv_docs_ingest',
+    description: 'Ingest a markdown document into the knowledge graph. Creates document nodes, relationships, and vector embeddings for semantic search. Use this to add new documentation or update existing docs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Relative path for the document (e.g., "docs/DESIGN.md")',
+        },
+        content: {
+          type: 'string',
+          description: 'Full markdown content of the document',
+        },
+        archive: {
+          type: 'boolean',
+          description: 'Store only in .cv/documents/ (not in repo filesystem)',
+          default: false,
+        },
+        frontmatter: {
+          type: 'object',
+          description: 'Optional YAML frontmatter fields (type, status, tags, relates_to)',
+        },
+      },
+      required: ['path', 'content'],
+    },
+  },
+  {
+    name: 'cv_docs_list',
+    description: 'List documents in the knowledge graph. Shows document paths, titles, types, and archived status.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        type: {
+          type: 'string',
+          description: 'Filter by document type',
+        },
+        archived: {
+          type: 'boolean',
+          description: 'Filter by archived status (true=archived only, false=active only, omit for all)',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of documents to return',
+          default: 50,
+        },
+      },
+    },
+  },
 ];
 
 /**
@@ -714,6 +811,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'cv_doc_coverage':
         validateArgs(args, ['prdId']);
         result = await handleDocCoverage(args as unknown as CoverageArgs);
+        break;
+
+      // Documentation Knowledge Graph Tools
+      case 'cv_docs_search':
+        validateArgs(args, ['query']);
+        result = await handleDocsSearch(args as unknown as DocsSearchArgs);
+        break;
+
+      case 'cv_docs_ingest':
+        validateArgs(args, ['path', 'content']);
+        result = await handleDocsIngest(args as unknown as DocsIngestArgs);
+        break;
+
+      case 'cv_docs_list':
+        result = await handleDocsList(args as unknown as DocsListArgs);
         break;
 
       default:
