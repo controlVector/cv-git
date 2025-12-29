@@ -879,17 +879,21 @@ export function createDocsCommand(): Command {
         await ingest.close();
 
         // Search document_chunks collection
+        // Note: minScore filtering happens after results are returned
         const results = await vector.search(
           'document_chunks',
           query,
-          parseInt(options.limit, 10) * 2, // Get extra for filtering
-          { minScore: parseFloat(options.minScore) }
+          parseInt(options.limit, 10) * 2 // Get extra for filtering
         );
+
+        // Filter by minimum score
+        const minScore = parseFloat(options.minScore);
+        const scoreFilteredResults = results.filter(r => r.score >= minScore);
 
         spinner.stop();
 
         // Filter by type and archived status
-        let filteredResults = results;
+        let filteredResults = scoreFilteredResults;
 
         if (options.type) {
           filteredResults = filteredResults.filter(r => r.payload.documentType === options.type);
