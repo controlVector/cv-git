@@ -24,10 +24,10 @@ export function gitCommand(): Command {
         return;
       }
 
-      // Spawn git process
+      // Spawn git process (no shell: true to avoid argument parsing issues)
       const git = spawn('git', args, {
         stdio: 'inherit',
-        shell: true
+        env: process.env
       });
 
       git.on('error', (error) => {

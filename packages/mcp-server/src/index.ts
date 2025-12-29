@@ -52,6 +52,7 @@ import { handleSync } from './tools/sync.js';
 import { handlePRCreate, handlePRList, handlePRReview, handleReleaseCreate } from './tools/platform.js';
 import { handleConfigGet, handleStatus, handleDoctor } from './tools/system.js';
 import { handleContext, ContextArgs } from './tools/context.js';
+import { handleAutoContext, AutoContextArgs } from './tools/auto-context.js';
 import {
   handlePRDContext,
   handleRequirementTrace,
@@ -147,6 +148,53 @@ const tools: Tool[] = [
           enum: ['markdown', 'xml', 'json'],
           description: 'Output format',
           default: 'markdown',
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'cv_auto_context',
+    description: `RECOMMENDED: Call this FIRST before any coding task to get relevant knowledge graph context automatically.
+
+Returns structured context optimized for AI system prompts including:
+- Semantically relevant code from the codebase
+- Call graph relationships (callers/callees)
+- Current file context and symbols
+- Related documentation
+
+USE THIS TOOL when:
+- Starting any coding task or question about the codebase
+- You need to understand code before making changes
+- The user asks about how something works
+
+This provides richer context than searching manually.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'What you want to understand or work on (natural language)',
+        },
+        currentFile: {
+          type: 'string',
+          description: 'Path to the file currently being edited (optional)',
+        },
+        format: {
+          type: 'string',
+          enum: ['xml', 'markdown', 'json'],
+          description: 'Output format (xml recommended for system prompts)',
+          default: 'xml',
+        },
+        budget: {
+          type: 'number',
+          description: 'Token budget for context (default: 20000)',
+          default: 20000,
+        },
+        includeDocs: {
+          type: 'boolean',
+          description: 'Include related documentation',
+          default: true,
         },
       },
       required: ['query'],
@@ -703,6 +751,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'cv_context':
         validateArgs(args, ['query']);
         result = await handleContext(args as unknown as ContextArgs);
+        break;
+
+      case 'cv_auto_context':
+        validateArgs(args, ['query']);
+        result = await handleAutoContext(args as unknown as AutoContextArgs);
         break;
 
       case 'cv_explain':
