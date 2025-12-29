@@ -13,7 +13,25 @@ build/
 .env.*.local
 
 # CV-Git metadata
-.cv/
+# Selective .cv/ ignoring - some files should be committed for portability
+# See docs/STORAGE_FORMAT.md for details
+
+# Ignore temporary/cache files
+.cv/cache/
+.cv/sessions/
+.cv/embeddings/
+.cv/delta_state.json
+
+# Optionally ignore large vector files (uncomment if vectors are too large)
+# .cv/vectors/
+
+# DO NOT ignore these - they enable portable knowledge graphs:
+# .cv/config.json      - repo configuration
+# .cv/manifest.json    - storage manifest
+# .cv/graph/           - graph nodes/edges (JSONL)
+# .cv/documents/       - ingested markdown docs
+# .cv/ingestion.jsonl  - document ingestion tracking
+
 sync_state.json
 
 # API keys and credentials (IMPORTANT - never commit these!)

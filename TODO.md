@@ -1,6 +1,26 @@
 # CV-Git TODO
 
-## Next Up - v0.3.6: Knowledge Graph Sync Strategy
+## v0.3.9 - Markdown Knowledge Graph Integration (Current)
+
+### Completed
+- [x] **Markdown ingestion pipeline** - Full integration with graph and vector DBs
+  - `cv docs ingest` now creates Document nodes in FalkorDB
+  - Auto-generates embeddings in Qdrant on ingest
+  - Creates DESCRIBES edges from docs to code via `relates_to` frontmatter
+  - Creates REFERENCES_DOC edges between documents
+- [x] **Git integration for archiving**
+  - `--git-rm` flag stages file removal from git index
+  - `cv docs restore --git-add` restages restored files
+- [x] **Search includes archived docs**
+  - `--archived-only` / `--active-only` filters
+  - Shows `[archived]` indicator in results
+- [x] **Portable .cv/ storage**
+  - Updated .gitignore to commit `.cv/documents/`, `.cv/graph/`, etc.
+  - Archived docs persist to remote repository
+
+---
+
+## Next Up - v0.3.10: Knowledge Graph Sync Strategy
 
 ### Development Workflow Integration
 The knowledge graph needs to stay in sync as code changes during development. Proposed strategy:
@@ -26,7 +46,7 @@ The knowledge graph needs to stay in sync as code changes during development. Pr
 
 ---
 
-## v0.3.5 - CLI Polish & Bug Fixes (Current)
+## v0.3.5 - CLI Polish & Bug Fixes
 
 ### Completed
 

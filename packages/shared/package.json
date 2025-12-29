@@ -1,6 +1,6 @@
 {
   "name": "@cv-git/shared",
-  "version": "0.3.5",
+  "version": "0.3.9",
   "description": "Shared types and utilities for CV-Git",
   "type": "module",
   "main": "./dist/index.js",

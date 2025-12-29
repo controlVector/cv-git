@@ -23,6 +23,31 @@ import { getEmbeddingCredentials } from '../utils/credentials.js';
 import * as path from 'path';
 
 /**
+ * Resolve a document link to an absolute path
+ */
+function resolveDocLink(fromDoc: string, target: string): string {
+  // Handle anchor links
+  if (target.startsWith('#')) {
+    return fromDoc + target;
+  }
+
+  // Handle relative paths
+  if (target.startsWith('.')) {
+    const dir = path.dirname(fromDoc);
+    return path.normalize(path.join(dir, target));
+  }
+
+  // Handle absolute paths from root
+  if (target.startsWith('/')) {
+    return target.slice(1);
+  }
+
+  // Assume relative to current file's directory
+  const dir = path.dirname(fromDoc);
+  return path.normalize(path.join(dir, target));
+}
+
+/**
  * Create the docs command with subcommands
  */
 export function createDocsCommand(): Command {
@@ -123,9 +148,11 @@ export function createDocsCommand(): Command {
   // ═══════════════════════════════════════════════════════════════════════════
   docs
     .command('ingest <pattern>')
-    .description('Ingest markdown files into knowledge system')
-    .option('--archive', 'Archive files (remove from git after ingesting)')
+    .description('Ingest markdown files into knowledge system (stores + indexes)')
+    .option('--archive', 'Archive files (mark for removal from git)')
+    .option('--git-rm', 'Also run git rm to stage file removal (use with --archive)')
     .option('--force', 'Re-ingest even if unchanged')
+    .option('--no-index', 'Skip graph/vector indexing (store only)')
     .option('-v, --verbose', 'Show detailed output')
     .action(async (pattern: string, options) => {
       const spinner = ora('Ingesting documents...').start();
@@ -152,17 +179,63 @@ export function createDocsCommand(): Command {
 
         spinner.text = `Ingesting ${files.length} file(s)...`;
 
+        const config = await configManager.load(repoRoot);
         const ingest = createIngestManager(repoRoot);
+        const parser = createParser();
+
+        // Initialize graph for indexing (unless --no-index)
+        let graph: ReturnType<typeof createGraphManager> | null = null;
+        let vector: ReturnType<typeof createVectorManager> | null = null;
+
+        if (options.index !== false) {
+          try {
+            graph = createGraphManager(config.graph.url, config.graph.database);
+            await graph.connect();
+
+            // Try to initialize vector manager
+            try {
+              const embeddingCreds = await getEmbeddingCredentials({
+                openRouterKey: config.embedding?.apiKey,
+                openaiKey: config.ai?.apiKey
+              });
+
+              vector = createVectorManager({
+                url: config.vector.url,
+                openrouterApiKey: embeddingCreds.openrouterApiKey,
+                openaiApiKey: embeddingCreds.openaiApiKey,
+                collections: config.vector.collections,
+                cacheDir: path.join(repoRoot, '.cv', 'embeddings')
+              });
+
+              await vector.connect();
+            } catch (error) {
+              if (options.verbose) {
+                console.log(chalk.yellow('\n  Vector DB not available, skipping embeddings'));
+              }
+            }
+          } catch (error) {
+            if (options.verbose) {
+              console.log(chalk.yellow('\n  Graph DB not available, storing locally only'));
+            }
+          }
+        }
+
         let created = 0;
         let updated = 0;
         let unchanged = 0;
         let errors = 0;
+        let graphIndexed = 0;
+        let vectorIndexed = 0;
+
+        // Collect parsed docs for batch graph/vector update
+        const parsedDocs: Array<{ file: string; content: string; parsed: any }> = [];
 
         for (const file of files) {
           try {
             const absolutePath = path.join(repoRoot, file);
             const content = await fs.readFile(absolutePath, 'utf-8');
 
+            // Store in .cv/documents/
             const result = await ingest.ingest(file, content, {
               archive: options.archive,
               force: options.force
@@ -175,6 +248,19 @@ export function createDocsCommand(): Command {
               errors++;
               if (options.verbose) {
                 console.log(chalk.red(`\n  Error: ${file}: ${result.error}`));
+              }
+              continue;
+            }
+
+            // Parse document for graph indexing
+            if (graph && (result.status === 'created' || result.status === 'updated' || options.force)) {
+              try {
+                const parsed = await parser.parseDocument(file, content);
+                parsedDocs.push({ file, content, parsed });
+              } catch (parseError: any) {
+                if (options.verbose) {
+                  console.log(chalk.yellow(`\n  Parse warning: ${file}: ${parseError.message}`));
+                }
               }
             }
 
@@ -191,6 +277,133 @@ export function createDocsCommand(): Command {
 
         await ingest.close();
 
+        // Index to graph
+        if (graph && parsedDocs.length > 0) {
+          spinner.text = 'Indexing to knowledge graph...';
+
+          for (const { file, parsed } of parsedDocs) {
+            try {
+              // Create document node
+              const absolutePath = path.join(repoRoot, file);
+              const stats = await fs.stat(absolutePath);
+
+              const firstH1 = parsed.headings.find((h: any) => h.level === 1);
+              const title = firstH1?.text || path.basename(file, path.extname(file));
+              const wordCount = parsed.content.split(/\s+/).filter((w: string) => w.length > 0).length;
+
+              const docNode = {
+                path: file,
+                absolutePath,
+                title,
+                type: parsed.frontmatter.type || parsed.inferredType,
+                status: parsed.frontmatter.status || 'active',
+                frontmatter: parsed.frontmatter,
+                headings: parsed.headings,
+                links: parsed.links,
+                sections: parsed.sections,
+                wordCount,
+                gitHash: '',
+                lastModified: stats.mtimeMs,
+                createdAt: Date.now(),
+                updatedAt: Date.now()
+              };
+
+              await graph.upsertDocumentNode(docNode);
+              graphIndexed++;
+
+              // Create relationships from links
+              for (const link of parsed.links) {
+                if (link.isInternal) {
+                  const targetPath = resolveDocLink(file, link.target);
+                  if (link.isCodeRef) {
+                    await graph.createDescribesEdge(file, targetPath);
+                  } else {
+                    await graph.createReferencesDocEdge(file, targetPath);
+                  }
+                }
+              }
+
+              // Create relationships from frontmatter relates_to
+              if (parsed.frontmatter.relates_to) {
+                for (const ref of parsed.frontmatter.relates_to) {
+                  const targetPath = resolveDocLink(file, ref);
+                  await graph.createDescribesEdge(file, targetPath);
+                }
+              }
+            } catch (graphError: any) {
+              if (options.verbose) {
+                console.log(chalk.yellow(`\n  Graph index warning: ${file}: ${graphError.message}`));
+              }
+            }
+          }
+        }
+
+        // Generate embeddings
+        if (vector && parsedDocs.length > 0) {
+          spinner.text = 'Generating embeddings...';
+
+          try {
+            const markdownParser = parser.getMarkdownParser();
+            const allChunks: any[] = [];
+
+            for (const { file, parsed } of parsedDocs) {
+              const chunks = markdownParser.chunkDocument(parsed, file);
+              allChunks.push(...chunks);
+            }
+
+            if (allChunks.length > 0) {
+              // Ensure collection exists
+              try {
+                await vector.ensureCollection('document_chunks', 1536);
+              } catch { /* Collection might exist */ }
+
+              // Prepare and embed
+              const textsToEmbed = allChunks.map(chunk => {
+                const parts: string[] = [];
+                parts.push(`// Document Type: ${chunk.documentType}`);
+                parts.push(`// File: ${chunk.file}`);
+                if (chunk.heading) parts.push(`// Section: ${chunk.heading}`);
+                if (chunk.tags?.length > 0) parts.push(`// Tags: ${chunk.tags.join(', ')}`);
+                parts.push('');
+                parts.push(chunk.text);
+                return parts.join('\n');
+              });
+
+              const embeddings = await vector.embedBatch(textsToEmbed);
+
+              const items = allChunks.map((chunk, idx) => ({
+                id: chunk.id,
+                vector: embeddings[idx],
+                payload: {
+                  id: chunk.id,
+                  file: chunk.file,
+                  language: 'markdown',
+                  documentType: chunk.documentType,
+                  heading: chunk.heading,
+                  headingLevel: chunk.headingLevel,
+                  startLine: chunk.startLine,
+                  endLine: chunk.endLine,
+                  text: chunk.text,
+                  tags: chunk.tags,
+                  lastModified: Date.now()
+                }
+              }));
+
+              await vector.upsertBatch('document_chunks', items);
+              vectorIndexed = allChunks.length;
+            }
+          } catch (vectorError: any) {
+            if (options.verbose) {
+              console.log(chalk.yellow(`\n  Embedding warning: ${vectorError.message}`));
+            }
+          }
+        }
+
+        // Close connections
+        if (graph) await graph.close();
+        if (vector) await vector.close();
+
+        // Report results
         const parts = [];
         if (created > 0) parts.push(`${created} created`);
         if (updated > 0) parts.push(`${updated} updated`);
@@ -201,9 +414,51 @@ export function createDocsCommand(): Command {
           chalk.green('Ingestion complete: ') + parts.join(', ')
         );
 
-        if (options.archive) {
+        if (graphIndexed > 0 || vectorIndexed > 0) {
+          console.log(chalk.gray(`  Indexed: ${graphIndexed} graph nodes, ${vectorIndexed} embeddings`));
+        }
+
+        // Handle git removal for archived files
+        if (options.archive && options.gitRm && (created > 0 || updated > 0)) {
+          spinner.start('Removing archived files from git...');
+
+          const { execSync } = await import('child_process');
+          let gitRmCount = 0;
+          const gitRmErrors: string[] = [];
+
+          for (const file of files) {
+            try {
+              // Check if file is tracked by git
+              execSync(`git ls-files --error-unmatch "${file}"`, {
+                cwd: repoRoot,
+                stdio: 'pipe'
+              });
+
+              // File is tracked, remove it
+              execSync(`git rm --cached "${file}"`, {
+                cwd: repoRoot,
+                stdio: 'pipe'
+              });
+              gitRmCount++;
+            } catch (error: any) {
+              // File not tracked or git error - that's fine
+              if (options.verbose) {
+                gitRmErrors.push(`${file}: ${error.message}`);
+              }
+            }
+          }
+
+          if (gitRmCount > 0) {
+            spinner.succeed(chalk.green(`Removed ${gitRmCount} files from git index`));
+            console.log(chalk.gray('  Run `git commit` to finalize the removal'));
+            console.log(chalk.gray('  Content preserved in: .cv/documents/'));
+          } else {
+            spinner.info('No tracked files to remove');
+          }
+        } else if (options.archive) {
           console.log(chalk.yellow('\nNote: Files marked as archived. They remain in git until you remove them.'));
-          console.log(chalk.gray('  To remove from git: git rm <file>'));
+          console.log(chalk.gray('  To remove from git: git rm --cached <file>'));
+          console.log(chalk.gray('  Or re-run with: cv docs ingest --archive --git-rm'));
           console.log(chalk.gray('  Content preserved in: .cv/documents/'));
         }
 
@@ -219,7 +474,8 @@ export function createDocsCommand(): Command {
   docs
     .command('archive <file>')
     .description('Mark ingested document as archived')
-    .action(async (file: string) => {
+    .option('--git-rm', 'Also run git rm to stage file removal')
+    .action(async (file: string, options) => {
       try {
         const repoRoot = await findRepoRoot();
         if (!repoRoot) {
@@ -243,7 +499,31 @@ export function createDocsCommand(): Command {
         if (result) {
           console.log(chalk.green(`Archived: ${file}`));
           console.log(chalk.gray(`Content preserved in: .cv/documents/${file}`));
-          console.log(chalk.gray(`To remove from git: git rm ${file}`));
+
+          // Handle git removal if requested
+          if (options.gitRm) {
+            try {
+              const { execSync } = await import('child_process');
+
+              // Check if file is tracked by git
+              execSync(`git ls-files --error-unmatch "${file}"`, {
+                cwd: repoRoot,
+                stdio: 'pipe'
+              });
+
+              // File is tracked, remove it
+              execSync(`git rm --cached "${file}"`, {
+                cwd: repoRoot,
+                stdio: 'pipe'
+              });
+              console.log(chalk.green(`Removed from git index: ${file}`));
+              console.log(chalk.gray('Run `git commit` to finalize the removal'));
+            } catch (error: any) {
+              console.log(chalk.yellow(`Note: Could not remove from git (may not be tracked)`));
+            }
+          } else {
+            console.log(chalk.gray(`To remove from git: git rm --cached ${file}`));
+          }
         } else {
           console.log(chalk.yellow(`Already archived: ${file}`));
         }
@@ -261,6 +541,7 @@ export function createDocsCommand(): Command {
     .command('restore <file>')
     .description('Restore archived document to filesystem')
     .option('--stdout', 'Output content to stdout instead of writing file')
+    .option('--git-add', 'Also run git add to stage the restored file')
     .action(async (file: string, options) => {
       try {
         const repoRoot = await findRepoRoot();
@@ -288,7 +569,22 @@ export function createDocsCommand(): Command {
           await fs.writeFile(absolutePath, content);
 
           console.log(chalk.green(`Restored: ${file}`));
-          console.log(chalk.gray(`To add back to git: git add ${file}`));
+
+          // Handle git add if requested
+          if (options.gitAdd) {
+            try {
+              const { execSync } = await import('child_process');
+              execSync(`git add "${file}"`, {
+                cwd: repoRoot,
+                stdio: 'pipe'
+              });
+              console.log(chalk.green(`Added to git: ${file}`));
+            } catch (error: any) {
+              console.log(chalk.yellow(`Note: Could not add to git: ${error.message}`));
+            }
+          } else {
+            console.log(chalk.gray(`To add back to git: git add ${file}`));
+          }
         }
 
       } catch (error: any) {
@@ -533,9 +829,11 @@ export function createDocsCommand(): Command {
   // ═══════════════════════════════════════════════════════════════════════════
   docs
     .command('search <query>')
-    .description('Semantic search across documentation')
+    .description('Semantic search across documentation (includes archived docs)')
     .option('-n, --limit <number>', 'Number of results', '10')
     .option('-t, --type <type>', 'Filter by document type')
+    .option('--archived-only', 'Only show results from archived documents')
+    .option('--active-only', 'Only show results from non-archived documents')
     .option('--min-score <score>', 'Minimum similarity score (0-1)', '0.5')
     .option('--json', 'Output as JSON')
     .action(async (query: string, options) => {
@@ -565,24 +863,56 @@ export function createDocsCommand(): Command {
 
         await vector.connect();
 
+        // Load ingestion data to check archived status
+        const ingest = createIngestManager(repoRoot);
+        const archivedPaths = new Set<string>();
+
+        try {
+          const archivedEntries = await ingest.getArchivedEntries();
+          for (const entry of archivedEntries) {
+            archivedPaths.add(entry.path);
+          }
+        } catch {
+          // Ingestion data not available - that's fine
+        }
+
+        await ingest.close();
+
         // Search document_chunks collection
         const results = await vector.search(
           'document_chunks',
           query,
-          parseInt(options.limit, 10),
+          parseInt(options.limit, 10) * 2, // Get extra for filtering
           { minScore: parseFloat(options.minScore) }
         );
 
         spinner.stop();
 
-        // Filter by type if specified
+        // Filter by type and archived status
         let filteredResults = results;
+
         if (options.type) {
-          filteredResults = results.filter(r => r.payload.documentType === options.type);
+          filteredResults = filteredResults.filter(r => r.payload.documentType === options.type);
         }
 
+        if (options.archivedOnly) {
+          filteredResults = filteredResults.filter(r => archivedPaths.has(r.payload.file));
+        }
+
+        if (options.activeOnly) {
+          filteredResults = filteredResults.filter(r => !archivedPaths.has(r.payload.file));
+        }
+
+        // Apply final limit
+        filteredResults = filteredResults.slice(0, parseInt(options.limit, 10));
+
         if (options.json) {
-          console.log(JSON.stringify(filteredResults, null, 2));
+          // Add archived status to JSON output
+          const enrichedResults = filteredResults.map(r => ({
+            ...r,
+            archived: archivedPaths.has(r.payload.file)
+          }));
+          console.log(JSON.stringify(enrichedResults, null, 2));
         } else {
           if (filteredResults.length === 0) {
             console.log(chalk.yellow('No matching documents found.'));
@@ -593,8 +923,14 @@ export function createDocsCommand(): Command {
               const score = (result.score * 100).toFixed(0);
               const type = result.payload.documentType || 'unknown';
               const heading = result.payload.heading || '';
+              const isArchived = archivedPaths.has(result.payload.file);
 
-              console.log(chalk.cyan(`${result.payload.file}`));
+              // Show file path with archived indicator
+              const pathDisplay = isArchived
+                ? chalk.cyan(`${result.payload.file}`) + chalk.yellow(' [archived]')
+                : chalk.cyan(`${result.payload.file}`);
+
+              console.log(pathDisplay);
               if (heading) {
                 console.log(chalk.gray(`  Section: ${heading}`));
               }
@@ -606,6 +942,12 @@ export function createDocsCommand(): Command {
                 console.log(chalk.gray(`  ${preview}...`));
               }
               console.log('');
+            }
+
+            // Show hint about archived docs
+            const archivedCount = filteredResults.filter(r => archivedPaths.has(r.payload.file)).length;
+            if (archivedCount > 0) {
+              console.log(chalk.gray(`Tip: ${archivedCount} result(s) from archived docs. Use 'cv docs restore <file>' to access.`));
             }
           }
         }

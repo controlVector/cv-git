@@ -18,12 +18,14 @@ CV-Git stores repository knowledge in the `.cv/` directory. This format is:
 .cv/
 ├── config.json              # Repository configuration
 ├── manifest.json            # Storage manifest with metadata
+├── ingestion.jsonl          # Document ingestion tracking
 ├── graph/
 │   ├── nodes/
 │   │   ├── files.jsonl      # File nodes
 │   │   ├── symbols.jsonl    # Symbol nodes (functions, classes, etc.)
 │   │   ├── modules.jsonl    # Module/package nodes
 │   │   ├── commits.jsonl    # Git commit nodes
+│   │   ├── documents.jsonl  # Documentation nodes (markdown files)
 │   │   ├── prds.jsonl       # PRD requirement nodes
 │   │   ├── devops.jsonl     # DevOps nodes (CI/CD, deployments)
 │   │   └── tests.jsonl      # Test nodes
@@ -31,11 +33,17 @@ CV-Git stores repository knowledge in the `.cv/` directory. This format is:
 │       ├── imports.jsonl    # Import relationships
 │       ├── calls.jsonl      # Function call relationships
 │       ├── contains.jsonl   # Containment (file->symbol, etc.)
+│       ├── describes.jsonl  # Document describes code (doc->file/symbol)
+│       ├── references.jsonl # Document references another doc
 │       ├── implements.jsonl # Code implements requirement
 │       ├── depends.jsonl    # Dependency relationships
 │       └── triggers.jsonl   # DevOps triggers (commit->deploy, etc.)
+├── documents/               # Ingested markdown document storage
+│   └── [relative-path]/     # Mirrors original repo structure
+│       └── file.md          # Full document content (for archived docs)
 ├── vectors/
 │   ├── code_chunks.jsonl    # Code chunk embeddings
+│   ├── doc_chunks.jsonl     # Document section embeddings
 │   ├── docstrings.jsonl     # Docstring embeddings
 │   ├── commits.jsonl        # Commit message embeddings
 │   └── prds.jsonl           # PRD chunk embeddings
@@ -73,10 +81,10 @@ CV-Git stores repository knowledge in the `.cv/` directory. This format is:
     "dimensions": 1536
   },
   "nodeTypes": [
-    "file", "symbol", "module", "commit", "prd", "devops", "test"
+    "file", "symbol", "module", "commit", "document", "prd", "devops", "test"
   ],
   "edgeTypes": [
-    "imports", "calls", "contains", "implements", "depends", "triggers"
+    "imports", "calls", "contains", "describes", "references", "implements", "depends", "triggers"
   ]
 }
 ```
@@ -95,6 +103,12 @@ Each line is a JSON object representing a node:
 ```jsonl
 {"id":"sym:src/index.ts:MyClass","type":"symbol","kind":"class","name":"MyClass","file":"src/index.ts","line":10,"endLine":50,"complexity":15,"docstring":"Main application class"}
 {"id":"sym:src/index.ts:myFunction","type":"symbol","kind":"function","name":"myFunction","file":"src/index.ts","line":55,"endLine":70,"complexity":5,"signature":"(x: number) => string"}
+```
+
+#### documents.jsonl
+```jsonl
+{"id":"doc:docs/ARCHITECTURE.md","type":"document","path":"docs/ARCHITECTURE.md","title":"System Architecture","docType":"design_spec","status":"active","wordCount":2450,"sectionCount":8,"archived":false,"tags":["architecture","design"],"frontmatter":{"author":"team","version":"1.0"}}
+{"id":"doc:docs/API.md","type":"document","path":"docs/API.md","title":"API Reference","docType":"api_doc","status":"active","wordCount":1200,"sectionCount":5,"archived":true,"archivedAt":"2025-01-15T10:00:00Z","tags":["api"]}
 ```
 
 #### prds.jsonl (Future)
@@ -120,6 +134,17 @@ Each line represents a relationship:
 #### calls.jsonl
 ```jsonl
 {"source":"sym:src/index.ts:myFunction","target":"sym:src/utils.ts:helper","type":"calls","metadata":{"line":60,"count":1}}
+```
+
+#### describes.jsonl
+```jsonl
+{"source":"doc:docs/ARCHITECTURE.md","target":"file:src/index.ts","type":"describes","metadata":{"section":"Overview","confidence":0.9}}
+{"source":"doc:docs/API.md","target":"sym:src/api/routes.ts:handleRequest","type":"describes","metadata":{"section":"Endpoints","confidence":0.85}}
+```
+
+#### references.jsonl
+```jsonl
+{"source":"doc:docs/ARCHITECTURE.md","target":"doc:docs/API.md","type":"references","metadata":{"linkText":"API documentation","line":45}}
 ```
 
 #### implements.jsonl
@@ -199,16 +224,37 @@ Each node/edge type can have optional fields:
 ## .gitignore Recommendations
 
 ```gitignore
-# CV-Git
+# CV-Git - Selective ignoring for portability
+# Ignore temporary/cache files
 .cv/cache/
 .cv/sessions/
-.cv/vectors/*.jsonl  # Optional: exclude large vector files
+.cv/embeddings/
+.cv/delta_state.json
 
-# Include these (portable graph structure)
-!.cv/config.json
-!.cv/manifest.json
-!.cv/graph/
+# Optional: exclude large vector files (uncomment if needed)
+# .cv/vectors/
+
+# DO NOT ignore these - they enable portable knowledge graphs:
+# .cv/config.json      - repository configuration
+# .cv/manifest.json    - storage manifest with metadata
+# .cv/ingestion.jsonl  - document ingestion tracking
+# .cv/graph/           - graph nodes and edges (JSONL)
+# .cv/documents/       - ingested/archived markdown docs
+# .cv/vectors/         - vector embeddings (optional, can be regenerated)
 ```
+
+### What Gets Committed
+
+| Path | Committed | Purpose |
+|------|-----------|---------|
+| `.cv/config.json` | ✅ Yes | Repo settings (no secrets) |
+| `.cv/manifest.json` | ✅ Yes | Schema version, stats |
+| `.cv/ingestion.jsonl` | ✅ Yes | Track ingested documents |
+| `.cv/graph/` | ✅ Yes | Knowledge graph (nodes/edges) |
+| `.cv/documents/` | ✅ Yes | Archived markdown docs |
+| `.cv/vectors/` | ⚠️ Optional | Large, can regenerate |
+| `.cv/cache/` | ❌ No | Temporary data |
+| `.cv/sessions/` | ❌ No | Local chat history |
 
 ## Implementation Phases
 
@@ -223,12 +269,22 @@ Each node/edge type can have optional fields:
 - [x] Auto-load `.cv/` files into DB on `cv find`
 - [ ] LRU eviction for memory management (future)
 
-### Phase 3: Incremental Sync
-- [ ] Track file hashes for change detection
+### Phase 3: Document Ingestion 🚧 (v0.3.9)
+- [x] Markdown parser with frontmatter, headings, links
+- [x] IngestManager for `.cv/documents/` storage
+- [x] CLI commands: `cv docs ingest/archive/restore/list`
+- [x] Delta sync manager for change tracking
+- [ ] Wire ingest → graph pipeline (Document nodes)
+- [ ] DESCRIBES edges from docs to code
+- [ ] Auto-embed on ingest
+- [ ] Git integration for --archive flag
+
+### Phase 4: Incremental Sync
+- [x] Track file hashes for change detection (DeltaSyncManager)
 - [ ] Only update changed nodes/edges
 - [ ] Merge strategy for concurrent edits
 
-### Phase 4: Extended Node Types
+### Phase 5: Extended Node Types
 - [ ] PRD nodes (integrate with cv-prd)
 - [ ] DevOps nodes (CI/CD pipelines)
 - [ ] Test nodes (test coverage mapping)
