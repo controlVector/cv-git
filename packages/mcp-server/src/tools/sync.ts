@@ -14,6 +14,7 @@ import {
   createSyncEngine,
 } from '@cv-git/core';
 import { findRepoRoot } from '@cv-git/shared';
+import { getOpenAIApiKey, getOpenRouterApiKey } from '../credentials.js';
 
 /**
  * Handle cv_sync tool call
@@ -45,13 +46,15 @@ export async function handleSync(args: SyncArgs): Promise<ToolResult> {
 
     // Vector manager (optional)
     let vector = undefined;
-    const openaiApiKey = config.ai.apiKey || process.env.OPENAI_API_KEY;
+    const openaiApiKey = config.ai.apiKey || await getOpenAIApiKey();
+    const openrouterApiKey = await getOpenRouterApiKey();
+    const apiKey = openaiApiKey || openrouterApiKey;
 
-    if (openaiApiKey && config.vector) {
+    if (apiKey && config.vector) {
       try {
         vector = createVectorManager(
           config.vector.url,
-          openaiApiKey,
+          apiKey,
           config.vector.collections
         );
         await vector.connect();

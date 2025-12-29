@@ -10,6 +10,7 @@ import {
   createVectorManager,
 } from '@cv-git/core';
 import { findRepoRoot } from '@cv-git/shared';
+import { getOpenAIApiKey, getOpenRouterApiKey } from '../credentials.js';
 
 /**
  * Handle cv_find tool call
@@ -27,20 +28,23 @@ export async function handleFind(args: FindArgs): Promise<ToolResult> {
     // Load configuration
     const config = await configManager.load(repoRoot);
 
-    // Check for OpenAI API key
-    const openaiApiKey = config.ai.apiKey || process.env.OPENAI_API_KEY;
-    if (!openaiApiKey) {
+    // Get API keys from credential manager
+    const openaiApiKey = config.ai.apiKey || await getOpenAIApiKey();
+    const openrouterApiKey = await getOpenRouterApiKey();
+
+    if (!openaiApiKey && !openrouterApiKey) {
       return errorResult(
-        'OpenAI API key not found. Set OPENAI_API_KEY environment variable or configure with `cv config set ai.apiKey <key>`'
+        'No embedding API key found. Run `cv auth setup openai` or `cv auth setup openrouter`.'
       );
     }
 
-    // Initialize vector manager
-    const vector = createVectorManager(
-      config.vector.url,
+    // Initialize vector manager with proper options
+    const vector = createVectorManager({
+      url: config.vector.url,
+      openrouterApiKey,
       openaiApiKey,
-      config.vector.collections
-    );
+      collections: config.vector.collections,
+    });
 
     await vector.connect();
 

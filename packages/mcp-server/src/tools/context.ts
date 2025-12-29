@@ -11,9 +11,9 @@ import {
   createGraphManager,
 } from '@cv-git/core';
 import { findRepoRoot, VectorSearchResult, CodeChunkPayload, SymbolNode } from '@cv-git/shared';
-import { CredentialManager } from '@cv-git/credentials';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { getOpenAIApiKey, getOpenRouterApiKey } from '../credentials.js';
 
 export interface ContextArgs {
   query: string;
@@ -49,43 +49,23 @@ export async function handleContext(args: ContextArgs): Promise<ToolResult> {
     // Load configuration
     const config = await configManager.load(repoRoot);
 
-    // Get API key from credentials or env
-    let openaiApiKey = config.ai.apiKey || process.env.OPENAI_API_KEY;
-    let openrouterApiKey = process.env.OPENROUTER_API_KEY;
+    // Get API keys from credential manager
+    const openaiApiKey = config.ai.apiKey || await getOpenAIApiKey();
+    const openrouterApiKey = await getOpenRouterApiKey();
 
-    // Try credential manager
-    try {
-      const credentials = new CredentialManager();
-      await credentials.init();
-
-      if (!openaiApiKey) {
-        openaiApiKey = await credentials.getOpenAIKey() || undefined;
-      }
-      if (!openrouterApiKey) {
-        openrouterApiKey = await credentials.getOpenRouterKey() || undefined;
-      }
-    } catch {
-      // Credential manager not available
-    }
-
-    // Set OpenRouter in env for VectorManager
-    if (openrouterApiKey && !process.env.OPENROUTER_API_KEY) {
-      process.env.OPENROUTER_API_KEY = openrouterApiKey;
-    }
-
-    const apiKey = openaiApiKey || openrouterApiKey;
-    if (!apiKey) {
+    if (!openaiApiKey && !openrouterApiKey) {
       return errorResult(
-        'No embedding API key found. Set OPENAI_API_KEY or OPENROUTER_API_KEY, or run `cv auth setup openai`'
+        'No embedding API key found. Run `cv auth setup openai` or `cv auth setup openrouter`.'
       );
     }
 
-    // Initialize vector manager
-    const vector = createVectorManager(
-      config.vector.url,
+    // Initialize vector manager with proper options
+    const vector = createVectorManager({
+      url: config.vector.url,
+      openrouterApiKey,
       openaiApiKey,
-      config.vector.collections
-    );
+      collections: config.vector.collections,
+    });
     await vector.connect();
 
     // Initialize graph manager (optional)

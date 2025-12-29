@@ -13,6 +13,7 @@ import {
   createGitManager,
 } from '@cv-git/core';
 import { findRepoRoot } from '@cv-git/shared';
+import { getAnthropicApiKey } from '../credentials.js';
 
 /**
  * Handle cv_do tool call
@@ -30,11 +31,11 @@ export async function handleDo(args: DoArgs): Promise<ToolResult> {
     // Load configuration
     const config = await configManager.load(repoRoot);
 
-    // Check for API keys
-    const anthropicApiKey = config.ai.apiKey || process.env.ANTHROPIC_API_KEY;
+    // Get API key from credential manager
+    const anthropicApiKey = config.ai.apiKey || await getAnthropicApiKey();
     if (!anthropicApiKey) {
       return errorResult(
-        'Anthropic API key not found. Set ANTHROPIC_API_KEY environment variable.'
+        'Anthropic API key not found. Run `cv auth setup anthropic`.'
       );
     }
 
@@ -112,11 +113,11 @@ export async function handleReview(args: ReviewArgs): Promise<ToolResult> {
     // Load configuration
     const config = await configManager.load(repoRoot);
 
-    // Check for API keys
-    const anthropicApiKey = config.ai.apiKey || process.env.ANTHROPIC_API_KEY;
+    // Get API key from credential manager
+    const anthropicApiKey = config.ai.apiKey || await getAnthropicApiKey();
     if (!anthropicApiKey) {
       return errorResult(
-        'Anthropic API key not found. Set ANTHROPIC_API_KEY environment variable.'
+        'Anthropic API key not found. Run `cv auth setup anthropic`.'
       );
     }
 

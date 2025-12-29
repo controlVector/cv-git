@@ -10,6 +10,7 @@ import { promisify } from 'util';
 import { ToolResult } from '../types.js';
 import { successResult, errorResult } from '../utils.js';
 import * as path from 'path';
+import { getAnthropicApiKey, getOpenAIApiKey, getOpenRouterApiKey } from '../credentials.js';
 
 const execAsync = promisify(exec);
 
@@ -119,10 +120,10 @@ export async function handleStatus(): Promise<ToolResult> {
       // Check services
       output += '\nServices:\n';
 
-      // Check FalkorDB
+      // Check FalkorDB (using TCP port check)
       try {
-        const { stdout } = await execAsync('redis-cli -h localhost -p 6379 ping', { timeout: 2000 });
-        if (stdout.trim().toLowerCase() === 'pong') {
+        const { stdout } = await execAsync('timeout 1 bash -c "</dev/tcp/localhost/6379" 2>/dev/null && echo "open" || echo "closed"', { timeout: 2000 });
+        if (stdout.trim() === 'open') {
           output += `  ✓ FalkorDB: Running (localhost:6379)\n`;
         } else {
           output += `  ✗ FalkorDB: Not responding\n`;
@@ -237,10 +238,10 @@ export async function handleDoctor(): Promise<ToolResult> {
       });
     }
 
-    // Check 5: FalkorDB
+    // Check 5: FalkorDB (using TCP port check instead of redis-cli)
     try {
-      const { stdout } = await execAsync('redis-cli -h localhost -p 6379 ping', { timeout: 2000 });
-      if (stdout.trim().toLowerCase() === 'pong') {
+      const { stdout } = await execAsync('timeout 1 bash -c "</dev/tcp/localhost/6379" 2>/dev/null && echo "open" || echo "closed"', { timeout: 2000 });
+      if (stdout.trim() === 'open') {
         checks.push({
           name: 'FalkorDB (Knowledge Graph)',
           status: 'pass',
@@ -285,35 +286,37 @@ export async function handleDoctor(): Promise<ToolResult> {
       });
     }
 
-    // Check 7: API Keys
-    const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.CV_ANTHROPIC_KEY;
-    const openaiKey = process.env.OPENAI_API_KEY || process.env.CV_OPENAI_KEY;
+    // Check 7: API Keys (from credential manager)
+    const anthropicKey = await getAnthropicApiKey();
+    const openaiKey = await getOpenAIApiKey();
+    const openrouterKey = await getOpenRouterApiKey();
 
     if (anthropicKey) {
       checks.push({
         name: 'Anthropic API Key',
         status: 'pass',
-        message: 'Configured'
+        message: 'Configured (via credential manager)'
       });
     } else {
       checks.push({
         name: 'Anthropic API Key',
         status: 'warn',
-        message: 'Not set (required for AI features)'
+        message: 'Not set. Run: cv auth setup anthropic'
       });
     }
 
-    if (openaiKey) {
+    if (openaiKey || openrouterKey) {
+      const provider = openrouterKey ? 'OpenRouter' : 'OpenAI';
       checks.push({
-        name: 'OpenAI API Key',
+        name: 'Embedding API Key',
         status: 'pass',
-        message: 'Configured'
+        message: `Configured via ${provider} (credential manager)`
       });
     } else {
       checks.push({
-        name: 'OpenAI API Key',
+        name: 'Embedding API Key',
         status: 'warn',
-        message: 'Not set (required for semantic search)'
+        message: 'Not set. Run: cv auth setup openai (or openrouter)'
       });
     }
 

@@ -16,6 +16,7 @@ import {
 import { findRepoRoot } from '@cv-git/shared';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { getEmbeddingCredentials } from '../credentials.js';
 
 /**
  * Arguments for cv_docs_search
@@ -49,16 +50,6 @@ export interface DocsListArgs {
 }
 
 /**
- * Get embedding credentials from config or environment
- */
-async function getEmbeddingCredentials(config: any) {
-  return {
-    openrouterApiKey: config.embedding?.apiKey || process.env.OPENROUTER_API_KEY,
-    openaiApiKey: config.ai?.apiKey || process.env.OPENAI_API_KEY
-  };
-}
-
-/**
  * Handle cv_docs_search - Search documentation including archived docs
  */
 export async function handleDocsSearch(args: DocsSearchArgs): Promise<ToolResult> {
@@ -71,11 +62,11 @@ export async function handleDocsSearch(args: DocsSearchArgs): Promise<ToolResult
     }
 
     const config = await configManager.load(repoRoot);
-    const creds = await getEmbeddingCredentials(config);
+    const creds = await getEmbeddingCredentials();
 
     if (!creds.openaiApiKey && !creds.openrouterApiKey) {
       return errorResult(
-        'No embedding API key found. Set OPENAI_API_KEY or OPENROUTER_API_KEY environment variable.'
+        'No embedding API key found. Run `cv auth setup openai` or `cv auth setup openrouter`.'
       );
     }
 
@@ -182,7 +173,7 @@ export async function handleDocsIngest(args: DocsIngestArgs): Promise<ToolResult
     }
 
     const config = await configManager.load(repoRoot);
-    const creds = await getEmbeddingCredentials(config);
+    const creds = await getEmbeddingCredentials();
 
     // Initialize managers
     const ingest = createIngestManager(repoRoot);
