@@ -4,6 +4,19 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+
+// Re-export CommitAnalyzer
+export {
+  CommitAnalyzer,
+  createCommitAnalyzer,
+  CommitAnalysis,
+  GeneratedCommitMessage,
+  CommitType,
+  SymbolChange,
+  BreakingChange,
+  CommitAnalyzerOptions,
+  CommitAIProvider
+} from './commit-analyzer.js';
 import {
   Context,
   Plan,

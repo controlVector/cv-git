@@ -84,6 +84,12 @@ import {
   handleFileHistory,
   handleBlame,
 } from './tools/version.js';
+import {
+  handleCommitAnalyze,
+  handleCommitGenerate,
+  CommitAnalyzeArgs,
+  CommitGenerateArgs,
+} from './tools/commit.js';
 
 /**
  * Tool definitions
@@ -784,6 +790,33 @@ This provides richer context than searching manually.`,
       },
     },
   },
+
+  // AI Commit Message Generation Tools
+  {
+    name: 'cv_commit_analyze',
+    description: 'Analyze staged git changes using AI and knowledge graph. Returns structured information about files changed, symbols added/modified/deleted, breaking changes detected, and suggested commit type/scope.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'cv_commit_generate',
+    description: 'Generate a conventional commit message from staged changes using AI analysis. Uses knowledge graph to detect breaking changes and affected callers. Returns a ready-to-use commit message.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        type: {
+          type: 'string',
+          description: 'Override commit type (feat, fix, refactor, docs, test, chore, style, perf, build, ci)',
+        },
+        scope: {
+          type: 'string',
+          description: 'Override commit scope (e.g., "auth", "api", "ui")',
+        },
+      },
+    },
+  },
 ];
 
 /**
@@ -1011,6 +1044,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'cv_docs_list':
         result = await handleDocsList(args as unknown as DocsListArgs);
+        break;
+
+      // AI Commit Message Generation
+      case 'cv_commit_analyze':
+        result = await handleCommitAnalyze(args as unknown as CommitAnalyzeArgs);
+        break;
+
+      case 'cv_commit_generate':
+        result = await handleCommitGenerate(args as unknown as CommitGenerateArgs);
         break;
 
       default:

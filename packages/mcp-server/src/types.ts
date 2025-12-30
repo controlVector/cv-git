@@ -163,3 +163,18 @@ export interface FileHistoryArgs {
 export interface BlameArgs {
   target: string;
 }
+
+/**
+ * Tool arguments for cv_commit_analyze
+ */
+export interface CommitAnalyzeArgs {
+  // No arguments needed - analyzes staged changes
+}
+
+/**
+ * Tool arguments for cv_commit_generate
+ */
+export interface CommitGenerateArgs {
+  type?: string;   // Override commit type (feat, fix, refactor, etc.)
+  scope?: string;  // Override commit scope
+}
