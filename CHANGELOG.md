@@ -2,6 +2,75 @@
 
 All notable changes to CV-Git will be documented in this file.
 
+## [0.4.0] - 2025-12-30
+
+### Added
+
+#### AI Context Integration (Phase 1-5)
+
+**cv_auto_context MCP Tool**
+- New recommended first-call tool for AI coding assistants
+- Provides optimized context for system prompts
+- Includes semantic code matches, call graph relationships, and documentation
+- Token budget control for efficient context usage
+
+**cv watch Command**
+- Real-time file watching with automatic knowledge graph sync
+- Configurable debounce (default 1000ms)
+- Desktop notifications support (`--notify`)
+- Supports `.cvignore` patterns
+
+**MCP Resources**
+- `cv://status` - Repository status (TTL: 30s)
+- `cv://stats` - Knowledge graph statistics (TTL: 60s)
+- `cv://recent-commits` - Last 10 commits (TTL: 30s)
+- `cv://modified-files` - Modified files list (TTL: 10s)
+- `cv://hotspots` - Most-called functions (TTL: 300s)
+
+**Version-Aware Tools**
+- `cv_commits` - List commits, filter by file/author
+- `cv_file_history` - File modification history with diff stats
+- `cv_blame` - Commit attribution for files and symbols
+
+**Commit Sync**
+- Commits now synced to knowledge graph during `cv sync`
+- MODIFIES edges link commits to files they changed
+- Tracks insertions/deletions per file modification
+- Configurable depth (default: 50 commits)
+
+**Documentation Tools**
+- `cv_docs_search` - Semantic search across documentation
+- `cv_docs_ingest` - Add documents to knowledge graph
+- `cv_docs_list` - List documents with filtering
+
+#### Infrastructure
+
+**Structured Logging**
+- Configurable log levels via `CV_LOG_LEVEL` (error, warn, info, debug)
+- JSON output mode via `CV_LOG_JSON=true`
+- Debug mode via `CV_DEBUG=true`
+- Timing instrumentation for performance analysis
+
+**Test Suite**
+- 201 vitest unit tests covering core functionality
+- MCP integration tests for tool validation
+- Logger, resources, auto-context test coverage
+
+### Changed
+
+- Delta sync now includes commit history sync
+- `cv sync --incremental` uses proper deltaSync with commits
+- Improved FalkorDB query parameter handling (prefix collision fix)
+
+### Fixed
+
+- FalkorDB parameter replacement bug where `$author` corrupted `$authorEmail`
+- `git.getCommit()` now properly retrieves commits by SHA
+- Logger test TypeScript type compatibility
+- MCP Resources error handling for edge cases
+
+---
+
 ## [0.3.0] - 2025-11-25
 
 ### Added
