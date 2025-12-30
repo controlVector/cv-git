@@ -12,7 +12,9 @@ import {
   DocumentNode,
   DocumentChunk,
   DocumentChunkPayload,
-  ParsedDocument
+  ParsedDocument,
+  CommitNode,
+  ChangeType
 } from '@cv-git/shared';
 import { shouldSyncFile, detectLanguage, getCVDir } from '@cv-git/shared';
 import { minimatch } from 'minimatch';
@@ -36,6 +38,9 @@ export interface SyncOptions {
   includeDocs?: boolean;          // Include markdown files (default: true)
   docPatterns?: string[];         // Patterns for doc files (default: ['**/*.md'])
   docExcludePatterns?: string[];  // Exclude patterns for docs
+  // Commit history sync options
+  syncCommits?: boolean;          // Sync commit history (default: true)
+  commitDepth?: number;           // Number of commits to sync (default: 50)
 }
 
 export interface DocumentSyncResult {
@@ -121,7 +126,15 @@ export class SyncEngine {
       console.log('Updating knowledge graph...');
       await this.updateGraph(parsedFiles);
 
-      // 5. Collect statistics
+      // 5. Sync commit history (if enabled)
+      const syncCommits = options.syncCommits !== false; // default: true
+      if (syncCommits) {
+        console.log('Syncing commit history...');
+        const commitDepth = options.commitDepth || 50;
+        await this.syncCommitHistory(commitDepth);
+      }
+
+      // 7. Collect statistics
       const stats = await this.graph.getStats();
 
       // Count vectors (if vector DB is available)
@@ -149,7 +162,7 @@ export class SyncEngine {
         errors
       };
 
-      // 6. Save sync state
+      // 8. Save sync state
       await this.saveSyncState(syncState);
 
       console.log(`Sync completed in ${syncState.syncDuration}s`);
@@ -333,9 +346,17 @@ export class SyncEngine {
 
       console.log(`Delta: ${delta.added.length} added, ${delta.modified.length} modified, ${delta.deleted.length} deleted, ${delta.unchanged.length} unchanged`);
 
-      // If nothing changed, return early
+      // If nothing changed in files, still sync commit history
       if (delta.added.length === 0 && delta.modified.length === 0 && delta.deleted.length === 0) {
-        console.log('No changes detected, skipping sync');
+        console.log('No file changes detected');
+
+        // Sync commit history even when no file changes (new commits may exist)
+        const syncCommits = options.syncCommits !== false;
+        if (syncCommits) {
+          console.log('Syncing commit history...');
+          const commitDepth = options.commitDepth || 50;
+          await this.syncCommitHistory(commitDepth);
+        }
 
         const stats = await this.graph.getStats();
         const prevState = await this.loadSyncState();
@@ -385,6 +406,14 @@ export class SyncEngine {
       // Update graph with changed files
       if (parsedFiles.length > 0) {
         await this.updateGraph(parsedFiles);
+      }
+
+      // Sync commit history (if enabled)
+      const syncCommits = options.syncCommits !== false; // default: true
+      if (syncCommits) {
+        console.log('Syncing commit history...');
+        const commitDepth = options.commitDepth || 50;
+        await this.syncCommitHistory(commitDepth);
       }
 
       // Handle deleted files
@@ -1302,6 +1331,110 @@ export class SyncEngine {
    */
   private getDefaultIncludeLanguages(): string[] {
     return ['typescript', 'javascript', 'python', 'go', 'rust'];
+  }
+
+  /**
+   * Sync commit history to the knowledge graph
+   * Creates Commit nodes and MODIFIES edges linking commits to files
+   */
+  async syncCommitHistory(depth: number = 50): Promise<{ commitCount: number; modifiesCount: number }> {
+    let commitCount = 0;
+    let modifiesCount = 0;
+
+    try {
+      // Get recent commits
+      const commits = await this.git.getRecentCommits(depth);
+      console.log(`Found ${commits.length} commits to sync`);
+
+      // Get current branch
+      let currentBranch = 'unknown';
+      try {
+        currentBranch = await this.git.getCurrentBranch();
+      } catch {
+        // Fallback to 'unknown' if git fails
+      }
+
+      // Process each commit
+      for (const commit of commits) {
+        try {
+          // Get detailed commit info with files changed
+          const detailedCommit = await this.git.getCommit(commit.sha);
+
+          // Get diff stats for this commit (insertions/deletions per file)
+          let diffStats: Map<string, { insertions: number; deletions: number }> = new Map();
+          try {
+            const diffs = await this.git.getDiff(`${commit.sha}^`, commit.sha);
+            for (const diff of diffs) {
+              diffStats.set(diff.file, {
+                insertions: diff.insertions,
+                deletions: diff.deletions
+              });
+            }
+          } catch {
+            // First commit has no parent, skip diff stats
+          }
+
+          // Calculate total insertions/deletions
+          let totalInsertions = 0;
+          let totalDeletions = 0;
+          for (const stats of diffStats.values()) {
+            totalInsertions += stats.insertions;
+            totalDeletions += stats.deletions;
+          }
+
+          // Create CommitNode
+          const commitNode: CommitNode = {
+            sha: commit.sha,
+            message: commit.message,
+            author: commit.author,
+            authorEmail: commit.authorEmail,
+            committer: commit.author, // simple-git doesn't distinguish
+            timestamp: commit.date,
+            branch: currentBranch,
+            filesChanged: detailedCommit.files.length,
+            insertions: totalInsertions,
+            deletions: totalDeletions,
+            createdAt: Date.now()
+          };
+
+          await this.graph.upsertCommitNode(commitNode);
+          commitCount++;
+
+          // Create MODIFIES edges for each file changed
+          for (const filePath of detailedCommit.files) {
+            try {
+              const stats = diffStats.get(filePath) || { insertions: 0, deletions: 0 };
+
+              // Determine change type
+              let changeType: ChangeType = 'modified';
+              // Note: We can't easily determine added/deleted from simple-git here
+              // The file list only contains paths, not change types
+              // For now, we'll mark everything as 'modified'
+
+              await this.graph.createModifiesEdge(commit.sha, filePath, {
+                changeType,
+                insertions: stats.insertions,
+                deletions: stats.deletions
+              });
+              modifiesCount++;
+            } catch {
+              // File might not exist in graph (e.g., excluded file types)
+              // Skip silently
+            }
+          }
+        } catch (error: any) {
+          // Log but continue with other commits
+          console.warn(`Failed to sync commit ${commit.sha.slice(0, 7)}: ${error.message}`);
+        }
+      }
+
+      console.log(`✓ Synced ${commitCount} commits with ${modifiesCount} file modifications`);
+      return { commitCount, modifiesCount };
+
+    } catch (error: any) {
+      console.error('Commit history sync failed:', error.message);
+      return { commitCount, modifiesCount };
+    }
   }
 }
 

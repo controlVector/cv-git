@@ -235,22 +235,16 @@ export function syncCommand(): Command {
           if (!lastState || !lastState.lastCommitSynced) {
             spinner.warn('No previous sync found, performing full sync instead');
           } else {
-            const changedFiles = await git.getChangedFilesSince(lastState.lastCommitSynced);
+            // Use deltaSync which handles commit history and smart change detection
+            spinner.text = 'Analyzing changes...';
+            spinner.stop();
 
-            if (changedFiles.length === 0) {
-              spinner.succeed('No changes to sync');
-              await graph.close();
-              if (vector) await vector.close();
-              return;
-            }
-
-            spinner.text = `Syncing ${changedFiles.length} changed files...`;
-
-            const syncState = await syncEngine.incrementalSync(changedFiles, {
+            const syncState = await syncEngine.deltaSync({
               excludePatterns: config.sync.excludePatterns,
               includeLanguages: config.sync.includeLanguages
             });
 
+            console.log();
             spinner.succeed(
               chalk.green(
                 `Incremental sync completed in ${syncState.syncDuration?.toFixed(1)}s`

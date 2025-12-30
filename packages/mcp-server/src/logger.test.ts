@@ -6,7 +6,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createLogger, setLogLevel } from './logger.js';
 
 describe('Logger', () => {
-  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let consoleErrorSpy: any;
 
   beforeEach(() => {
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -156,7 +157,7 @@ describe('Logger', () => {
 
       logger.info('json message', { foo: 'bar' });
 
-      const output = consoleErrorSpy.mock.calls[0][0];
+      const output = consoleErrorSpy.mock.calls[0][0] as string;
       expect(() => JSON.parse(output)).not.toThrow();
 
       const parsed = JSON.parse(output);

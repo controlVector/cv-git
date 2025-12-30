@@ -25,6 +25,9 @@ import {
   DoArgs,
   ReviewArgs,
   SyncArgs,
+  CommitsArgs,
+  FileHistoryArgs,
+  BlameArgs,
   ToolResult,
 } from './types.js';
 
@@ -76,6 +79,11 @@ import {
   DocsIngestArgs,
   DocsListArgs,
 } from './tools/docs.js';
+import {
+  handleCommits,
+  handleFileHistory,
+  handleBlame,
+} from './tools/version.js';
 
 /**
  * Tool definitions
@@ -350,6 +358,68 @@ This provides richer context than searching manually.`,
           default: 20,
         },
       },
+    },
+  },
+
+  // Version-Aware Tools (Code Evolution)
+  {
+    name: 'cv_commits',
+    description: 'List recent commits from the knowledge graph. Can filter by file or author. Shows commit history with metadata.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: {
+          type: 'number',
+          description: 'Maximum number of commits to return',
+          default: 20,
+        },
+        file: {
+          type: 'string',
+          description: 'Filter to commits that modified this file path',
+        },
+        author: {
+          type: 'string',
+          description: 'Filter to commits by this author (partial match)',
+        },
+      },
+    },
+  },
+  {
+    name: 'cv_file_history',
+    description: 'Get the complete modification history of a file. Shows all commits that changed the file with insertion/deletion counts.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          description: 'File path to get history for',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of commits to return',
+          default: 10,
+        },
+        showDiff: {
+          type: 'boolean',
+          description: 'Include diff summaries (future feature)',
+          default: false,
+        },
+      },
+      required: ['file'],
+    },
+  },
+  {
+    name: 'cv_blame',
+    description: 'Show which commits last modified code. For files, shows blame for each symbol. For symbol names, shows recent commits affecting that symbol.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: {
+          type: 'string',
+          description: 'File path or symbol name to get blame for',
+        },
+      },
+      required: ['target'],
     },
   },
 
@@ -843,6 +913,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'cv_graph_hotspots':
         result = await handleGraphHotspots(args as { limit?: number });
+        break;
+
+      // Version-Aware Tools
+      case 'cv_commits':
+        result = await handleCommits(args as unknown as CommitsArgs);
+        break;
+
+      case 'cv_file_history':
+        validateArgs(args, ['file']);
+        result = await handleFileHistory(args as unknown as FileHistoryArgs);
+        break;
+
+      case 'cv_blame':
+        validateArgs(args, ['target']);
+        result = await handleBlame(args as unknown as BlameArgs);
         break;
 
       // Code Modification

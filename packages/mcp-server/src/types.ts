@@ -138,3 +138,28 @@ export interface GraphResult {
     type: string;
   }>;
 }
+
+/**
+ * Tool arguments for cv_commits
+ */
+export interface CommitsArgs {
+  limit?: number;
+  file?: string;
+  author?: string;
+}
+
+/**
+ * Tool arguments for cv_file_history
+ */
+export interface FileHistoryArgs {
+  file: string;
+  limit?: number;
+  showDiff?: boolean;
+}
+
+/**
+ * Tool arguments for cv_blame
+ */
+export interface BlameArgs {
+  target: string;
+}

@@ -206,7 +206,12 @@ export class GraphManager {
       // Replace parameters in query (FalkorDB doesn't support parameterized queries the same way as Neo4j)
       let processedQuery = cypher;
       if (params) {
-        for (const [key, value] of Object.entries(params)) {
+        // Sort keys by length (longest first) to avoid prefix conflicts
+        // e.g., $authorEmail should be replaced before $author
+        const sortedKeys = Object.keys(params).sort((a, b) => b.length - a.length);
+
+        for (const key of sortedKeys) {
+          const value = params[key];
           const placeholder = `$${key}`;
           const escapedValue = this.escapeValue(value);
           // Use split/join for reliable replacement (avoids regex special chars issues)

@@ -127,7 +127,8 @@ export class GitManager {
    */
   async getCommit(sha: string): Promise<GitCommit> {
     try {
-      const log = await this.git.log({ maxCount: 1, from: sha, to: sha });
+      // Use log with -1 flag to get single commit by SHA
+      const log = await this.git.log(['-1', sha]);
 
       if (log.all.length === 0) {
         throw new GitError(`Commit not found: ${sha}`);
@@ -136,8 +137,19 @@ export class GitManager {
       const commit = log.all[0];
 
       // Get files changed in this commit
-      const filesResult = await this.git.diff(['--name-only', `${sha}^`, sha]);
-      const files = filesResult.trim().split('\n').filter(f => f.length > 0);
+      let files: string[] = [];
+      try {
+        const filesResult = await this.git.diff(['--name-only', `${sha}^`, sha]);
+        files = filesResult.trim().split('\n').filter(f => f.length > 0);
+      } catch {
+        // First commit or other issue - use show instead
+        try {
+          const showResult = await this.git.show(['--name-only', '--format=', sha]);
+          files = showResult.trim().split('\n').filter(f => f.length > 0);
+        } catch {
+          // Fallback to empty files list
+        }
+      }
 
       return {
         sha: commit.hash,
