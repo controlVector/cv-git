@@ -4,12 +4,7 @@
       "command": "node",
       "args": [
         "/home/schmotz/project/cv-git/packages/mcp-server/dist/index.js"
-      ],
-      "env": {
-        "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}",
-        "OPENAI_API_KEY": "${OPENAI_API_KEY}",
-        "OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}"
-      }
+      ]
     }
   }
 }

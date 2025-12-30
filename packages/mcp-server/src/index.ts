@@ -10,8 +10,13 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
+
+// Resources handler
+import { listResources, readResource } from './resources.js';
 
 import {
   FindArgs,
@@ -721,6 +726,7 @@ const server = new Server(
   {
     capabilities: {
       tools: {},
+      resources: {},
     },
   }
 );
@@ -730,6 +736,37 @@ const server = new Server(
  */
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools };
+});
+
+/**
+ * Handle list resources request
+ */
+server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  const resources = listResources();
+  return { resources };
+});
+
+/**
+ * Handle read resource request
+ */
+server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  const { uri } = request.params;
+
+  try {
+    const content = await readResource(uri);
+    return {
+      contents: [content],
+    };
+  } catch (error: any) {
+    console.error(`Error reading resource ${uri}:`, error);
+    return {
+      contents: [{
+        uri,
+        mimeType: 'application/json',
+        text: JSON.stringify({ error: error.message }),
+      }],
+    };
+  }
 });
 
 /**
