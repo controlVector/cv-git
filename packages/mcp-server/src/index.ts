@@ -58,6 +58,7 @@ import { handlePRCreate, handlePRList, handlePRReview, handleReleaseCreate } fro
 import { handleConfigGet, handleStatus, handleDoctor } from './tools/system.js';
 import { handleContext, ContextArgs } from './tools/context.js';
 import { handleAutoContext, AutoContextArgs } from './tools/auto-context.js';
+import { serverLogger, toolLogger, resourceLogger } from './logger.js';
 import {
   handlePRDContext,
   handleRequirementTrace,
@@ -742,7 +743,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
  * Handle list resources request
  */
 server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  resourceLogger.debug('Listing resources');
   const resources = listResources();
+  resourceLogger.info('Resources listed', { count: resources.length });
   return { resources };
 });
 
@@ -751,14 +754,19 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
  */
 server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   const { uri } = request.params;
+  resourceLogger.debug('Reading resource', { uri });
+  const start = Date.now();
 
   try {
     const content = await readResource(uri);
+    const duration = Date.now() - start;
+    resourceLogger.info('Resource read', { uri, duration });
     return {
       contents: [content],
     };
   } catch (error: any) {
-    console.error(`Error reading resource ${uri}:`, error);
+    const duration = Date.now() - start;
+    resourceLogger.error('Resource read failed', { uri, duration, error: error.message });
     return {
       contents: [{
         uri,
@@ -774,6 +782,8 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
  */
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
+  toolLogger.debug('Tool call received', { tool: name, args: Object.keys(args || {}) });
+  const start = Date.now();
 
   try {
     let result: ToolResult;
@@ -923,12 +933,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     // Return MCP-compliant result
+    const duration = Date.now() - start;
+    toolLogger.info('Tool call completed', { tool: name, duration, isError: result.isError });
     return {
       content: result.content,
       isError: result.isError
     };
   } catch (error: any) {
-    console.error(`Error in tool ${name}:`, error);
+    const duration = Date.now() - start;
+    toolLogger.error('Tool call failed', { tool: name, duration, error: error.message });
     const errResult = errorResult(`Failed to execute ${name}`, error);
     return {
       content: errResult.content,
@@ -941,10 +954,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
  * Handle errors
  */
 server.onerror = (error) => {
-  console.error('[MCP Error]', error);
+  serverLogger.error('MCP protocol error', { error: String(error) });
 };
 
 process.on('SIGINT', async () => {
+  serverLogger.info('Shutting down');
   await server.close();
   process.exit(0);
 });
@@ -953,12 +967,16 @@ process.on('SIGINT', async () => {
  * Start the server
  */
 async function main() {
+  serverLogger.info('Starting CV-Git MCP Server', {
+    logLevel: process.env.CV_LOG_LEVEL || 'info',
+    debug: !!process.env.CV_DEBUG
+  });
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('CV-Git MCP Server running on stdio');
+  serverLogger.info('Server connected via stdio');
 }
 
 main().catch((error) => {
-  console.error('Fatal error:', error);
+  serverLogger.error('Fatal startup error', { error: error.message });
   process.exit(1);
 });
