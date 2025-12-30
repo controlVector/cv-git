@@ -62,7 +62,7 @@ async function runTests() {
     }
 
     // =========================================================================
-    // Test 1: Store OpenAI key and verify retrieval
+    // Test 1: Store OpenAI key and verify retrieval by name
     // =========================================================================
     console.log('\n--- Test 1: OpenAI Credential Storage and Retrieval ---');
 
@@ -73,16 +73,16 @@ async function runTests() {
       apiKey: testOpenAIKey,
     });
 
-    // Simulate what getOpenAIApiKey() in credentials.ts does
-    const retrievedOpenAI = await manager.getOpenAIKey();
+    // Retrieve by specific name to be deterministic (other credentials may exist)
+    const retrievedOpenAI = await manager.retrieve(CredentialType.OPENAI_API, 'test-cli-creds');
     test(
-      'OpenAI key stored and retrieved via getOpenAIKey()',
-      retrievedOpenAI !== null && retrievedOpenAI.includes('test-openai-cli-creds'),
-      retrievedOpenAI ? `Got: ${retrievedOpenAI.substring(0, 15)}...` : 'Got null'
+      'OpenAI key stored and retrieved by name',
+      retrievedOpenAI !== null && retrievedOpenAI.apiKey === testOpenAIKey,
+      retrievedOpenAI ? `Got: ${retrievedOpenAI.apiKey.substring(0, 20)}...` : 'Got null'
     );
 
     // =========================================================================
-    // Test 2: Store Anthropic key and verify retrieval
+    // Test 2: Store Anthropic key and verify retrieval by name
     // =========================================================================
     console.log('\n--- Test 2: Anthropic Credential Storage and Retrieval ---');
 
@@ -93,15 +93,15 @@ async function runTests() {
       apiKey: testAnthropicKey,
     });
 
-    const retrievedAnthropic = await manager.getAnthropicKey();
+    const retrievedAnthropic = await manager.retrieve(CredentialType.ANTHROPIC_API, 'test-cli-creds');
     test(
-      'Anthropic key stored and retrieved via getAnthropicKey()',
-      retrievedAnthropic !== null && retrievedAnthropic.includes('test-anthropic-cli-creds'),
-      retrievedAnthropic ? `Got: ${retrievedAnthropic.substring(0, 15)}...` : 'Got null'
+      'Anthropic key stored and retrieved by name',
+      retrievedAnthropic !== null && retrievedAnthropic.apiKey === testAnthropicKey,
+      retrievedAnthropic ? `Got: ${retrievedAnthropic.apiKey.substring(0, 20)}...` : 'Got null'
     );
 
     // =========================================================================
-    // Test 3: Store OpenRouter key and verify retrieval
+    // Test 3: Store OpenRouter key and verify retrieval by name
     // =========================================================================
     console.log('\n--- Test 3: OpenRouter Credential Storage and Retrieval ---');
 
@@ -112,17 +112,17 @@ async function runTests() {
       apiKey: testOpenRouterKey,
     });
 
-    const retrievedOpenRouter = await manager.getOpenRouterKey();
+    const retrievedOpenRouter = await manager.retrieve(CredentialType.OPENROUTER_API, 'test-cli-creds');
     test(
-      'OpenRouter key stored and retrieved via getOpenRouterKey()',
-      retrievedOpenRouter !== null && retrievedOpenRouter.includes('test-openrouter-cli-creds'),
-      retrievedOpenRouter ? `Got: ${retrievedOpenRouter.substring(0, 15)}...` : 'Got null'
+      'OpenRouter key stored and retrieved by name',
+      retrievedOpenRouter !== null && retrievedOpenRouter.apiKey === testOpenRouterKey,
+      retrievedOpenRouter ? `Got: ${retrievedOpenRouter.apiKey.substring(0, 20)}...` : 'Got null'
     );
 
     // =========================================================================
-    // Test 4: Verify credential manager takes priority over env vars
+    // Test 4: Verify credential manager retrieval is independent of env vars
     // =========================================================================
-    console.log('\n--- Test 4: CredentialManager Priority Over Environment ---');
+    console.log('\n--- Test 4: CredentialManager Independent of Environment ---');
 
     // Save current env
     const savedEnvOpenAI = process.env.OPENAI_API_KEY;
@@ -130,15 +130,13 @@ async function runTests() {
     // Set env var to different value
     process.env.OPENAI_API_KEY = 'sk-env-var-should-not-be-used';
 
-    // The credentials.ts getOpenAIApiKey() function should:
-    // 1. First try CredentialManager (should return our stored key)
-    // 2. Only fall back to env var if CredentialManager returns null
-    const fromManager = await manager.getOpenAIKey();
+    // Retrieve by name should still return our stored key, not the env var
+    const fromManager = await manager.retrieve(CredentialType.OPENAI_API, 'test-cli-creds');
 
     test(
-      'CredentialManager key takes priority (not overwritten by env)',
-      fromManager !== null && fromManager.includes('test-openai-cli-creds'),
-      `Manager returned: ${fromManager?.substring(0, 15) || 'null'}... (env has: sk-env-var...)`
+      'CredentialManager retrieval is not affected by env vars',
+      fromManager !== null && fromManager.apiKey === testOpenAIKey,
+      `Manager returned: ${fromManager?.apiKey?.substring(0, 20) || 'null'}... (env has: sk-env-var...)`
     );
 
     // Restore env
@@ -149,23 +147,20 @@ async function runTests() {
     }
 
     // =========================================================================
-    // Test 5: Verify fallback works when credential not stored
+    // Test 5: Verify deleted credential returns null when retrieved by name
     // =========================================================================
-    console.log('\n--- Test 5: Fallback When Credential Not Stored ---');
+    console.log('\n--- Test 5: Deleted Credential Returns Null ---');
 
     // Delete the test credential
     await manager.delete(CredentialType.OPENAI_API, 'test-cli-creds');
 
-    // Now getOpenAIKey should return null (or the first stored key if any)
-    // The credentials.ts helper would then check env vars
-    const afterDelete = await manager.getOpenAIKey();
+    // Retrieve by specific name should now return null
+    const afterDelete = await manager.retrieve(CredentialType.OPENAI_API, 'test-cli-creds');
 
-    // If there are other OpenAI credentials, this might not be null
-    // The important thing is that it doesn't crash
     test(
-      'getOpenAIKey() handles deleted credential gracefully',
-      true, // Always passes if no exception
-      `After delete, getOpenAIKey() returned: ${afterDelete === null ? 'null' : afterDelete.substring(0, 10) + '...'}`
+      'Deleted credential returns null when retrieved by name',
+      afterDelete === null,
+      `After delete, retrieve() returned: ${afterDelete === null ? 'null' : 'non-null'}`
     );
 
     // =========================================================================
