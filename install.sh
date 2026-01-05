@@ -31,53 +31,39 @@ get_version() {
     fi
 }
 
-# Copy native module with error reporting
-# Resolves symlinks to copy actual files (important for pnpm)
-copy_native_module() {
-    local module_name="$1"
-    local src_dir="$2"
-    local src_path="$src_dir/$module_name"
+# Install native modules using npm
+# This ensures all dependencies are properly resolved
+install_native_modules() {
+    echo "Installing native modules..."
 
-    # Resolve symlink to get the real path
-    if [ -L "$src_path" ]; then
-        src_path=$(readlink -f "$src_path")
-    fi
-
-    if [ -d "$src_path" ]; then
-        echo "  Copying native module: $module_name"
-        # Copy with -rL to also resolve any nested symlinks
-        if sudo cp -rL "$src_path" "$INSTALL_DIR/$module_name"; then
-            return 0
-        else
-            echo -e "${YELLOW}  Warning: Failed to copy $module_name${NC}"
-            return 1
-        fi
-    fi
-    return 0
+    # Create a minimal package.json for the native modules
+    sudo tee "$INSTALL_DIR/package.json" > /dev/null << 'PKGJSON'
+{
+  "name": "cv-git-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "keytar": "7.9.0",
+    "tree-sitter": "0.21.1",
+    "tree-sitter-go": "0.21.2",
+    "tree-sitter-java": "0.21.0",
+    "tree-sitter-javascript": "0.21.4",
+    "tree-sitter-python": "0.21.0",
+    "tree-sitter-rust": "0.21.0",
+    "tree-sitter-typescript": "0.21.2"
+  }
 }
+PKGJSON
 
-# Copy all native modules from a node_modules directory
-copy_native_modules() {
-    local src_dir="$1"
-
-    if [ ! -d "$src_dir" ]; then
-        echo -e "${YELLOW}Warning: node_modules not found at $src_dir${NC}"
+    # Install dependencies
+    cd "$INSTALL_DIR"
+    if sudo npm install --production --silent 2>/dev/null; then
+        echo -e "${GREEN}  Native modules installed successfully${NC}"
+        return 0
+    else
+        echo -e "${YELLOW}  Warning: Some native modules may not have installed correctly${NC}"
         return 1
     fi
-
-    echo "Copying native modules..."
-    copy_native_module "keytar" "$src_dir"
-    copy_native_module "tree-sitter" "$src_dir"
-
-    # Copy all tree-sitter language parsers
-    for parser in "$src_dir"/tree-sitter-*; do
-        if [ -d "$parser" ] || [ -L "$parser" ]; then
-            module_name=$(basename "$parser")
-            copy_native_module "$module_name" "$src_dir"
-        fi
-    done
-
-    return 0
 }
 
 # Get version before showing banner
@@ -208,8 +194,8 @@ main() {
         echo "Installing from local build..."
         sudo cp packages/cli/dist/bundle.cjs "$INSTALL_DIR/cv.cjs"
 
-        # Copy native modules
-        copy_native_modules "node_modules"
+        # Install native modules via npm
+        install_native_modules
     else
         # Download release
         RELEASE_URL="https://github.com/controlVector/cv-git/releases/download/v${VERSION}/cv-git-${VERSION}.tar.gz"
@@ -228,9 +214,9 @@ main() {
             echo "Rebuilding native modules..."
             pnpm rebuild keytar tree-sitter 2>/dev/null || echo -e "${YELLOW}Native module rebuild warning (may be OK)${NC}"
 
-            # Copy bundle and native modules
+            # Copy bundle and install native modules
             sudo cp packages/cli/dist/bundle.cjs "$INSTALL_DIR/cv.cjs"
-            copy_native_modules "node_modules"
+            install_native_modules
 
             cd -
             rm -rf "$TEMP_DIR"
