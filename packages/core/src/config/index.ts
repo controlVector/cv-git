@@ -16,14 +16,14 @@ const DEFAULT_CONFIG: CVConfig = {
   },
   llm: {
     provider: 'anthropic',
-    model: 'claude-sonnet-4',
+    model: 'claude-sonnet-4-20250514',
     apiKey: process.env.CV_ANTHROPIC_KEY,
     maxTokens: 4096,
     temperature: 0.2
   },
   ai: {
     provider: 'anthropic',
-    model: 'claude-sonnet-4',
+    model: 'claude-sonnet-4-20250514',
     apiKey: process.env.CV_ANTHROPIC_KEY,
     maxTokens: 4096,
     temperature: 0.2
