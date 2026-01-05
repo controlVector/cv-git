@@ -41,10 +41,73 @@ jobs:
 
       - name: Build Debian package
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential devscripts debhelper
-          dpkg-buildpackage -us -uc -b
-          mv ../cv-git_*.deb dist/release/
+          VERSION=${GITHUB_REF#refs/tags/v}
+
+          # Create package structure
+          PKG_DIR="cv-git_${VERSION}_amd64"
+          mkdir -p "${PKG_DIR}/DEBIAN"
+          mkdir -p "${PKG_DIR}/usr/lib/cv-git"
+          mkdir -p "${PKG_DIR}/usr/bin"
+
+          # Copy files
+          cp packages/cli/dist/bundle.cjs "${PKG_DIR}/usr/lib/cv-git/cv.cjs"
+
+          # Create wrapper script
+          cat > "${PKG_DIR}/usr/bin/cv" << 'WRAPPER'
+          #!/bin/bash
+          exec node /usr/lib/cv-git/cv.cjs "$@"
+          WRAPPER
+          chmod +x "${PKG_DIR}/usr/bin/cv"
+
+          # Create package.json for native modules
+          cat > "${PKG_DIR}/usr/lib/cv-git/package.json" << 'PKGJSON'
+          {
+            "name": "cv-git-runtime",
+            "version": "1.0.0",
+            "private": true,
+            "dependencies": {
+              "keytar": "7.9.0",
+              "tree-sitter": "0.21.1",
+              "tree-sitter-go": "0.21.2",
+              "tree-sitter-java": "0.21.0",
+              "tree-sitter-javascript": "0.21.4",
+              "tree-sitter-python": "0.21.0",
+              "tree-sitter-rust": "0.21.0",
+              "tree-sitter-typescript": "0.21.2"
+            }
+          }
+          PKGJSON
+
+          # Create postinst script to install native modules
+          cat > "${PKG_DIR}/DEBIAN/postinst" << 'POSTINST'
+          #!/bin/bash
+          set -e
+          echo "Installing native modules..."
+          cd /usr/lib/cv-git
+          npm install --production --silent 2>/dev/null || echo "Warning: Some native modules may not have installed"
+          echo "cv-git installed successfully. Run 'cv doctor' to verify."
+          POSTINST
+          chmod +x "${PKG_DIR}/DEBIAN/postinst"
+
+          # Create control file
+          cat > "${PKG_DIR}/DEBIAN/control" << EOF
+          Package: cv-git
+          Version: ${VERSION}
+          Section: devel
+          Priority: optional
+          Architecture: amd64
+          Depends: nodejs (>= 18.0.0)
+          Recommends: docker.io | docker-ce
+          Maintainer: CV-Git Contributors <cv-git@controlvector.dev>
+          Homepage: https://github.com/controlVector/cv-git
+          Description: AI-Native Version Control with Knowledge Graph
+           CV-Git adds knowledge graph, semantic search, and AI-powered
+           code understanding to your development workflow.
+          EOF
+
+          # Build .deb
+          dpkg-deb --build "${PKG_DIR}"
+          mv "${PKG_DIR}.deb" dist/release/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
