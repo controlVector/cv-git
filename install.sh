@@ -37,9 +37,10 @@ copy_native_module() {
     local src_dir="$2"
     local src_path="$src_dir/$module_name"
 
-    if [ -d "$src_path" ]; then
+    if [ -d "$src_path" ] || [ -L "$src_path" ]; then
         echo "  Copying native module: $module_name"
-        if sudo cp -r "$src_path" "$INSTALL_DIR/"; then
+        # Use -rL to follow symlinks and copy actual files
+        if sudo cp -rL "$src_path" "$INSTALL_DIR/"; then
             return 0
         else
             echo -e "${YELLOW}  Warning: Failed to copy $module_name${NC}"
