@@ -32,15 +32,21 @@ get_version() {
 }
 
 # Copy native module with error reporting
+# Resolves symlinks to copy actual files (important for pnpm)
 copy_native_module() {
     local module_name="$1"
     local src_dir="$2"
     local src_path="$src_dir/$module_name"
 
-    if [ -d "$src_path" ] || [ -L "$src_path" ]; then
+    # Resolve symlink to get the real path
+    if [ -L "$src_path" ]; then
+        src_path=$(readlink -f "$src_path")
+    fi
+
+    if [ -d "$src_path" ]; then
         echo "  Copying native module: $module_name"
-        # Use -rL to follow symlinks and copy actual files
-        if sudo cp -rL "$src_path" "$INSTALL_DIR/"; then
+        # Copy with -rL to also resolve any nested symlinks
+        if sudo cp -rL "$src_path" "$INSTALL_DIR/$module_name"; then
             return 0
         else
             echo -e "${YELLOW}  Warning: Failed to copy $module_name${NC}"
@@ -65,7 +71,7 @@ copy_native_modules() {
 
     # Copy all tree-sitter language parsers
     for parser in "$src_dir"/tree-sitter-*; do
-        if [ -d "$parser" ]; then
+        if [ -d "$parser" ] || [ -L "$parser" ]; then
             module_name=$(basename "$parser")
             copy_native_module "$module_name" "$src_dir"
         fi
