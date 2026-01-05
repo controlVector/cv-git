@@ -50,7 +50,7 @@ jobs:
         if: ${{ vars.GPG_PUBLIC_KEY != '' }}
         run: |
           echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
-          echo "${{ vars.GPG_PUBLIC_KEY }}" > apt-repo/gpg.key
+          echo "${{ vars.GPG_PUBLIC_KEY }}" > apt-repo/gpg.pub
 
       - name: Generate repository metadata
         run: |
@@ -95,7 +95,7 @@ jobs:
           <h2>Installation</h2>
           <pre>
           # Add GPG key
-          curl -fsSL https://controlvector.github.io/cv-git/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/cv-git.gpg
+          curl -fsSL https://controlvector.github.io/cv-git/gpg.pub | sudo gpg --dearmor -o /usr/share/keyrings/cv-git.gpg
 
           # Add repository
           echo "deb [signed-by=/usr/share/keyrings/cv-git.gpg] https://controlvector.github.io/cv-git stable main" | sudo tee /etc/apt/sources.list.d/cv-git.list
