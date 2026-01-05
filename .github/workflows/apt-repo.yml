@@ -4,6 +4,11 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to package (e.g., 0.4.2). Leave empty for latest.'
+        required: false
+        default: ''
 
 jobs:
   update-apt-repo:
@@ -20,11 +25,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          elif [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            # Get latest release version
+            VERSION=$(curl -fsSL https://api.github.com/repos/controlVector/cv-git/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Using version: $VERSION"
+
       - name: Download release .deb
         run: |
           mkdir -p apt-repo/pool/main/c/cv-git
-          VERSION=${GITHUB_REF_NAME#v}
-          curl -fsSL "https://github.com/controlVector/cv-git/releases/download/${GITHUB_REF_NAME}/cv-git_${VERSION}_amd64.deb" \
+          VERSION="${{ steps.version.outputs.version }}"
+          curl -fsSL "https://github.com/controlVector/cv-git/releases/download/v${VERSION}/cv-git_${VERSION}_amd64.deb" \
             -o "apt-repo/pool/main/c/cv-git/cv-git_${VERSION}_amd64.deb"
 
       - name: Import GPG key
