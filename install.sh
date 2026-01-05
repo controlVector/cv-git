@@ -236,9 +236,9 @@ WRAPPER
 
     sudo chmod +x "$BIN_DIR/cv"
 
-    # Verify installation
+    # Verify installation (use full path since shell may not have updated PATH)
     echo
-    if cv --version &> /dev/null; then
+    if "$BIN_DIR/cv" --version &> /dev/null; then
         echo -e "${GREEN}╔═══════════════════════════════════════╗${NC}"
         echo -e "${GREEN}║     CV-Git installed successfully!    ║${NC}"
         echo -e "${GREEN}╚═══════════════════════════════════════╝${NC}"
