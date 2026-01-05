@@ -106,7 +106,7 @@ export class AIManager {
     if (this.vector) {
       try {
         context.chunks = await this.vector.searchCode(query, maxChunks, {
-          minScore: 0.6
+          minScore: 0.25  // Lowered from 0.6 to be more lenient with semantic matches
         });
       } catch (error) {
         console.error('Vector search failed:', error);

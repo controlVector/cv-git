@@ -17,7 +17,7 @@ import {
 import { findRepoRoot } from '@cv-git/shared';
 import { Plan } from '@cv-git/shared';
 import { addGlobalOptions } from '../utils/output.js';
-import { getAnthropicApiKey, getOpenAIApiKey } from '../utils/credentials.js';
+import { getAnthropicApiKey, getEmbeddingCredentials } from '../utils/credentials.js';
 
 export function doCommand(): Command {
   const cmd = new Command('do');
@@ -57,20 +57,23 @@ export function doCommand(): Command {
           process.exit(1);
         }
 
-        const openaiApiKey = await getOpenAIApiKey(config.ai.apiKey);
+        // Get embedding credentials (OpenRouter preferred, fallback to OpenAI)
+        const embeddingCreds = await getEmbeddingCredentials();
 
         // Initialize components
         spinner.text = 'Connecting to services...';
 
         // Vector manager (optional)
         let vector = undefined;
-        if (openaiApiKey && config.vector) {
+        if ((embeddingCreds.openrouterApiKey || embeddingCreds.openaiApiKey) && config.vector) {
           try {
-            vector = createVectorManager(
-              config.vector.url,
-              openaiApiKey,
-              config.vector.collections
-            );
+            vector = createVectorManager({
+              url: config.vector.url,
+              openrouterApiKey: embeddingCreds.openrouterApiKey,
+              openaiApiKey: embeddingCreds.openaiApiKey,
+              collections: config.vector.collections,
+              embeddingModel: config.embedding?.model
+            });
             await vector.connect();
           } catch (error) {
             console.log(chalk.gray('  ⚠ Could not connect to vector DB'));

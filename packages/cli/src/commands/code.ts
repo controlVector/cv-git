@@ -265,25 +265,16 @@ export function codeCommand(): Command {
         }
       }
 
-      // Configure embedding provider for VectorManager
-      if (openrouterApiKey && !openaiApiKey) {
-        // Use OpenRouter for embeddings when no OpenAI key is available
-        if (!process.env.OPENROUTER_API_KEY) {
-          process.env.OPENROUTER_API_KEY = openrouterApiKey;
-        }
-        if (!process.env.CV_EMBEDDING_MODEL) {
-          process.env.CV_EMBEDDING_MODEL = 'openai/text-embedding-3-small';
-        }
-      }
-
-      const embeddingKey = openaiApiKey || openrouterApiKey;
+      const embeddingKey = openrouterApiKey || openaiApiKey;
       if (embeddingKey && infra.qdrant.available && infra.qdrant.url) {
         try {
-          vector = createVectorManager(
-            infra.qdrant.url,
-            openaiApiKey,
-            config.vector?.collections || { codeChunks: 'code_chunks', docstrings: 'docstrings', commits: 'commits' }
-          );
+          vector = createVectorManager({
+            url: infra.qdrant.url,
+            openrouterApiKey: openrouterApiKey,
+            openaiApiKey: openaiApiKey,
+            collections: config.vector?.collections || { codeChunks: 'code_chunks', docstrings: 'docstrings', commits: 'commits' },
+            embeddingModel: config.embedding?.model
+          });
           await vector.connect();
         } catch (e) {
           output.debug?.('Vector DB not available, continuing without semantic search');

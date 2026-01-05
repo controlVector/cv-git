@@ -104,19 +104,16 @@ export function chatCommand(): Command {
       let graph: GraphManager | null = null;
 
       if (options.noContext !== true) {
-        // Set OpenRouter key for vector embeddings if no OpenAI key
-        if (!openaiApiKey && openrouterApiKey) {
-          process.env.OPENROUTER_API_KEY = openrouterApiKey;
-        }
-
-        const embeddingKey = openaiApiKey || openrouterApiKey;
+        const embeddingKey = openrouterApiKey || openaiApiKey;
         if (embeddingKey && config.vector) {
           try {
-            vector = createVectorManager(
-              config.vector.url,
-              openaiApiKey,
-              config.vector.collections
-            );
+            vector = createVectorManager({
+              url: config.vector.url,
+              openrouterApiKey: openrouterApiKey,
+              openaiApiKey: openaiApiKey,
+              collections: config.vector.collections,
+              embeddingModel: config.embedding?.model
+            });
             await vector.connect();
           } catch (e) {
             output.debug?.('Vector DB not available, continuing without semantic search');
