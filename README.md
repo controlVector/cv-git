@@ -35,7 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/controlVector/cv-git/main/install.s
 ### Option 3: Download .deb directly
 
 ```bash
-wget https://github.com/controlVector/cv-git/releases/latest/download/cv-git_0.4.2_amd64.deb
+wget https://github.com/controlVector/cv-git/releases/latest/download/cv-git_0.4.3_amd64.deb
 sudo dpkg -i cv-git_*.deb
 ```
 
