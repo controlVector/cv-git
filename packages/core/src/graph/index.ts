@@ -19,9 +19,19 @@ import {
   ModifiesEdge,
   TouchesEdge
 } from '@cv-git/shared';
+import { compareVersions } from '../storage/manifest.js';
+
+// Schema version for graph migrations
+const GRAPH_SCHEMA_VERSION = '1.0.0';
 
 interface GraphQueryResult {
   [key: string]: any;
+}
+
+interface SchemaVersionResult {
+  migrated: boolean;
+  from?: string;
+  to?: string;
 }
 
 export class GraphManager {
@@ -84,6 +94,12 @@ export class GraphManager {
 
       // Create indexes
       await this.createIndexes();
+
+      // Check and migrate schema if needed
+      const schemaResult = await this.ensureSchemaVersion();
+      if (schemaResult.migrated) {
+        console.log(`Graph schema migrated: ${schemaResult.from} -> ${schemaResult.to}`);
+      }
 
     } catch (error: any) {
       throw new GraphError(`Failed to connect to FalkorDB: ${error.message}`, error);
@@ -172,6 +188,105 @@ export class GraphManager {
         console.warn(`Full-text index creation warning for ${label}:`, error.message);
       }
     }
+  }
+
+  // ========== Schema Version Management ==========
+
+  /**
+   * Get current schema version from graph metadata
+   */
+  async getSchemaVersion(): Promise<string | null> {
+    try {
+      const result = await this.query(
+        "MATCH (m:_Meta {key: 'schema_version'}) RETURN m.version as version"
+      );
+      return result[0]?.version || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Set schema version in graph metadata
+   */
+  async setSchemaVersion(version: string): Promise<void> {
+    await this.query(`
+      MERGE (m:_Meta {key: 'schema_version'})
+      SET m.version = $version, m.updatedAt = $updatedAt
+    `, { version, updatedAt: Date.now() });
+  }
+
+  /**
+   * Check and migrate schema if needed
+   */
+  async ensureSchemaVersion(): Promise<SchemaVersionResult> {
+    const currentVersion = await this.getSchemaVersion();
+
+    if (!currentVersion) {
+      // New graph or pre-versioned graph - set version
+      await this.setSchemaVersion(GRAPH_SCHEMA_VERSION);
+      return { migrated: false };
+    }
+
+    if (compareVersions(currentVersion, GRAPH_SCHEMA_VERSION) < 0) {
+      // Need migration
+      await this.migrateSchema(currentVersion, GRAPH_SCHEMA_VERSION);
+      return { migrated: true, from: currentVersion, to: GRAPH_SCHEMA_VERSION };
+    }
+
+    return { migrated: false };
+  }
+
+  /**
+   * Migrate graph schema between versions
+   * Preserves existing data while updating schema
+   */
+  private async migrateSchema(fromVersion: string, toVersion: string): Promise<void> {
+    console.log(`Migrating graph schema from ${fromVersion} to ${toVersion}`);
+
+    // Migration: Add Searchable label to existing Symbol nodes (pre-1.0.0)
+    if (compareVersions(fromVersion, '1.0.0') < 0) {
+      console.log('  Adding Searchable labels to Symbol nodes...');
+
+      try {
+        // Add Searchable label to all Symbol nodes that don't have it
+        await this.query(`
+          MATCH (s:Symbol)
+          WHERE NOT s:Searchable
+          SET s:Searchable
+        `);
+      } catch (error: any) {
+        console.warn('  Warning adding Searchable labels:', error.message);
+      }
+
+      // Add specific type labels (Function, Class, etc.) to symbols
+      const kindLabelMap = [
+        { kind: 'function', label: 'Function' },
+        { kind: 'method', label: 'Function' },
+        { kind: 'class', label: 'Class' },
+        { kind: 'interface', label: 'Interface' },
+        { kind: 'struct', label: 'Struct' },
+        { kind: 'enum', label: 'Enum' }
+      ];
+
+      for (const { kind, label } of kindLabelMap) {
+        try {
+          await this.query(`
+            MATCH (s:Symbol {kind: $kind})
+            WHERE NOT s:${label}
+            SET s:${label}
+          `, { kind });
+        } catch (error: any) {
+          console.warn(`  Warning adding ${label} labels:`, error.message);
+        }
+      }
+    }
+
+    // Future migrations would go here:
+    // if (compareVersions(fromVersion, '1.1.0') < 0) { ... }
+
+    await this.setSchemaVersion(toVersion);
+    console.log(`  Schema migration complete.`);
   }
 
   /**

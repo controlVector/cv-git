@@ -148,21 +148,63 @@ export function addEdgeTypes(manifest: StorageManifest, types: EdgeType[]): Stor
  * Migrate manifest to current version
  */
 function migrateManifest(manifest: StorageManifest): StorageManifest {
-  const version = manifest.version;
+  const originalVersion = manifest.version || '0.0.0';
+  const migrations: string[] = [];
 
-  // No migrations needed yet (we're at v1.0.0)
+  // Migration from pre-1.0.0 (e.g., 0.3.2 format)
+  if (compareVersions(originalVersion, '1.0.0') < 0) {
+    manifest = migrateToV1_0_0(manifest);
+    migrations.push(`v${originalVersion} -> v1.0.0`);
+  }
+
   // Future migrations would go here:
-  //
-  // if (compareVersions(version, '1.1.0') < 0) {
+  // if (compareVersions(manifest.version, '1.1.0') < 0) {
   //   manifest = migrateToV1_1_0(manifest);
+  //   migrations.push('v1.0.0 -> v1.1.0');
   // }
 
-  // Update version to current
-  if (version !== CURRENT_VERSION) {
-    manifest.version = CURRENT_VERSION;
+  // Log migrations if any occurred
+  if (migrations.length > 0) {
+    console.log(`Manifest migrated: ${migrations.join(' -> ')}`);
   }
 
   return manifest;
+}
+
+/**
+ * Migrate manifest from pre-1.0.0 versions to 1.0.0
+ * Handles missing fields that may not exist in older versions
+ */
+function migrateToV1_0_0(manifest: any): StorageManifest {
+  const now = new Date().toISOString();
+
+  // Ensure all required fields exist with sensible defaults
+  return {
+    version: '1.0.0',
+    format: manifest.format || FORMAT_ID,
+    created: manifest.created || now,
+    updated: now,
+    repository: manifest.repository || {
+      id: 'unknown',
+      name: 'unknown',
+      root: process.cwd()
+    },
+    stats: {
+      files: manifest.stats?.files ?? 0,
+      symbols: manifest.stats?.symbols ?? 0,
+      relationships: manifest.stats?.relationships ?? 0,
+      vectors: manifest.stats?.vectors ?? 0,
+      lastSync: manifest.stats?.lastSync || now,
+      syncDuration: manifest.stats?.syncDuration ?? 0
+    },
+    embedding: {
+      provider: manifest.embedding?.provider || 'openrouter',
+      model: manifest.embedding?.model || 'openai/text-embedding-3-small',
+      dimensions: manifest.embedding?.dimensions || 1536
+    },
+    nodeTypes: manifest.nodeTypes || ['file', 'symbol'],
+    edgeTypes: manifest.edgeTypes || ['imports', 'calls', 'contains']
+  };
 }
 
 /**

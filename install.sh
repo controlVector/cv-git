@@ -4,7 +4,7 @@
 
 set -e
 
-VERSION="0.3.5"
+VERSION=""  # Will be populated by get_version()
 INSTALL_DIR="/usr/local/lib/cv-git"
 BIN_DIR="/usr/local/bin"
 
@@ -14,6 +14,67 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+
+# Get version dynamically from package.json
+get_version() {
+    # Try local package.json first (for local installs)
+    if [ -f "package.json" ]; then
+        VERSION=$(grep '"version"' package.json | head -1 | sed 's/.*"version": *"\([^"]*\)".*/\1/')
+    fi
+    # Fallback: fetch from GitHub
+    if [ -z "$VERSION" ]; then
+        VERSION=$(curl -fsSL https://raw.githubusercontent.com/controlVector/cv-git/main/package.json 2>/dev/null | grep '"version"' | head -1 | sed 's/.*"version": *"\([^"]*\)".*/\1/')
+    fi
+    # Ultimate fallback
+    if [ -z "$VERSION" ]; then
+        VERSION="0.4.0"
+    fi
+}
+
+# Copy native module with error reporting
+copy_native_module() {
+    local module_name="$1"
+    local src_dir="$2"
+    local src_path="$src_dir/$module_name"
+
+    if [ -d "$src_path" ]; then
+        echo "  Copying native module: $module_name"
+        if sudo cp -r "$src_path" "$INSTALL_DIR/"; then
+            return 0
+        else
+            echo -e "${YELLOW}  Warning: Failed to copy $module_name${NC}"
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# Copy all native modules from a node_modules directory
+copy_native_modules() {
+    local src_dir="$1"
+
+    if [ ! -d "$src_dir" ]; then
+        echo -e "${YELLOW}Warning: node_modules not found at $src_dir${NC}"
+        return 1
+    fi
+
+    echo "Copying native modules..."
+    copy_native_module "keytar" "$src_dir"
+    copy_native_module "tree-sitter" "$src_dir"
+
+    # Copy all tree-sitter language parsers
+    for parser in "$src_dir"/tree-sitter-*; do
+        if [ -d "$parser" ]; then
+            module_name=$(basename "$parser")
+            copy_native_module "$module_name" "$src_dir"
+        fi
+    done
+
+    return 0
+}
+
+# Get version before showing banner
+get_version
 
 echo -e "${BLUE}"
 echo "╔═══════════════════════════════════════╗"
@@ -140,12 +201,8 @@ main() {
         echo "Installing from local build..."
         sudo cp packages/cli/dist/bundle.cjs "$INSTALL_DIR/cv.cjs"
 
-        # Copy native modules if they exist
-        if [ -d "node_modules/tree-sitter" ]; then
-            sudo cp -r node_modules/keytar "$INSTALL_DIR/" 2>/dev/null || true
-            sudo cp -r node_modules/tree-sitter "$INSTALL_DIR/" 2>/dev/null || true
-            sudo cp -r node_modules/tree-sitter-* "$INSTALL_DIR/" 2>/dev/null || true
-        fi
+        # Copy native modules
+        copy_native_modules "node_modules"
     else
         # Download release
         RELEASE_URL="https://github.com/controlVector/cv-git/releases/download/v${VERSION}/cv-git-${VERSION}.tar.gz"
@@ -159,7 +216,15 @@ main() {
             npm install -g pnpm
             pnpm install
             pnpm build
+
+            # Rebuild native modules for the target system
+            echo "Rebuilding native modules..."
+            pnpm rebuild keytar tree-sitter 2>/dev/null || echo -e "${YELLOW}Native module rebuild warning (may be OK)${NC}"
+
+            # Copy bundle and native modules
             sudo cp packages/cli/dist/bundle.cjs "$INSTALL_DIR/cv.cjs"
+            copy_native_modules "node_modules"
+
             cd -
             rm -rf "$TEMP_DIR"
         }
@@ -170,10 +235,10 @@ main() {
         fi
     fi
 
-    # Create wrapper script
-    sudo tee "$BIN_DIR/cv" > /dev/null << 'WRAPPER'
+    # Create wrapper script with correct install path
+    sudo tee "$BIN_DIR/cv" > /dev/null << WRAPPER
 #!/bin/bash
-exec node /usr/local/lib/cv-git/cv.cjs "$@"
+exec node "${INSTALL_DIR}/cv.cjs" "\$@"
 WRAPPER
 
     sudo chmod +x "$BIN_DIR/cv"

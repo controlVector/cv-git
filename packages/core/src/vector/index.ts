@@ -854,6 +854,183 @@ export class VectorManager {
     }
   }
 
+  // ========== Collection Compatibility ==========
+
+  /**
+   * Check collection compatibility with current embedding model
+   * @param collection - Collection name to check
+   * @returns Compatibility info including whether recreation is needed
+   */
+  async checkCollectionCompatibility(collection: string): Promise<{
+    compatible: boolean;
+    existingDimensions?: number;
+    requiredDimensions: number;
+    needsRecreation: boolean;
+    pointCount?: number;
+  }> {
+    if (!this.client) {
+      throw new VectorError('Not connected to Qdrant');
+    }
+
+    try {
+      const info = await this.client.getCollection(collection);
+      const existingDimensions = info.config?.params?.vectors?.size as number;
+      const pointCount = info.points_count ?? undefined;
+
+      return {
+        compatible: existingDimensions === this.vectorSize,
+        existingDimensions,
+        requiredDimensions: this.vectorSize,
+        needsRecreation: existingDimensions !== this.vectorSize,
+        pointCount
+      };
+    } catch (error: any) {
+      // Collection doesn't exist - compatible by default (will be created)
+      if (error.message?.includes('not found') || error.status === 404) {
+        return {
+          compatible: true,
+          requiredDimensions: this.vectorSize,
+          needsRecreation: false
+        };
+      }
+      throw new VectorError(`Failed to check collection compatibility: ${error.message}`, error);
+    }
+  }
+
+  /**
+   * Check all collections for compatibility and report issues
+   * @returns Array of compatibility issues found
+   */
+  async checkAllCollectionsCompatibility(): Promise<Array<{
+    collection: string;
+    existingDimensions: number;
+    requiredDimensions: number;
+    pointCount: number;
+  }>> {
+    const issues: Array<{
+      collection: string;
+      existingDimensions: number;
+      requiredDimensions: number;
+      pointCount: number;
+    }> = [];
+
+    for (const [, collectionName] of Object.entries(this.collections)) {
+      const compat = await this.checkCollectionCompatibility(collectionName);
+      if (!compat.compatible && compat.existingDimensions) {
+        issues.push({
+          collection: collectionName,
+          existingDimensions: compat.existingDimensions,
+          requiredDimensions: compat.requiredDimensions,
+          pointCount: compat.pointCount || 0
+        });
+      }
+    }
+
+    return issues;
+  }
+
+  /**
+   * Migrate collection if embedding dimensions changed
+   * WARNING: This will delete all existing vectors in the collection!
+   * @param collection - Collection to migrate
+   * @param force - Skip confirmation (for automated migrations)
+   * @returns Migration result
+   */
+  async migrateCollectionIfNeeded(collection: string, force: boolean = false): Promise<{
+    migrated: boolean;
+    action?: 'recreated' | 'skipped';
+    pointsLost?: number;
+    oldDimensions?: number;
+    newDimensions?: number;
+  }> {
+    const compat = await this.checkCollectionCompatibility(collection);
+
+    if (compat.compatible) {
+      return { migrated: false };
+    }
+
+    // Warn about data loss
+    if (!force && compat.pointCount && compat.pointCount > 0) {
+      console.warn(
+        `\nWARNING: Collection '${collection}' has incompatible dimensions:\n` +
+        `  Current: ${compat.existingDimensions} dimensions\n` +
+        `  Required: ${compat.requiredDimensions} dimensions (model: ${this.embeddingModel})\n` +
+        `  Points to delete: ${compat.pointCount}\n\n` +
+        `Run 'cv sync --force' to recreate collections with new dimensions.\n`
+      );
+      return {
+        migrated: false,
+        action: 'skipped',
+        pointsLost: 0,
+        oldDimensions: compat.existingDimensions,
+        newDimensions: compat.requiredDimensions
+      };
+    }
+
+    // Recreate the collection
+    console.log(`Recreating collection '${collection}' with ${this.vectorSize} dimensions...`);
+
+    const pointsLost = compat.pointCount || 0;
+
+    try {
+      await this.client!.deleteCollection(collection);
+    } catch {
+      // Collection might not exist
+    }
+
+    await this.ensureCollection(collection, this.vectorSize);
+
+    return {
+      migrated: true,
+      action: 'recreated',
+      pointsLost,
+      oldDimensions: compat.existingDimensions,
+      newDimensions: this.vectorSize
+    };
+  }
+
+  /**
+   * Migrate all collections if needed
+   * @param force - Force migration even if data will be lost
+   */
+  async migrateAllCollectionsIfNeeded(force: boolean = false): Promise<{
+    collections: string[];
+    totalPointsLost: number;
+    needsResync: boolean;
+  }> {
+    const migratedCollections: string[] = [];
+    let totalPointsLost = 0;
+
+    for (const [, collectionName] of Object.entries(this.collections)) {
+      const result = await this.migrateCollectionIfNeeded(collectionName, force);
+      if (result.migrated) {
+        migratedCollections.push(collectionName);
+        totalPointsLost += result.pointsLost || 0;
+      }
+    }
+
+    return {
+      collections: migratedCollections,
+      totalPointsLost,
+      needsResync: totalPointsLost > 0
+    };
+  }
+
+  /**
+   * Get current embedding model and dimensions
+   */
+  getEmbeddingInfo(): {
+    model: string;
+    provider: string;
+    dimensions: number;
+  } {
+    return {
+      model: this.embeddingModel,
+      provider: this.embeddingProvider,
+      dimensions: this.vectorSize
+    };
+  }
+
   /**
    * Scroll through all points in a collection
    * Used for exporting vectors to file storage
