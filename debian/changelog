@@ -1,3 +1,31 @@
+cv-git (0.4.2-1) unstable; urgency=medium
+
+  * Fixed installer native module installation using npm
+  * Updated verification step to use full path
+  * Cleaned up README documentation
+  * Added backward compatibility for knowledge graph
+  * Added schema versioning for FalkorDB
+  * Added collection compatibility for Qdrant
+
+ -- CV-Git Contributors <cv-git@controlvector.dev>  Sun, 05 Jan 2026 12:00:00 +0000
+
+cv-git (0.4.1-1) unstable; urgency=medium
+
+  * Added backward compatibility infrastructure
+  * Manifest migration support
+  * Graph schema versioning
+  * Vector collection compatibility checks
+
+ -- CV-Git Contributors <cv-git@controlvector.dev>  Sat, 04 Jan 2026 12:00:00 +0000
+
+cv-git (0.4.0-1) unstable; urgency=medium
+
+  * MCP Server integration (20 tools for Claude Desktop)
+  * Multi-language support (TypeScript, JavaScript, Python, Go, Rust, Java)
+  * Advanced graph analysis (dead code, cycles, complexity, hotspots)
+
+ -- CV-Git Contributors <cv-git@controlvector.dev>  Sun, 29 Dec 2025 12:00:00 +0000
+
 cv-git (0.3.5-1) unstable; urgency=medium
 
   * Initial release
