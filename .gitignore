@@ -36,6 +36,7 @@ sync_state.json
 
 # API keys and credentials (IMPORTANT - never commit these!)
 *.key
+!apt-repo/gpg.key  # GPG public key for apt repository (safe to commit)
 *.pem
 secrets/
 credentials.json
