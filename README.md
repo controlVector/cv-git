@@ -10,17 +10,34 @@ CV-Git is an intelligent wrapper around Git that adds a knowledge graph, semanti
 
 ---
 
-## Quick Install
+## Installation
+
+### Option 1: APT (Debian/Ubuntu) - Recommended
+
+```bash
+# Add GPG key
+curl -fsSL https://controlvector.github.io/cv-git/gpg.pub | sudo gpg --dearmor -o /usr/share/keyrings/cv-git.gpg
+
+# Add repository
+echo "deb [signed-by=/usr/share/keyrings/cv-git.gpg] https://controlvector.github.io/cv-git stable main" | sudo tee /etc/apt/sources.list.d/cv-git.list
+
+# Install
+sudo apt update
+sudo apt install cv-git
+```
+
+### Option 2: Quick Install Script
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/controlVector/cv-git/main/install.sh | bash
 ```
 
-This will:
-- Check for Node.js 18+ (prompts to install if missing)
-- Check for Docker (prompts to install if missing)
-- Download and install cv-git
-- Install native modules (tree-sitter, keytar)
+### Option 3: Download .deb directly
+
+```bash
+wget https://github.com/controlVector/cv-git/releases/latest/download/cv-git_0.4.2_amd64.deb
+sudo dpkg -i cv-git_*.deb
+```
 
 ### After Installation
 
