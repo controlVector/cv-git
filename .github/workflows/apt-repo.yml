@@ -1,0 +1,104 @@
+name: Update APT Repository
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  update-apt-repo:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release .deb
+        run: |
+          mkdir -p apt-repo/pool/main/c/cv-git
+          VERSION=${GITHUB_REF_NAME#v}
+          curl -fsSL "https://github.com/controlVector/cv-git/releases/download/${GITHUB_REF_NAME}/cv-git_${VERSION}_amd64.deb" \
+            -o "apt-repo/pool/main/c/cv-git/cv-git_${VERSION}_amd64.deb"
+
+      - name: Import GPG key
+        if: ${{ vars.GPG_PUBLIC_KEY != '' }}
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          echo "${{ vars.GPG_PUBLIC_KEY }}" > apt-repo/gpg.key
+
+      - name: Generate repository metadata
+        run: |
+          cd apt-repo
+          mkdir -p dists/stable/main/binary-amd64
+
+          # Generate Packages file
+          dpkg-scanpackages --arch amd64 pool/ > dists/stable/main/binary-amd64/Packages
+          gzip -k -f dists/stable/main/binary-amd64/Packages
+
+          # Generate Release file
+          cd dists/stable
+          cat > Release << EOF
+          Origin: CV-Git
+          Label: CV-Git
+          Suite: stable
+          Codename: stable
+          Version: 1.0
+          Architectures: amd64
+          Components: main
+          Description: CV-Git APT Repository
+          EOF
+
+          # Add checksums
+          apt-ftparchive release . >> Release
+
+      - name: Sign Release file
+        if: ${{ vars.GPG_PUBLIC_KEY != '' }}
+        run: |
+          cd apt-repo/dists/stable
+          gpg --batch --yes --armor --detach-sign -o Release.gpg Release
+          gpg --batch --yes --clearsign -o InRelease Release
+
+      - name: Create index page
+        run: |
+          cat > apt-repo/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head><title>CV-Git APT Repository</title></head>
+          <body>
+          <h1>CV-Git APT Repository</h1>
+          <h2>Installation</h2>
+          <pre>
+          # Add GPG key
+          curl -fsSL https://controlvector.github.io/cv-git/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/cv-git.gpg
+
+          # Add repository
+          echo "deb [signed-by=/usr/share/keyrings/cv-git.gpg] https://controlvector.github.io/cv-git stable main" | sudo tee /etc/apt/sources.list.d/cv-git.list
+
+          # Install
+          sudo apt update
+          sudo apt install cv-git
+          </pre>
+          <p>Or use the quick install script:</p>
+          <pre>curl -fsSL https://raw.githubusercontent.com/controlVector/cv-git/main/install.sh | bash</pre>
+          </body>
+          </html>
+          EOF
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: apt-repo
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
