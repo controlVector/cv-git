@@ -17,6 +17,12 @@ export interface CVGitConfig {
   graph: GraphConfig;
   vector: VectorConfig;
   features: FeaturesConfig;
+  hub?: HubConfig;
+}
+
+export interface HubConfig {
+  url: string;
+  token?: string;
 }
 
 export interface PlatformConfig {
@@ -102,6 +108,9 @@ const DEFAULT_CONFIG: CVGitConfig = {
     aiPRDescriptions: true,
     aiCodeReview: true,
     autoMerge: false,
+  },
+  hub: {
+    url: 'https://api.hub.controlvector.io/api',
   },
 };
 
