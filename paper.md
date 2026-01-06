@@ -1,16 +1,16 @@
 ---
-title: "CV-Git: AI-Native Version Control with Knowledge Graph and Semantic Code Search"
+title: "Context Manifold Experiment: Reproducible Evaluation of Hybrid Graph--Vector Retrieval for Code Intelligence"
 tags:
+  - retrieval-augmented generation
+  - code search
   - software engineering
-  - knowledge graphs
-  - semantic search
-  - static analysis
-  - developer tools
+  - graph algorithms
+  - information retrieval
 authors:
   - name: John Schmotzer
     affiliation: 1
 affiliations:
-  - name: Control Vector / Independent
+  - name: Independent Researcher
     index: 1
 date: "2026-01-06"
 bibliography: paper.bib
@@ -18,64 +18,93 @@ bibliography: paper.bib
 
 # Summary
 
-CV-Git is a command-line tool that wraps Git with repository-aware intelligence: it builds a code knowledge graph, supports semantic search over code, and exposes AI-assisted commands for explanation, change planning, and review. The system is designed to help developers navigate and modify large codebases by combining (i) structural understanding derived from parsing and graph extraction and (ii) semantic retrieval via embeddings.
+This repository provides a fully reproducible experiment harness for evaluating **Context Manifold**, a hybrid retrieval approach that combines vector similarity with explicit program-graph structure (e.g., call edges) to produce dependency-aware context bundles for code intelligence workflows.
 
-In practice, CV-Git provides a workflow where a developer initializes a repository, synchronizes code into a graph+vector substrate, and then uses `cv find` and related commands to locate relevant code and relationships (e.g., call paths) quickly. The project targets polyglot repositories and supports multiple languages through Tree-sitter based parsing and graph construction.
+The harness runs an A/B comparison between vector-only retrieval and hybrid graph--vector retrieval, computes retrieval metrics (including dependency-coverage style measures), and generates a publication-ready report with tables and CSV exports. The system is designed to make hybrid retrieval *inspectable and reproducible* using local infrastructure components and deterministic scripts.
 
 # Statement of need
 
-Modern software projects are increasingly large, polyglot, and dependency-dense. Developers spend significant time (a) locating relevant code, (b) tracing execution paths and call relationships, and (c) establishing the context needed to make safe changes. Traditional text search and standard Git workflows do not provide *semantic retrieval* or *first-class structural navigation* across language boundaries.
+Code-oriented retrieval is commonly implemented as vector similarity search over embedded code chunks. While effective for many repositories, vector-only retrieval can under-represent structural dependencies that matter for answering questions about behavior, call paths, and cross-module coupling.
 
-CV-Git is intended to fill this gap by providing:
-1. **Structural context** via an explicit knowledge graph, including call graph extraction and symbol relationships such as imports/exports and inheritance.
-2. **Semantic search** across repositories using vector embeddings for natural-language queries.
-3. **Action-oriented CLI workflows** that integrate these capabilities into standard developer loops (search, explain, review).
-
-This combination is particularly valuable when dependency structure matters (e.g., “what calls this function?”, “what is the execution path from A to B?”), and when developers need fast, explainable retrieval rather than purely generative assistance.
+The Context Manifold Experiment fills a practical need for the research and practitioner community: a lightweight, open experiment harness that (i) builds the structural artifacts required for graph-augmented retrieval, (ii) runs a standardized A/B experiment, and (iii) produces a report suitable for inclusion in technical writeups. It supports rapid iteration on hybrid retrieval parameters (e.g., neighborhood radius and hybrid weighting) and enables auditing of when graph augmentation helps and when it does not.
 
 # Software design
 
 ## Architecture
 
-CV-Git is organized as a CLI-centric system with two primary data substrates:
+The experiment harness comprises three phases:
 
-- **Knowledge graph store.** Code is parsed and relationships are stored in a graph database to enable dependency queries such as call relationships, paths, dead-code detection, and cyclic dependency discovery.
-- **Vector store.** Code chunks are embedded and indexed for similarity search, enabling natural language queries over code.
+1. **Setup.**
+   - Clone a curated set of repositories (configured in `data/repositories.json`).
+   - Parse/analyze repositories to identify candidate symbols/functions.
+   - Build a program-structure graph (FalkorDB) and a semantic embedding index (ChromaDB).
 
-At a high level, a typical workflow is:
-1. Install CV-Git and start required services (graph DB and vector DB).
-2. Run `cv init` in a target repository.
-3. Run `cv sync` to build/refresh the knowledge graph and semantic index.
-4. Use retrieval and analysis commands such as `cv find`, `cv explain`, and `cv graph ...` to navigate code and dependencies.
+2. **Run.**
+   - For each task, execute vector-only retrieval and hybrid graph--vector retrieval.
+   - Record per-task retrieval outcomes and derived metrics.
 
-## Key features
+3. **Analyze.**
+   - Aggregate results by repository and category.
+   - Produce summary statistics and a publication-ready report.
 
-CV-Git provides:
-- multi-language parsing and graph extraction (e.g., TypeScript/JavaScript, Python, Go, Rust, Java),
-- call graph extraction and related graph queries,
-- semantic search with embeddings and a dedicated vector database,
-- optional AI-powered commands (explain, do, review) that can be enabled with API keys.
+## Reproducibility recipe
 
-## Quality control
+```bash
+# Prereqs: Docker (with docker compose), Git, Python 3.10+.
 
-The repository includes automated tests and a build pipeline. This JOSS paper is compiled via the Open Journals draft action GitHub workflow in `.github/workflows/draft-pdf.yml`.
+# 1) Start local infrastructure (FalkorDB + ChromaDB)
+cd docker
+docker compose up -d
+cd ..
 
-# Research impact statement
+# 2) Create and activate a virtual environment (recommended)
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
-CV-Git is designed as research-enabling infrastructure for code intelligence workflows, supporting reproducible indexing (graph + vector), inspectable retrieval, and dependency-aware navigation. Near-term impact is expected through:
-- easier repository comprehension and dependency tracing,
-- faster iteration on refactors and feature work in large codebases,
-- a practical foundation for evaluating retrieval and graph-augmented approaches to code assistance.
+# 3) Install dependencies
+pip install -r requirements.txt
 
-(Authors should expand this section with concrete evidence such as external adopters, downstream publications, benchmark results, or usage metrics as they become available.)
+# 4) Configure credentials
+export OPENAI_API_KEY="sk-..."  # required for embeddings
+
+# Optional: override hosts/ports (defaults shown)
+# export FALKORDB_HOST=localhost
+# export FALKORDB_PORT=6379
+# export CHROMADB_HOST=localhost
+# export CHROMADB_PORT=8000
+
+# 5) Run the experiment end-to-end (setup + run + analyze)
+python scripts/run_experiment.py --phase all
+
+# 6) Generate the publication report (tables + CSV exports)
+python scripts/generate_report.py
+
+# Outputs are written under ./results/
+# - results/REPORT.md
+# - results/results_full.csv
+# - results/results_by_repo.csv
+```
+
+## Outputs
+
+After a successful run, the harness produces:
+- `results/REPORT.md`: publication-ready report with tables and summary findings.
+- `results/results_full.csv`: per-task results.
+- `results/results_by_repo.csv`: aggregated results by repository.
+
+# Quality control
+
+The experiment is implemented as deterministic scripts with explicit configuration defaults in `src/config.py`. The repository is intended to be CI-friendly; users can pin dependency versions and run the end-to-end pipeline in containerized environments. This manuscript is intended to be compiled via the Open Journals draft action workflow used by JOSS submissions. [@openjournals_draft_action]
+
+# Empirical evaluation (brief)
+
+The harness is designed to surface heterogeneous effects across repository types and structural regimes. In the accompanying report, call-edge density is used as a practical cohort-level correlate for when hybrid retrieval is likely to help.
+
+![Edge density vs. observed change in dependency coverage (ΔDC) on representative repositories.](figures/edge_density_vs_delta.png)
 
 # AI usage disclosure
 
-(Choose one and delete the other.)
-
-**Option A (no generative AI used):** No generative AI tools were used in developing the software, preparing documentation, or writing this manuscript.
-
-**Option B (generative AI used):** Generative AI tools were used to assist portions of software development and/or documentation and manuscript drafting. All AI-assisted outputs were reviewed by the authors, validated via automated tests where applicable, and manually inspected for correctness.
+Generative AI tools may be used by downstream consumers of retrieved context; however, the experiment harness itself evaluates retrieval outcomes independent of any particular language model generation loop. If authors use generative AI to assist code or manuscript edits, they should disclose that usage here per journal guidelines.
 
 # Acknowledgements
 
