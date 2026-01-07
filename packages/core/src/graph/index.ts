@@ -319,18 +319,18 @@ export class GraphManager {
 
     try {
       // Replace parameters in query (FalkorDB doesn't support parameterized queries the same way as Neo4j)
+      // We use word-boundary regex to ensure $file doesn't match $filePath
       let processedQuery = cypher;
       if (params) {
-        // Sort keys by length (longest first) to avoid prefix conflicts
-        // e.g., $authorEmail should be replaced before $author
-        const sortedKeys = Object.keys(params).sort((a, b) => b.length - a.length);
+        const sortedKeys = Object.keys(params);
 
         for (const key of sortedKeys) {
           const value = params[key];
-          const placeholder = `$${key}`;
           const escapedValue = this.escapeValue(value);
-          // Use split/join for reliable replacement (avoids regex special chars issues)
-          processedQuery = processedQuery.split(placeholder).join(escapedValue);
+          // Use word-boundary regex to avoid replacing $file inside $filePath
+          // The pattern matches $key followed by a non-word character or end of string
+          const pattern = new RegExp(`\\$${key}(?![a-zA-Z0-9_])`, 'g');
+          processedQuery = processedQuery.replace(pattern, escapedValue);
         }
       }
 
