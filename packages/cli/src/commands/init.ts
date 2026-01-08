@@ -196,7 +196,14 @@ export function initCommand(): Command {
             // Non-interactive mode: auto-init git
             console.log(chalk.cyan('Initializing git repository...'));
             const { execSync } = await import('child_process');
-            execSync('git init', { cwd: currentDir, stdio: 'inherit' });
+            const { writeFileSync, existsSync } = await import('fs');
+            execSync('git init -b main', { cwd: currentDir, stdio: 'inherit' });
+            // Create initial commit so git commands work
+            const readmePath = path.join(currentDir, 'README.md');
+            if (!existsSync(readmePath)) {
+              writeFileSync(readmePath, `# ${projectName}\n\nInitialized with CV-Git.\n`);
+            }
+            execSync('git add -A && git commit -m "Initial commit"', { cwd: currentDir, stdio: 'inherit', shell: '/bin/bash' });
             mode = 'repo';
             spinner.start('Initializing CV-Git...');
           } else {
@@ -213,7 +220,14 @@ export function initCommand(): Command {
               console.log();
               console.log(chalk.cyan('Initializing git repository...'));
               const { execSync } = await import('child_process');
-              execSync('git init', { cwd: currentDir, stdio: 'inherit' });
+              const { writeFileSync, existsSync } = await import('fs');
+              execSync('git init -b main', { cwd: currentDir, stdio: 'inherit' });
+              // Create initial commit so git commands work
+              const readmePath = path.join(currentDir, 'README.md');
+              if (!existsSync(readmePath)) {
+                writeFileSync(readmePath, `# ${projectName}\n\nInitialized with CV-Git.\n`);
+              }
+              execSync('git add -A && git commit -m "Initial commit"', { cwd: currentDir, stdio: 'inherit', shell: '/bin/bash' });
               mode = 'repo';
               spinner.start('Initializing CV-Git...');
             } else {
