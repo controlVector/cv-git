@@ -447,7 +447,7 @@ interface EmbeddingPipeline {
   },
   "llm": {
     "provider": "anthropic",
-    "model": "claude-sonnet-4",
+    "model": "claude-sonnet-4-20250514",
     "apiKey": "${CV_ANTHROPIC_KEY}",
     "maxTokens": 4096,
     "temperature": 0.2

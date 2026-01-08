@@ -186,9 +186,41 @@ export function initCommand(): Command {
         } else if (detected.type === 'repo') {
           mode = 'repo';
         } else {
-          spinner.fail(chalk.red('Not a git repository and no child repos found'));
-          console.log(chalk.gray('\nRun `cv init` inside a git repository, or in a folder containing git repos.'));
-          process.exit(1);
+          // Not a git repo - offer to initialize one
+          spinner.stop();
+          console.log();
+          console.log(chalk.yellow('This directory is not a git repository.'));
+          console.log();
+
+          if (options.yes) {
+            // Non-interactive mode: auto-init git
+            console.log(chalk.cyan('Initializing git repository...'));
+            const { execSync } = await import('child_process');
+            execSync('git init', { cwd: currentDir, stdio: 'inherit' });
+            mode = 'repo';
+            spinner.start('Initializing CV-Git...');
+          } else {
+            const { initGit } = await inquirer.prompt([
+              {
+                type: 'confirm',
+                name: 'initGit',
+                message: 'Would you like to initialize a git repository here?',
+                default: true,
+              },
+            ]);
+
+            if (initGit) {
+              console.log();
+              console.log(chalk.cyan('Initializing git repository...'));
+              const { execSync } = await import('child_process');
+              execSync('git init', { cwd: currentDir, stdio: 'inherit' });
+              mode = 'repo';
+              spinner.start('Initializing CV-Git...');
+            } else {
+              console.log(chalk.gray('\nRun `cv init` inside a git repository, or in a folder containing git repos.'));
+              process.exit(1);
+            }
+          }
         }
 
         // Create .cv directory

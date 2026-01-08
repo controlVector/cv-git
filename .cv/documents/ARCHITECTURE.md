@@ -415,7 +415,7 @@ async function getContextForTask(task: string): Context {
   "version": "0.1.0",
   "llm": {
     "provider": "anthropic",
-    "model": "claude-sonnet-4",
+    "model": "claude-sonnet-4-20250514",
     "apiKey": "sk-ant-..."
   },
   "graph": {

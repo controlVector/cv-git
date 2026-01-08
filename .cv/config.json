@@ -13,7 +13,7 @@
   },
   "ai": {
     "provider": "anthropic",
-    "model": "claude-sonnet-4",
+    "model": "claude-sonnet-4-20250514",
     "maxTokens": 4096,
     "temperature": 0.2
   },
@@ -30,12 +30,13 @@
   },
   "vector": {
     "provider": "qdrant",
-    "url": "http://localhost:6333",
+    "url": "http://localhost:6334",
     "embedded": true,
     "collections": {
       "codeChunks": "code_chunks",
       "docstrings": "docstrings",
-      "commits": "commits"
+      "commits": "commits",
+      "documentChunks": "document_chunks"
     }
   },
   "sync": {
@@ -83,6 +84,20 @@
       "go",
       "rust"
     ]
+  },
+  "docs": {
+    "enabled": true,
+    "patterns": [
+      "**/*.md"
+    ],
+    "excludePatterns": [
+      "node_modules/**",
+      "dist/**",
+      "build/**",
+      ".git/**"
+    ],
+    "chunkByHeading": 2,
+    "inferTypes": true
   },
   "features": {
     "enableChat": true,
