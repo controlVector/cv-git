@@ -1,3 +1,18 @@
+cv-git (0.4.7-1) unstable; urgency=medium
+
+  * Auth command restructuring with category routing (dns/, devops/, ai/, git/)
+  * New credential types: Cloudflare, AWS, DigitalOcean (Token, Spaces, App)
+  * Convenience getters for all credential types
+  * Environment variable migration for new providers
+  * Fixed cv hooks list subcommand
+  * Added cv preferences get <key> subcommand
+  * Added --options flag with interceptor for all commands
+  * Added cv verify command stub
+  * Added stub interfaces for MCP Gateway and AI Security
+  * Test suite: 60 tests all passing
+
+ -- CV-Git Contributors <cv-git@controlvector.dev>  Thu, 09 Jan 2026 12:00:00 +0000
+
 cv-git (0.4.3-1) unstable; urgency=medium
 
   * Fixed cv explain "No relevant code found" bug (#1)
