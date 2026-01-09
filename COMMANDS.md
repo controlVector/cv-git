@@ -1,7 +1,7 @@
 # CV-Git CLI Commands Reference
 
-**Version:** 0.2.0
-**Last Updated:** 2025-11-17
+**Version:** 0.4.11
+**Last Updated:** 2026-01-09
 
 Complete reference guide for all CV-Git CLI commands.
 
@@ -18,14 +18,39 @@ Complete reference guide for all CV-Git CLI commands.
   - [cv sync](#cv-sync)
   - [cv status](#cv-status)
   - [cv doctor](#cv-doctor)
+- [Git Wrapper Commands](#git-wrapper-commands)
+  - [cv add](#cv-add)
+  - [cv commit](#cv-commit)
+  - [cv diff](#cv-diff)
+  - [cv log](#cv-log)
+  - [cv branch](#cv-branch)
+  - [cv checkout / cv switch](#cv-checkout--cv-switch)
+  - [cv merge](#cv-merge)
+  - [cv stash](#cv-stash)
+  - [cv fetch](#cv-fetch)
+  - [cv pull](#cv-pull)
+  - [cv push](#cv-push)
+  - [cv remote](#cv-remote)
+  - [cv reset](#cv-reset)
+  - [cv revert](#cv-revert)
+  - [cv tag](#cv-tag)
+- [Advanced Workflow Commands](#advanced-workflow-commands)
+  - [cv absorb](#cv-absorb)
+  - [cv undo](#cv-undo)
+  - [cv reflog](#cv-reflog)
+  - [cv stack](#cv-stack)
+  - [cv split](#cv-split)
 - [AI Features](#ai-features)
   - [cv find](#cv-find)
   - [cv do](#cv-do)
   - [cv explain](#cv-explain)
   - [cv review](#cv-review)
+  - [cv chat](#cv-chat)
+  - [cv context](#cv-context)
 - [Platform Integration](#platform-integration)
   - [cv pr](#cv-pr)
   - [cv release](#cv-release)
+  - [cv clone](#cv-clone)
 - [Advanced](#advanced)
   - [cv graph](#cv-graph)
   - [cv git](#cv-git)
@@ -34,21 +59,15 @@ Complete reference guide for all CV-Git CLI commands.
 
 ## Global Options
 
-All commands support these global flags for consistent behavior:
+All commands support these global flags:
 
 | Flag | Description |
 |------|-------------|
 | `--json` | Output results as JSON for scripting/automation |
 | `--quiet` | Suppress non-essential output |
 | `--verbose` | Show detailed debug information |
+| `--options` | Show available options for the command |
 | `--help` | Show help for the command |
-
-**Examples:**
-```bash
-cv status --json                    # Machine-readable output
-cv sync --quiet                     # Silent operation
-cv doctor --verbose                 # Detailed diagnostics
-```
 
 ---
 
@@ -58,7 +77,6 @@ cv doctor --verbose                 # Detailed diagnostics
 
 Initialize CV-Git in a repository.
 
-**Usage:**
 ```bash
 cv init [options]
 ```
@@ -67,38 +85,11 @@ cv init [options]
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--name <name>` | Repository name | Directory name |
-| `--json` | JSON output | false |
-| `--quiet` | Suppress output | false |
-| `--verbose` | Verbose output | false |
 
 **Examples:**
 ```bash
-# Initialize in current directory
-cv init
-
-# Initialize with custom name
-cv init --name my-project
-
-# Initialize with JSON output
-cv init --json
-```
-
-**What it does:**
-1. Creates `.cv/` directory
-2. Initializes configuration
-3. Sets up cache and session directories
-4. Prepares repository for CV-Git
-
-**Next steps after init:**
-```bash
-# 1. Set up credentials
-cv auth setup
-
-# 2. Sync your repository
-cv sync
-
-# 3. Start using AI features
-cv find "authentication logic"
+cv init                    # Initialize in current directory
+cv init --name my-project  # Initialize with custom name
 ```
 
 ---
@@ -107,71 +98,21 @@ cv find "authentication logic"
 
 Manage credentials for AI services and platforms.
 
-**Usage:**
 ```bash
 cv auth <command> [options]
 ```
 
 **Commands:**
-
-#### cv auth setup
-Interactive setup for credentials.
-
-```bash
-cv auth setup
-```
-
-Prompts for:
-- Anthropic API key (Claude)
-- OpenAI API key (GPT/embeddings)
-- GitHub token (optional)
-
-#### cv auth list
-List all stored credentials.
-
-```bash
-cv auth list
-cv auth list --json
-```
-
-#### cv auth get
-Get a specific credential.
-
-```bash
-cv auth get <service>
-
-# Examples:
-cv auth get anthropic
-cv auth get openai
-cv auth get github
-```
-
-#### cv auth set
-Set a credential value.
-
-```bash
-cv auth set <service> <key>
-
-# Examples:
-cv auth set anthropic sk-ant-...
-cv auth set openai sk-...
-cv auth set github ghp_...
-```
-
-#### cv auth remove
-Remove a credential.
-
-```bash
-cv auth remove <service>
-
-# Example:
-cv auth remove github
-```
-
-**Security:**
-- Credentials stored in system keychain (macOS/Linux)
-- Encrypted file fallback if keychain unavailable
-- Never logged or displayed in plain text
+- `cv auth setup` - Interactive setup (supports categories: ai/, git/, dns/, devops/)
+- `cv auth setup ai/anthropic` - Setup Anthropic API key
+- `cv auth setup git/github` - Setup GitHub token
+- `cv auth setup dns/cloudflare` - Setup Cloudflare API token
+- `cv auth setup devops/aws` - Setup AWS credentials
+- `cv auth list` - List stored credentials
+- `cv auth get <service>` - Get a credential
+- `cv auth set <service> <key>` - Set a credential
+- `cv auth remove <service>` - Remove a credential
+- `cv auth test <service>` - Test credential validity
 
 ---
 
@@ -179,134 +120,17 @@ cv auth remove github
 
 Manage CV-Git configuration.
 
-**Usage:**
 ```bash
-cv config <command> [options]
+cv config <command>
 ```
 
 **Commands:**
-
-#### cv config list
-Show all configuration settings.
-
-```bash
-cv config list
-cv config list --json
-```
-
-**Output:**
-```
-📋 CV-Git Configuration
-
-Version: 0.2.0
-Platform: github
-
-AI Configuration:
-  Model: claude-3-5-sonnet-20241022
-  Max Tokens: 4096
-
-Graph Database (FalkorDB):
-  URL: redis://localhost:6379
-  Database: cv-git
-
-Vector Database (Qdrant):
-  URL: http://localhost:6333
-  Collection: cv-code
-
-Features:
-  AI Commit Messages: true
-  Auto Review: false
-  Smart Merge: true
-```
-
-#### cv config get
-Get a specific configuration value.
-
-```bash
-cv config get <key>
-
-# Examples:
-cv config get ai.model
-cv config get platform.type
-cv config get features.aiCommitMessages
-```
-
-Supports nested keys with dot notation.
-
-#### cv config set
-Set a configuration value.
-
-```bash
-cv config set <key> <value>
-
-# Examples:
-cv config set ai.model claude-3-opus-20240229
-cv config set features.aiCommitMessages false
-cv config set graph.url redis://localhost:6380
-```
-
-**Auto-type detection:**
-- `true`/`false` → boolean
-- Numbers → number
-- Everything else → string
-
-#### cv config reset
-Reset configuration to defaults.
-
-```bash
-cv config reset
-```
-
-**Warning:** This will erase all custom settings. Prompts for confirmation.
-
-#### cv config edit
-Open configuration file in editor.
-
-```bash
-cv config edit
-```
-
-Uses `$VISUAL` or `$EDITOR` environment variable.
-
-#### cv config path
-Show configuration file location.
-
-```bash
-cv config path
-```
-
-**Output:**
-```
-~/.cv/config.json
-```
-
-**Configuration Structure:**
-```json
-{
-  "version": "0.2.0",
-  "platform": {
-    "type": "github",
-    "url": "https://api.github.com"
-  },
-  "ai": {
-    "model": "claude-3-5-sonnet-20241022",
-    "maxTokens": 4096
-  },
-  "graph": {
-    "url": "redis://localhost:6379",
-    "database": "cv-git"
-  },
-  "vector": {
-    "url": "http://localhost:6333",
-    "collections": "cv-code"
-  },
-  "features": {
-    "aiCommitMessages": true,
-    "autoReview": false,
-    "smartMerge": true
-  }
-}
-```
+- `cv config list` - Show all settings
+- `cv config get <key>` - Get a value (dot notation: `ai.model`)
+- `cv config set <key> <value>` - Set a value
+- `cv config reset` - Reset to defaults
+- `cv config edit` - Open in editor
+- `cv config path` - Show config file location
 
 ---
 
@@ -316,7 +140,6 @@ cv config path
 
 Synchronize the knowledge graph with your repository.
 
-**Usage:**
 ```bash
 cv sync [options]
 ```
@@ -324,44 +147,15 @@ cv sync [options]
 **Options:**
 | Option | Description |
 |--------|-------------|
-| `--incremental` | Only sync changed files |
-| `--force` | Force full rebuild of graph |
-| `--json` | JSON output |
-| `--quiet` | Suppress output |
-| `--verbose` | Show detailed progress |
+| `--incremental` | Only sync changed files (faster) |
+| `--force` | Force full rebuild |
 
 **Examples:**
 ```bash
-# Full sync
-cv sync
-
-# Incremental sync (faster)
-cv sync --incremental
-
-# Force full rebuild
-cv sync --force
-
-# Silent sync for scripts
-cv sync --quiet
+cv sync                    # Full sync
+cv sync --incremental      # Incremental (faster)
+cv sync --force            # Force rebuild
 ```
-
-**What it does:**
-1. Parses source files
-2. Extracts symbols (functions, classes, variables)
-3. Builds knowledge graph in FalkorDB
-4. Creates embeddings for semantic search (if OpenAI key configured)
-5. Tracks relationships between code elements
-
-**When to sync:**
-- After initial `cv init`
-- After major code changes
-- Before using AI features
-- Regularly in CI/CD
-
-**Performance:**
-- Initial sync: ~1-2 min for medium project
-- Incremental: ~5-10 seconds
-- Depends on: File count, languages, complexity
 
 ---
 
@@ -369,67 +163,8 @@ cv sync --quiet
 
 Show CV-Git status and health.
 
-**Usage:**
 ```bash
 cv status [options]
-```
-
-**Options:**
-| Option | Description |
-|--------|-------------|
-| `--json` | JSON output |
-
-**Examples:**
-```bash
-cv status
-cv status --json
-```
-
-**Output:**
-```
-📊 CV-Git Status
-
-Git Repository:
-  Branch: main
-  M 4 file(s) modified
-
-CV-Git:
-  Status: ✓ Initialized
-  Last Sync: 2 hours ago
-  Files: 142
-  Symbols: 1,847
-  Embeddings: 1,203
-
-Services:
-  ✓ FalkorDB: Running
-  ✓ Qdrant: Running
-```
-
-**JSON Output:**
-```json
-{
-  "git": {
-    "branch": "main",
-    "ahead": 0,
-    "behind": 0,
-    "modified": 4,
-    "created": 0,
-    "deleted": 0
-  },
-  "cvGit": {
-    "initialized": true,
-    "lastSync": "2024-11-17T20:00:00.000Z",
-    "stats": {
-      "files": 142,
-      "symbols": 1847,
-      "embeddings": 1203
-    }
-  },
-  "services": {
-    "FalkorDB": { "healthy": true },
-    "Qdrant": { "healthy": true }
-  }
-}
 ```
 
 ---
@@ -438,58 +173,772 @@ Services:
 
 Run health diagnostics.
 
-**Usage:**
 ```bash
 cv doctor [options]
+```
+
+---
+
+## Git Wrapper Commands
+
+CV-Git provides enhanced wrappers for common git commands with knowledge graph integration.
+
+### cv add
+
+Stage files for commit.
+
+```bash
+cv add [files...] [options]
 ```
 
 **Options:**
 | Option | Description |
 |--------|-------------|
-| `--json` | JSON output |
-| `--fix` | Attempt automatic fixes (future) |
+| `-A, --all` | Stage all changes |
+| `-p, --patch` | Interactive patch mode |
+| `-u, --update` | Stage modified and deleted only |
+| `-n, --dry-run` | Show what would be staged |
 
 **Examples:**
 ```bash
-cv doctor
-cv doctor --json
+cv add .                   # Stage all files
+cv add -A                  # Stage all including untracked
+cv add src/               # Stage directory
+cv add --patch             # Interactive staging
 ```
 
-**Checks:**
-1. ✓ Git Installation
-2. ✓ Git Repository
-3. ✓ Node.js Version (>= 18)
-4. ✓ pnpm Installation
-5. ⚠ CV-Git Initialization
-6. ✓ Configuration Validity
-7. ⚠ Credentials Stored
-8. ✓ FalkorDB Connectivity
-9. ⚠ Qdrant Connectivity
-10. ✓ Disk Space
-11. ✓ Network Connectivity
+---
+
+### cv commit
+
+Commit with AI-generated messages and credential identity.
+
+```bash
+cv commit [options]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-m, --message <msg>` | Commit message |
+| `-a, --all` | Stage all modified files |
+| `--amend` | Amend previous commit |
+| `--ai` | Generate AI commit message |
+| `--no-verify` | Skip pre-commit hooks |
+
+**Examples:**
+```bash
+cv commit -m "Fix bug"     # Manual message
+cv commit --ai             # AI-generated message
+cv commit -a --ai          # Stage all + AI message
+```
+
+---
+
+### cv diff
+
+Show changes with optional AI analysis.
+
+```bash
+cv diff [commit...] [options]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--staged` | Show staged changes |
+| `--stat` | Show diffstat |
+| `--name-only` | Show only file names |
+| `--analyze` | AI-powered analysis of changes |
+
+**Examples:**
+```bash
+cv diff                    # Working tree vs index
+cv diff --staged           # Index vs HEAD
+cv diff HEAD~3             # Last 3 commits
+cv diff --analyze          # AI analysis of changes
+cv diff --stat             # Summary statistics
+```
+
+**AI Analysis Output:**
+```
+Analyzing changes...
+
+Change Summary:
+- Modified authentication flow to use JWT
+- Added input validation for email
+- Updated error handling
+
+Suggested commit type: feat
+Suggested scope: auth
+Potential issues: None detected
+```
+
+---
+
+### cv log
+
+Show commit history with knowledge graph features.
+
+```bash
+cv log [revision-range] [options]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--oneline` | One line per commit |
+| `--graph` | Draw ASCII graph |
+| `--all` | Show all branches |
+| `-n, --number <n>` | Limit to n commits |
+| `--author <pattern>` | Filter by author |
+| `-S, --symbol <name>` | Show commits affecting a symbol |
+| `--smart` | Visual branch tree (smartlog style) |
+| `--mine` | Show only my commits |
+| `--stack` | Show current stack context |
+
+**Examples:**
+```bash
+cv log -5                  # Last 5 commits
+cv log --oneline --graph   # Graphical view
+cv log --symbol login      # Commits affecting 'login' function
+cv log --smart             # Smartlog visual tree
+cv log --mine              # Only my commits
+cv log --stack             # Current stack commits
+```
+
+**Smart Log Output:**
+```
+📊 Smart Log
+
+Current: main
+
+* fe94939 John 2 hours ago (HEAD -> main, origin/main)
+  test: Add integration tests
+|
+* 27d7572 John 3 hours ago
+  feat: Add git command wrappers
+|
+* 9a58272 John 4 hours ago
+  fix: Windows build
+
+Tip: cv log --mine  # Show only your commits
+     cv log --stack # Show current stack
+```
+
+**Stack Log Output:**
+```
+📚 Stack Log
+
+Base: main
+Commits in stack: 3
+
+│ 1. fe94939 test: Add integration tests (2 hours ago)
+│
+│ 2. 27d7572 feat: Add git command wrappers (3 hours ago)
+│
+◉ 3. 9a58272 fix: Windows build (4 hours ago)
+│
+◯ main
+```
+
+---
+
+### cv branch
+
+List, create, or delete branches.
+
+```bash
+cv branch [branch-name] [start-point] [options]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-a, --all` | List local and remote branches |
+| `-r, --remotes` | List only remote branches |
+| `-d, --delete` | Delete a branch |
+| `-D, --force-delete` | Force delete |
+| `-m, --move` | Rename a branch |
+
+**Examples:**
+```bash
+cv branch                  # List branches
+cv branch feature          # Create branch
+cv branch -d feature       # Delete branch
+cv branch -m old new       # Rename branch
+cv branch --json           # JSON output
+```
+
+---
+
+### cv checkout / cv switch
+
+Switch branches or restore files with auto-sync.
+
+```bash
+cv checkout [branch-or-file] [options]
+cv switch [branch] [options]        # Modern style
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-b, --create <branch>` | Create and switch to branch |
+| `-f, --force` | Force switch (discard changes) |
+| `--no-sync` | Skip knowledge graph sync |
+
+**Examples:**
+```bash
+cv checkout main           # Switch to main
+cv checkout -b feature     # Create and switch
+cv switch feature          # Modern switch syntax
+cv checkout -- file.ts     # Restore file
+```
+
+Auto-syncs knowledge graph when switching branches (unless `--no-sync`).
+
+---
+
+### cv merge
+
+Merge branches with conflict detection and auto-sync.
+
+```bash
+cv merge [branch] [options]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--no-ff` | Create merge commit even if fast-forward |
+| `--squash` | Squash commits |
+| `--abort` | Abort current merge |
+| `--continue` | Continue after resolving conflicts |
+
+**Examples:**
+```bash
+cv merge feature           # Merge feature into current
+cv merge feature --no-ff   # Force merge commit
+cv merge --abort           # Abort merge
+```
+
+Auto-syncs knowledge graph after successful merge.
+
+---
+
+### cv stash
+
+Stash changes.
+
+```bash
+cv stash [subcommand] [options]
+```
+
+**Subcommands:**
+- `push` (default) - Stash changes
+- `pop` - Apply and remove top stash
+- `apply` - Apply without removing
+- `list` - List stashes
+- `show` - Show stash contents
+- `drop` - Remove a stash
+- `clear` - Remove all stashes
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-m, --message <msg>` | Stash message |
+| `-u, --include-untracked` | Include untracked files |
+| `-k, --keep-index` | Keep staged changes |
+
+**Examples:**
+```bash
+cv stash                   # Quick stash
+cv stash -m "WIP feature"  # With message
+cv stash pop               # Apply and remove
+cv stash list              # List stashes
+cv stash show stash@{0}    # Show contents
+```
+
+---
+
+### cv fetch
+
+Download objects and refs from remote.
+
+```bash
+cv fetch [remote] [refspec...] [options]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--all` | Fetch all remotes |
+| `-p, --prune` | Remove stale refs |
+| `-t, --tags` | Fetch all tags |
+
+**Examples:**
+```bash
+cv fetch                   # Fetch from origin
+cv fetch --all             # Fetch all remotes
+cv fetch --prune           # Clean up stale refs
+```
+
+---
+
+### cv pull
+
+Pull with automatic knowledge graph sync.
+
+```bash
+cv pull [remote] [branch] [options]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--rebase` | Rebase instead of merge |
+| `-f, --ff-only` | Fast-forward only |
+
+---
+
+### cv push
+
+Push with automatic knowledge graph sync.
+
+```bash
+cv push [remote] [branch] [options]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-u, --set-upstream` | Set upstream branch |
+| `--tags` | Push all tags |
+| `-f, --force` | Force push (use with caution) |
+
+---
+
+### cv remote
+
+Manage remote repositories.
+
+```bash
+cv remote [subcommand] [args...]
+```
+
+**Subcommands:**
+- (no args) - List remotes
+- `add <name> <url>` - Add remote
+- `remove <name>` - Remove remote
+- `rename <old> <new>` - Rename remote
+- `set-url <name> <url>` - Change URL
+- `show <name>` - Show remote info
+
+**Examples:**
+```bash
+cv remote                  # List remotes
+cv remote -v               # With URLs
+cv remote add upstream URL # Add remote
+cv remote --json           # JSON output
+```
+
+---
+
+### cv reset
+
+Reset current HEAD.
+
+```bash
+cv reset [commit] [files...] [options]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--soft` | Keep changes staged |
+| `--mixed` | Keep changes unstaged (default) |
+| `--hard` | Discard changes (DESTRUCTIVE) |
+
+**Examples:**
+```bash
+cv reset HEAD~1            # Undo last commit (keep changes)
+cv reset --soft HEAD~1     # Undo, keep staged
+cv reset --hard HEAD~1     # Undo and discard (careful!)
+cv reset HEAD file.ts      # Unstage specific file
+```
+
+---
+
+### cv revert
+
+Revert commits by creating new commits.
+
+```bash
+cv revert [commits...] [options]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-n, --no-commit` | Don't auto-commit |
+| `--abort` | Abort current revert |
+| `--continue` | Continue after conflicts |
+
+**Examples:**
+```bash
+cv revert HEAD             # Revert last commit
+cv revert abc123           # Revert specific commit
+cv revert HEAD~3..HEAD     # Revert last 3 commits
+cv revert --abort          # Abort in-progress revert
+```
+
+---
+
+### cv tag
+
+Create, list, delete, or verify tags.
+
+```bash
+cv tag [tagname] [commit] [options]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-a, --annotate` | Create annotated tag |
+| `-m, --message <msg>` | Tag message (implies -a) |
+| `-d, --delete` | Delete tag |
+| `-l, --list [pattern]` | List tags |
+| `-v, --verify` | Verify tag signature |
+
+**Examples:**
+```bash
+cv tag                     # List tags
+cv tag v1.0.0              # Lightweight tag
+cv tag -a v1.0.0 -m "Rel"  # Annotated tag
+cv tag -d v1.0.0           # Delete tag
+cv tag --json              # JSON output
+```
+
+---
+
+## Advanced Workflow Commands
+
+These commands implement modern VCS workflows inspired by Jujutsu, Sapling, and git-absorb.
+
+### cv absorb
+
+Automatically create fixup commits for staged changes.
+
+```bash
+cv absorb [options]
+```
+
+**What it does:** Analyzes your staged changes, determines which previous commits they should be absorbed into using git blame, and creates `fixup!` commits targeting those commits.
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--and-rebase` | Auto-rebase with --autosquash after |
+| `--base <commit>` | Base commit to consider |
+| `-n, --dry-run` | Preview without making changes |
+| `-v, --verbose` | Show detailed information |
+
+**Examples:**
+```bash
+# Stage your changes
+cv add -A
+
+# See what would be absorbed
+cv absorb --dry-run
+
+# Create fixup commits
+cv absorb
+
+# Create and auto-squash
+cv absorb --and-rebase
+```
+
+**Workflow:**
+```
+$ cv absorb
+
+Analyzing staged changes...
+
+Found 2 commit(s) to absorb into:
+
+  abc1234 Add user authentication
+    - src/auth/login.ts
+
+  def5678 Implement session handling
+    - src/auth/session.ts
+
+✓ Created fixup for abc1234
+✓ Created fixup for def5678
+
+✓ Created 2 fixup commit(s)
+
+To apply fixups, run:
+  git rebase -i --autosquash main
+
+Or use: cv absorb --and-rebase
+```
+
+---
+
+### cv undo
+
+Undo the last operation using git reflog.
+
+```bash
+cv undo [target] [options]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--hard` | Discard uncommitted changes |
+| `-n, --steps <n>` | Number of operations to undo |
+
+**Examples:**
+```bash
+cv undo                    # Undo last operation (soft)
+cv undo HEAD@{3}           # Go back 3 operations
+cv undo --hard             # Undo and discard changes
+cv undo abc1234            # Restore to specific commit
+```
 
 **Output:**
 ```
-🔍 Running CV-Git Diagnostics...
+Undo operation:
 
-✓ Git Installation
-  git version 2.43.0
+  Current: fe94939 (main)
+  Target:  27d7572 "feat: Add git command wrappers"
 
-✓ Node.js Version
-  v18.19.1 (>= 18.0.0 required)
+✓ Restored to 27d7572
 
-⚠ Qdrant (Vector Search)
-  Not available
-  → Fix: Start Qdrant: docker run -d --name qdrant -p 6333:6333 qdrant/qdrant
+Changes are preserved in your working directory.
+Use "cv status" to see them.
 
-Summary:
-  ✓ 8 passed
-  ⚠ 3 warnings
+To redo (go back), use:
+  cv undo fe94939
 ```
 
-**Exit Codes:**
-- `0` - All checks passed or warnings only
-- `1` - One or more checks failed
+---
+
+### cv reflog
+
+Show operation history for use with cv undo.
+
+```bash
+cv reflog [options]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-n, --count <n>` | Number of entries (default: 20) |
+
+**Examples:**
+```bash
+cv reflog                  # Show recent operations
+cv reflog -n 50            # Show more
+cv reflog --json           # JSON output
+```
+
+**Output:**
+```
+Recent operations:
+
+  Use "cv undo HEAD@{N}" to restore to that point
+
+HEAD@{0} fe94939 commit: test: Add tests (2 min ago)
+HEAD@{1} 27d7572 commit: feat: Add wrappers (1 hour ago)
+HEAD@{2} 9a58272 commit: fix: Windows build (3 hours ago)
+HEAD@{3} 3cee7a7 checkout: moving from feature to main (3 hours ago)
+HEAD@{4} bfc2692 commit: chore: Bump version (4 hours ago)
+
+Tip: Use "cv undo" to undo the last operation
+     Use "cv undo HEAD@{2}" to go back 2 operations
+```
+
+---
+
+### cv stack
+
+Manage stacked diffs workflow for incremental PR reviews.
+
+```bash
+cv stack [subcommand] [options]
+```
+
+**Subcommands:**
+
+#### cv stack status
+Show current stack status.
+
+```bash
+cv stack status [--base <commit>]
+```
+
+**Output:**
+```
+Stack Status
+
+Base: main
+
+◉ ○ fe94939 Add unit tests
+│   branch: stack/feature/3
+│   PR: #127
+
+│ ○ 27d7572 Implement feature
+│   branch: stack/feature/2
+│   PR: #126
+
+│ ○ 9a58272 Add foundation
+│   branch: stack/feature/1
+│   PR: #125
+│
+◯ main
+
+Commands:
+  cv stack push    - Push branches for each commit
+  cv stack submit  - Create PRs for the stack
+  cv stack rebase  - Rebase stack on updated base
+```
+
+#### cv stack log / cv stack smartlog
+Show stack as visual graph.
+
+```bash
+cv stack log [--base <commit>]
+```
+
+#### cv stack create
+Create a named stack from current commits.
+
+```bash
+cv stack create <name> [--base <commit>]
+```
+
+#### cv stack push
+Push all commits in stack as separate branches.
+
+```bash
+cv stack push [--force]
+```
+
+Creates branches named `stack/<branch>/<n>` for each commit.
+
+#### cv stack submit
+Create/update PRs for each commit in stack.
+
+```bash
+cv stack submit [--draft]
+```
+
+Requires GitHub CLI (gh) to be installed.
+
+#### cv stack rebase
+Rebase entire stack on updated base.
+
+```bash
+cv stack rebase [--base <commit>]
+```
+
+#### cv stack sync
+Sync stack with remote (fetch + rebase).
+
+```bash
+cv stack sync
+```
+
+**Full Stacked Diffs Workflow:**
+```bash
+# 1. Make commits for your feature
+git commit -m "Add foundation"
+git commit -m "Implement feature"
+git commit -m "Add tests"
+
+# 2. View your stack
+cv stack status
+
+# 3. Push stack branches
+cv stack push
+
+# 4. Create PRs for review
+cv stack submit
+
+# 5. After review, sync with main
+cv stack sync
+
+# 6. Force push updates
+cv stack push --force
+```
+
+---
+
+### cv split
+
+Split a commit into multiple smaller commits.
+
+```bash
+cv split [commit] [options]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--by-file` | Auto-split: one commit per file |
+| `-i, --interactive` | Interactive mode: choose files |
+
+**Examples:**
+```bash
+cv split                   # Show split options
+cv split HEAD              # Split last commit
+cv split --by-file         # One commit per file
+cv split --interactive     # Choose files for each commit
+```
+
+**Interactive Mode:**
+```
+Interactive split mode
+
+For each commit, enter file numbers to include (e.g., "1,3,4" or "1-3")
+Enter "done" when finished, "abort" to cancel
+
+   1. src/auth/login.ts
+   2. src/auth/session.ts
+   3. src/utils/helpers.ts
+   4. tests/auth.test.ts
+
+Remaining files: 1, 2, 3, 4
+Commit 1 files: 1,2
+  Message [Original message]: Implement authentication
+
+✓ Created commit abc1234
+
+Remaining files: 3, 4
+Commit 2 files: 3-4
+  Message [Original message (part 2)]: Add helpers and tests
+
+✓ Created commit def5678
+
+✓ Created 2 commits
+```
+
+**By-File Mode:**
+```
+Splitting by file...
+
+✓ abc1234 login.ts
+✓ def5678 session.ts
+✓ ghi9012 helpers.ts
+✓ jkl3456 auth.test.ts
+
+✓ Split into 4 commits
+```
 
 ---
 
@@ -499,74 +948,23 @@ Summary:
 
 Semantic search over your codebase.
 
-**Usage:**
 ```bash
 cv find <query> [options]
 ```
 
 **Options:**
-| Option | Description | Default |
-|--------|-------------|---------|
-| `-l, --limit <n>` | Max results | 10 |
-| `--language <lang>` | Filter by language | all |
-| `--file <path>` | Filter by file path | all |
-| `--min-score <score>` | Minimum similarity (0-1) | 0.5 |
-| `--json` | JSON output | false |
-| `--quiet` | Suppress output | false |
-| `--verbose` | Verbose output | false |
+| Option | Description |
+|--------|-------------|
+| `-l, --limit <n>` | Max results (default: 10) |
+| `--language <lang>` | Filter by language |
+| `--file <path>` | Filter by file path |
+| `--min-score <score>` | Minimum similarity (0-1) |
 
 **Examples:**
 ```bash
-# Basic search
 cv find "authentication logic"
-
-# Limit results
 cv find "error handling" --limit 5
-
-# Filter by language
 cv find "database queries" --language typescript
-
-# Filter by file path
-cv find "API endpoints" --file "src/api"
-
-# Lower threshold for more results
-cv find "validation" --min-score 0.3
-
-# JSON output for automation
-cv find "test helpers" --json
-```
-
-**How it works:**
-1. Converts query to embedding using OpenAI
-2. Searches vector database for similar code
-3. Ranks by semantic similarity
-4. Returns relevant code chunks
-
-**Requirements:**
-- OpenAI API key configured
-- Repository synced with `cv sync`
-- Qdrant running
-
-**Output:**
-```
-Search results for: "authentication logic"
-────────────────────────────────────────────────────────────────────────────────
-
-1. authenticateUser (85.3% match)
-   src/auth/login.ts:45-67 • typescript
-   Authenticates user credentials and returns session token
-
-   │ async function authenticateUser(email: string, password: string) {
-   │   const user = await db.users.findOne({ email });
-   │   if (!user) throw new Error('User not found');
-   │
-   │   const valid = await bcrypt.compare(password, user.passwordHash);
-   │   if (!valid) throw new Error('Invalid password');
-   │   ...
-
-2. validateToken (78.1% match)
-   src/auth/middleware.ts:12-28 • typescript
-   ...
 ```
 
 ---
@@ -575,7 +973,6 @@ Search results for: "authentication logic"
 
 Execute tasks with AI assistance.
 
-**Usage:**
 ```bash
 cv do <task> [options]
 ```
@@ -588,52 +985,9 @@ cv do <task> [options]
 
 **Examples:**
 ```bash
-# Generate and apply changes
 cv do "add logging to error handlers"
-
-# Plan only (no code generation)
-cv do "refactor authentication module" --plan-only
-
-# Auto-approve (use with caution)
-cv do "fix typos in comments" --yes
+cv do "refactor auth module" --plan-only
 ```
-
-**How it works:**
-1. Analyzes task using AI
-2. Searches codebase for relevant context
-3. Generates execution plan
-4. Shows plan for approval
-5. Generates and applies code changes
-6. Creates commit with changes
-
-**Interactive Flow:**
-```
-🤖 Analyzing task: "add logging to error handlers"
-
-📊 Found relevant context:
-  - src/utils/errors.ts (error handling)
-  - src/middleware/errorHandler.ts (middleware)
-  - src/logger.ts (logging utility)
-
-📋 Execution Plan:
-  1. Import logger in errorHandler.ts
-  2. Add log statements to each error handler
-  3. Include error details and stack traces
-  4. Update error response format
-
-Approve this plan? [y/N]: y
-
-✨ Generating code...
-📝 Creating commit...
-
-✅ Task completed!
-```
-
-**Best Practices:**
-- Review plan carefully before approval
-- Use `--plan-only` for complex changes
-- Start with small, focused tasks
-- Verify changes before committing
 
 ---
 
@@ -641,55 +995,14 @@ Approve this plan? [y/N]: y
 
 Get AI explanations of code.
 
-**Usage:**
 ```bash
-cv explain <symbol> [options]
+cv explain <symbol>
 ```
-
-**Arguments:**
-- `<symbol>` - Function/class/variable name to explain
 
 **Examples:**
 ```bash
-# Explain a function
 cv explain authenticateUser
-
-# Explain a class
 cv explain AuthService
-
-# Explain a complex algorithm
-cv explain calculateOptimalRoute
-```
-
-**Output:**
-```
-🔍 Explaining: authenticateUser
-
-📍 Location: src/auth/login.ts:45-67
-
-📖 Purpose:
-Authenticates a user by validating their email and password against
-the database. Returns a session token on successful authentication.
-
-⚙️ How it works:
-1. Looks up user by email in database
-2. Compares provided password with stored hash using bcrypt
-3. Generates and returns a JWT session token if valid
-4. Throws descriptive errors for invalid credentials
-
-🔗 Dependencies:
-- db.users.findOne() - User lookup
-- bcrypt.compare() - Password verification
-- generateSessionToken() - Token creation
-
-📞 Used by:
-- loginHandler() in src/api/auth.ts
-- refreshToken() in src/api/auth.ts
-
-💡 Notes:
-- Uses bcrypt for secure password hashing
-- Throws errors that should be caught by error middleware
-- Session tokens expire after 24 hours
 ```
 
 ---
@@ -698,7 +1011,6 @@ the database. Returns a session token on successful authentication.
 
 AI code review.
 
-**Usage:**
 ```bash
 cv review [options]
 ```
@@ -706,54 +1018,27 @@ cv review [options]
 **Options:**
 | Option | Description |
 |--------|-------------|
-| `--staged` | Review staged changes only |
+| `--staged` | Review staged changes |
 | `--commit <sha>` | Review specific commit |
 
-**Examples:**
+---
+
+### cv chat
+
+Interactive AI chat with codebase context.
+
 ```bash
-# Review current changes
-cv review
-
-# Review staged changes
-cv review --staged
-
-# Review specific commit
-cv review --commit abc123
+cv chat [question]
 ```
 
-**What it reviews:**
-- Code quality and style
-- Potential bugs
-- Security issues
-- Performance concerns
-- Best practices
-- Documentation gaps
+---
 
-**Output:**
-```
-🔍 AI Code Review
+### cv context
 
-📁 Files changed: 3
+Generate context for AI coding assistants.
 
-src/auth/login.ts
-  ⚠️  Line 52: Password comparison should use constant-time comparison
-      Consider using crypto.timingSafeEqual for security
-
-  💡 Line 45: Consider adding input validation for email format
-
-  ✅ Line 60: Good error handling
-
-src/api/auth.ts
-  🐛 Line 28: Potential null pointer - user might be undefined
-      Add null check before accessing user.id
-
-  📝 Line 15: Missing JSDoc comment for public API
-
-Summary:
-  ⚠️  2 warnings
-  🐛 1 bug
-  💡 1 suggestion
-  📝 1 documentation
+```bash
+cv context <query>
 ```
 
 ---
@@ -764,71 +1049,15 @@ Summary:
 
 Manage pull requests.
 
-**Usage:**
 ```bash
 cv pr <command> [options]
 ```
 
 **Commands:**
-
-#### cv pr create
-Create a pull request.
-
-```bash
-cv pr create [options]
-
-# Options:
-  --title <title>      PR title
-  --body <body>        PR description
-  --base <branch>      Base branch (default: main)
-  --draft              Create as draft PR
-```
-
-**Examples:**
-```bash
-# Interactive creation
-cv pr create
-
-# With title and description
-cv pr create --title "Add authentication" --body "Implements JWT auth"
-
-# Create draft PR
-cv pr create --draft
-```
-
-#### cv pr list
-List pull requests.
-
-```bash
-cv pr list [options]
-
-# Options:
-  --state <state>      State: open, closed, all (default: open)
-  --author <user>      Filter by author
-  --limit <n>          Max results (default: 10)
-```
-
-#### cv pr view
-View PR details.
-
-```bash
-cv pr view <number>
-
-# Example:
-cv pr view 42
-```
-
-#### cv pr review
-Review a pull request.
-
-```bash
-cv pr review <number>
-
-# Example:
-cv pr review 42
-```
-
-Provides AI-powered code review of the PR.
+- `create` - Create PR
+- `list` - List PRs
+- `view <n>` - View PR
+- `review <n>` - AI review PR
 
 ---
 
@@ -836,43 +1065,22 @@ Provides AI-powered code review of the PR.
 
 Manage releases.
 
-**Usage:**
 ```bash
 cv release <command> [options]
 ```
 
 **Commands:**
+- `create <version>` - Create release
+- `list` - List releases
 
-#### cv release create
-Create a new release.
+---
 
-```bash
-cv release create <version> [options]
+### cv clone
 
-# Options:
-  --title <title>      Release title
-  --notes <notes>      Release notes
-  --draft              Create as draft
-  --prerelease         Mark as pre-release
-```
-
-**Examples:**
-```bash
-# Create release with auto-generated notes
-cv release create v1.2.0
-
-# Create with custom notes
-cv release create v1.2.0 --notes "Bug fixes and improvements"
-
-# Create draft release
-cv release create v2.0.0 --draft
-```
-
-#### cv release list
-List releases.
+Clone and initialize CV-Git.
 
 ```bash
-cv release list [--limit <n>]
+cv clone <url> [directory]
 ```
 
 ---
@@ -881,155 +1089,69 @@ cv release list [--limit <n>]
 
 ### cv graph
 
-Query the knowledge graph directly.
+Query the knowledge graph.
 
-**Usage:**
 ```bash
-cv graph <query> [options]
+cv graph <query>
 ```
 
 **Query Types:**
-
-#### Relationship Queries
-```bash
-# Find what calls a function
-cv graph calls authenticateUser
-
-# Find what a function calls
-cv graph called-by loginHandler
-
-# Find what imports a module
-cv graph imports ./utils/errors
-
-# Find what a file exports
-cv graph exports src/auth/login.ts
-```
-
-#### Structure Queries
-```bash
-# List all functions
-cv graph functions
-
-# List all classes
-cv graph classes
-
-# List files by language
-cv graph files --language typescript
-```
-
-**Examples:**
-```bash
-cv graph calls handleRequest
-cv graph imports lodash
-cv graph functions --file src/api
-```
+- `calls <func>` - What calls this function
+- `called-by <func>` - What this function calls
+- `imports <module>` - What imports this
+- `exports <file>` - What a file exports
+- `functions` - List all functions
+- `classes` - List all classes
 
 ---
 
 ### cv git
 
-Execute git commands with CV-Git awareness.
+Execute any git command (passthrough).
 
-**Usage:**
 ```bash
-cv git <git-command> [args]
+cv git <command> [args...]
 ```
-
-**Examples:**
-```bash
-# Standard git commands work
-cv git status
-cv git log
-cv git diff
-
-# CV-Git enhances certain commands
-cv git commit    # AI-generated commit message
-cv git merge     # Smart conflict resolution
-```
-
-**Enhanced Commands:**
-- `commit` - AI-generated commit messages
-- `merge` - AI-assisted conflict resolution
-- `rebase` - Smart rebase with context
 
 ---
 
 ## Common Workflows
 
-### Initial Setup
-```bash
-# 1. Initialize repository
-cv init
-
-# 2. Set up credentials
-cv auth setup
-
-# 3. Initial sync
-cv sync
-
-# 4. Verify everything works
-cv doctor
-```
-
 ### Daily Development
 ```bash
-# Check status
-cv status
-
-# Find relevant code
-cv find "feature I'm working on"
-
-# Make changes with AI help
-cv do "add validation to user input"
-
-# Sync changes
-cv sync --incremental
+cv status                  # Check status
+cv find "feature"          # Find relevant code
+cv add -A                  # Stage changes
+cv commit --ai             # AI commit message
+cv push                    # Push with sync
 ```
 
-### Code Review
+### Code Review with Stacked Diffs
 ```bash
-# Review your changes
-cv review
+# Create stack
+git commit -m "Part 1"
+git commit -m "Part 2"
+git commit -m "Part 3"
 
-# Create PR
-cv pr create
+# Submit for review
+cv stack submit
 
-# Review teammate's PR
-cv pr review 123
+# After feedback, update
+cv absorb --and-rebase
+cv stack push --force
 ```
 
-### Troubleshooting
+### Fixing Mistakes
 ```bash
-# Run diagnostics
-cv doctor
-
-# Check configuration
-cv config list
-
-# Verify services
-cv status
-
-# Full rebuild if needed
-cv sync --force
+cv reflog                  # See history
+cv undo                    # Undo last operation
+cv undo HEAD@{3}           # Go back further
 ```
 
----
-
-## Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `ANTHROPIC_API_KEY` | Claude API key | - |
-| `OPENAI_API_KEY` | OpenAI API key | - |
-| `GITHUB_TOKEN` | GitHub personal access token | - |
-| `CV_DEBUG` | Enable debug logging | false |
-| `VISUAL` / `EDITOR` | Editor for `cv config edit` | vi |
-
-**Example:**
+### Cleaning Up History
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-export OPENAI_API_KEY=sk-...
-export GITHUB_TOKEN=ghp_...
+cv split --by-file         # Split large commit
+cv absorb                  # Absorb fixups
 ```
 
 ---
@@ -1049,24 +1171,16 @@ export GITHUB_TOKEN=ghp_...
 ## Getting Help
 
 ```bash
-# General help
-cv --help
-
-# Command help
-cv <command> --help
-
-# Examples:
-cv config --help
-cv find --help
-cv do --help
+cv --help                  # General help
+cv <command> --help        # Command help
+cv <command> --options     # Show all options
 ```
 
 **Resources:**
 - Documentation: https://github.com/controlVector/cv-git
 - Issues: https://github.com/controlVector/cv-git/issues
-- Discussions: https://github.com/controlVector/cv-git/discussions
 
 ---
 
-**Last Updated:** 2025-11-17
-**Version:** 0.2.0
+**Last Updated:** 2026-01-09
+**Version:** 0.4.11
