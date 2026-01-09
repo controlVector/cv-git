@@ -1,6 +1,6 @@
 {
   "name": "@controlvector/cv-git",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "description": "AI-Native Paired-Programming + Knowledge-Graph Version Control Layer",
   "type": "module",
   "bin": {
@@ -33,7 +33,7 @@
   ],
   "scripts": {
     "build": "tsc && pnpm run bundle",
-    "bundle": "node -e \"const fs=require('fs');const c=fs.readFileSync('dist/index.js','utf8');fs.writeFileSync('dist/index.js',c.replace(/^#!.*\\n/,''))\" && esbuild dist/index.js --bundle --platform=node --format=cjs --outfile=dist/bundle.cjs --external:keytar --external:tree-sitter --external:tree-sitter-* --banner:js='#!/usr/bin/env node'",
+    "bundle": "node -e \"const fs=require('fs');const c=fs.readFileSync('dist/index.js','utf8');fs.writeFileSync('dist/index.js',c.replace(/^#!.*\\n/,''))\" && esbuild dist/index.js --bundle --platform=node --format=cjs --outfile=dist/bundle.cjs --external:keytar --external:tree-sitter --external:tree-sitter-go --external:tree-sitter-java --external:tree-sitter-javascript --external:tree-sitter-python --external:tree-sitter-rust --external:tree-sitter-typescript --banner:js=\"#!/usr/bin/env node\"",
     "dev": "tsc --watch",
     "clean": "rm -rf dist *.tsbuildinfo",
     "start": "node dist/bundle.js",

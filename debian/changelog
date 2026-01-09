@@ -1,3 +1,9 @@
+cv-git (0.4.9-1) unstable; urgency=medium
+
+  * Fixed Windows build by removing glob patterns in esbuild externals
+
+ -- CV-Git Contributors <cv-git@controlvector.dev>  Thu, 09 Jan 2026 14:30:00 +0000
+
 cv-git (0.4.8-1) unstable; urgency=medium
 
   * Added cross-platform builds (Windows x64, macOS x64/arm64)
