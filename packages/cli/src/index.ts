@@ -52,13 +52,17 @@ import { remoteCommand } from './commands/remote.js';
 import { resetCommand } from './commands/reset.js';
 import { revertCommand } from './commands/revert.js';
 import { tagCommand } from './commands/tag.js';
+import { absorbCommand } from './commands/absorb.js';
+import { undoCommand, reflogCommand } from './commands/undo.js';
+import { stackCommand } from './commands/stack.js';
+import { splitCommand } from './commands/split.js';
 
 const program = new Command();
 
 program
   .name('cv')
   .description('AI-Native Version Control with Knowledge Graph & Secure Credentials')
-  .version('0.4.10');
+  .version('0.4.11');
 
 // Add commands
 program.addCommand(configCommand());        // Configuration management
@@ -100,6 +104,11 @@ program.addCommand(remoteCommand());          // Git remote wrapper
 program.addCommand(resetCommand());           // Git reset wrapper
 program.addCommand(revertCommand());          // Git revert wrapper
 program.addCommand(tagCommand());             // Git tag wrapper
+program.addCommand(absorbCommand());          // Auto-create fixup commits
+program.addCommand(undoCommand());            // Undo operations
+program.addCommand(reflogCommand());          // Operation history
+program.addCommand(stackCommand());           // Stacked diffs workflow
+program.addCommand(splitCommand());           // Split commits
 program.addCommand(createPRDCommand());     // PRD management (cv prd)
 program.addCommand(importCommand());        // Import PRD data from cv-prd exports
 program.addCommand(servicesCommand());      // Service discovery and management

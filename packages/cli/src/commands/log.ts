@@ -43,6 +43,9 @@ interface LogOptions {
   grep?: string;
   file?: string;
   symbol?: string;
+  smart?: boolean;
+  mine?: boolean;
+  stack?: boolean;
   verbose?: boolean;
   quiet?: boolean;
   json?: boolean;
@@ -66,6 +69,9 @@ export function logCommand(): Command {
     .option('--grep <pattern>', 'Filter by commit message')
     .option('-f, --file <path>', 'Show commits affecting file')
     .option('-S, --symbol <name>', 'Show commits affecting symbol (function/class)')
+    .option('--smart', 'Smart log: visual branch tree with relationship context')
+    .option('--mine', 'Show only my commits')
+    .option('--stack', 'Show current stack context (commits since base)')
     .allowUnknownOption(true);
 
   addGlobalOptions(cmd);
@@ -84,6 +90,27 @@ export function logCommand(): Command {
       if (options.symbol) {
         await logBySymbol(options.symbol, options, repoRoot, output);
         return;
+      }
+
+      // Smart log - visual branch tree
+      if (options.smart) {
+        await smartLog(options, repoRoot, output);
+        return;
+      }
+
+      // Stack log - show current stack
+      if (options.stack) {
+        await stackLog(options, repoRoot, output);
+        return;
+      }
+
+      // Mine flag - filter by current user
+      if (options.mine) {
+        const userEmail = execSync('git config user.email', {
+          cwd: repoRoot,
+          encoding: 'utf-8',
+        }).trim();
+        options.author = userEmail;
       }
 
       // Build git log arguments
@@ -262,6 +289,159 @@ async function logBySymbol(
       console.log(chalk.gray(`  cv log --grep "${symbolName}"  # Search commit messages`));
       console.log(chalk.gray(`  cv find "${symbolName}"        # Semantic code search`));
     }
+  } catch (error: any) {
+    console.error(chalk.red(`Error: ${error.message}`));
+  }
+}
+
+/**
+ * Smart log - visual branch tree with relationship context
+ * Inspired by Jujutsu and Sapling smartlog
+ */
+async function smartLog(
+  options: LogOptions,
+  repoRoot: string,
+  output: any
+): Promise<void> {
+  console.log(chalk.bold('\n📊 Smart Log\n'));
+
+  // Get current branch
+  const currentBranch = execSync('git branch --show-current', {
+    cwd: repoRoot,
+    encoding: 'utf-8',
+  }).trim() || 'HEAD';
+
+  // Custom format for smart log
+  const format = '%C(auto)%h%C(reset) %C(cyan)%an%C(reset) %C(dim)%ar%C(reset)%C(auto)%d%C(reset)%n  %s';
+
+  const args = [
+    'log',
+    '--graph',
+    '--all',
+    '--decorate',
+    `--format=${format}`,
+  ];
+
+  if (options.number) args.push(`-n${options.number}`);
+  if (options.author) args.push(`--author=${options.author}`);
+  if (options.since) args.push(`--since=${options.since}`);
+
+  // Add visual markers for HEAD and current work
+  console.log(chalk.gray(`Current: ${currentBranch}\n`));
+
+  try {
+    const result = execSync(`git ${args.join(' ')}`, {
+      cwd: repoRoot,
+      encoding: 'utf-8',
+      maxBuffer: 10 * 1024 * 1024,
+    });
+
+    console.log(result);
+
+    // Show working state
+    const status = execSync('git status --porcelain', {
+      cwd: repoRoot,
+      encoding: 'utf-8',
+    }).trim();
+
+    if (status) {
+      const changes = status.split('\n').length;
+      console.log(chalk.yellow(`\n◉ Working copy (${changes} uncommitted change${changes > 1 ? 's' : ''})`));
+    }
+
+    console.log(chalk.gray('\nTip: cv log --mine  # Show only your commits'));
+    console.log(chalk.gray('     cv log --stack # Show current stack'));
+
+  } catch (error: any) {
+    console.error(chalk.red(`Error: ${error.message}`));
+  }
+}
+
+/**
+ * Stack log - show commits in current stack
+ */
+async function stackLog(
+  options: LogOptions,
+  repoRoot: string,
+  output: any
+): Promise<void> {
+  console.log(chalk.bold('\n📚 Stack Log\n'));
+
+  // Find base (main or master)
+  let base = 'main';
+  try {
+    execSync('git rev-parse --verify main', { cwd: repoRoot, stdio: ['pipe', 'pipe', 'pipe'] });
+  } catch {
+    try {
+      execSync('git rev-parse --verify master', { cwd: repoRoot, stdio: ['pipe', 'pipe', 'pipe'] });
+      base = 'master';
+    } catch {
+      base = 'origin/main';
+    }
+  }
+
+  // Get merge-base
+  let mergeBase: string;
+  try {
+    mergeBase = execSync(`git merge-base ${base} HEAD`, {
+      cwd: repoRoot,
+      encoding: 'utf-8',
+    }).trim();
+  } catch {
+    console.log(chalk.yellow('Could not determine stack base'));
+    return;
+  }
+
+  // Count commits in stack
+  const countOutput = execSync(`git rev-list --count ${mergeBase}..HEAD`, {
+    cwd: repoRoot,
+    encoding: 'utf-8',
+  }).trim();
+
+  const count = parseInt(countOutput, 10);
+
+  if (count === 0) {
+    console.log(chalk.gray(`Base: ${base}`));
+    console.log(chalk.yellow('\nNo commits in stack (you are at the base)'));
+    return;
+  }
+
+  console.log(chalk.gray(`Base: ${base}`));
+  console.log(chalk.gray(`Commits in stack: ${count}\n`));
+
+  // Show stack commits
+  const format = '%C(yellow)%h%C(reset) %s %C(dim)(%ar)%C(reset)%C(auto)%d%C(reset)';
+
+  const args = [
+    'log',
+    '--reverse',
+    `--format=${format}`,
+    `${mergeBase}..HEAD`,
+  ];
+
+  try {
+    const result = execSync(`git ${args.join(' ')}`, {
+      cwd: repoRoot,
+      encoding: 'utf-8',
+    });
+
+    // Number the commits
+    const lines = result.trim().split('\n');
+    lines.forEach((line, i) => {
+      const marker = i === lines.length - 1 ? '◉' : '│';
+      console.log(`${chalk.cyan(marker)} ${i + 1}. ${line}`);
+      if (i < lines.length - 1) {
+        console.log(chalk.cyan('│'));
+      }
+    });
+
+    console.log(chalk.cyan('│'));
+    console.log(chalk.gray(`◯ ${base}`));
+
+    console.log(chalk.gray('\nCommands:'));
+    console.log(chalk.gray('  cv stack status  # Full stack status'));
+    console.log(chalk.gray('  cv stack push    # Push stack branches'));
+
   } catch (error: any) {
     console.error(chalk.red(`Error: ${error.message}`));
   }

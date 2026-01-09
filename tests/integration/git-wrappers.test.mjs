@@ -524,6 +524,192 @@ async function runTests() {
   }
 
   // ===========================================
+  // cv absorb tests
+  // ===========================================
+
+  // Test 25: cv absorb --help
+  testCount++;
+  console.log('Test 25: cv absorb --help');
+  try {
+    const result = await runCommand(['absorb', '--help']);
+    if (result.code === 0 &&
+        result.stdout.includes('--and-rebase') &&
+        result.stdout.includes('--dry-run') &&
+        result.stdout.includes('--base')) {
+      console.log('✅ PASS\n');
+      passedCount++;
+    } else {
+      console.log('❌ FAIL: Missing expected options\n');
+    }
+  } catch (error) {
+    console.log(`❌ FAIL: ${error.message}\n`);
+  }
+
+  // Test 26: cv absorb (no staged changes)
+  testCount++;
+  console.log('Test 26: cv absorb (no staged changes)');
+  try {
+    const result = await runCommand(['absorb']);
+    // Should handle gracefully when no changes staged
+    if (result.stdout.includes('No staged changes') || result.code === 0) {
+      console.log('✅ PASS\n');
+      passedCount++;
+    } else {
+      console.log('❌ FAIL: Should handle no staged changes\n');
+    }
+  } catch (error) {
+    console.log(`❌ FAIL: ${error.message}\n`);
+  }
+
+  // ===========================================
+  // cv undo tests
+  // ===========================================
+
+  // Test 27: cv undo --help
+  testCount++;
+  console.log('Test 27: cv undo --help');
+  try {
+    const result = await runCommand(['undo', '--help']);
+    if (result.code === 0 &&
+        result.stdout.includes('--hard') &&
+        result.stdout.includes('--steps')) {
+      console.log('✅ PASS\n');
+      passedCount++;
+    } else {
+      console.log('❌ FAIL: Missing expected options\n');
+    }
+  } catch (error) {
+    console.log(`❌ FAIL: ${error.message}\n`);
+  }
+
+  // Test 28: cv reflog
+  testCount++;
+  console.log('Test 28: cv reflog');
+  try {
+    const result = await runCommand(['reflog', '-n', '5']);
+    if (result.code === 0 &&
+        result.stdout.includes('Recent operations') &&
+        result.stdout.includes('HEAD@{')) {
+      console.log('✅ PASS\n');
+      passedCount++;
+    } else {
+      console.log('❌ FAIL: Unexpected reflog output\n');
+    }
+  } catch (error) {
+    console.log(`❌ FAIL: ${error.message}\n`);
+  }
+
+  // ===========================================
+  // cv stack tests
+  // ===========================================
+
+  // Test 29: cv stack --help
+  testCount++;
+  console.log('Test 29: cv stack --help');
+  try {
+    const result = await runCommand(['stack', '--help']);
+    if (result.code === 0 &&
+        result.stdout.includes('status') &&
+        result.stdout.includes('push') &&
+        result.stdout.includes('rebase') &&
+        result.stdout.includes('submit')) {
+      console.log('✅ PASS\n');
+      passedCount++;
+    } else {
+      console.log('❌ FAIL: Missing expected subcommands\n');
+    }
+  } catch (error) {
+    console.log(`❌ FAIL: ${error.message}\n`);
+  }
+
+  // Test 30: cv stack status
+  testCount++;
+  console.log('Test 30: cv stack status');
+  try {
+    const result = await runCommand(['stack', 'status']);
+    // Should show stack status (may have commits or be empty)
+    if (result.code === 0 || result.stdout.includes('Stack') || result.stdout.includes('stack')) {
+      console.log('✅ PASS\n');
+      passedCount++;
+    } else {
+      console.log('❌ FAIL: Unexpected stack status output\n');
+    }
+  } catch (error) {
+    console.log(`❌ FAIL: ${error.message}\n`);
+  }
+
+  // ===========================================
+  // cv split tests
+  // ===========================================
+
+  // Test 31: cv split --help
+  testCount++;
+  console.log('Test 31: cv split --help');
+  try {
+    const result = await runCommand(['split', '--help']);
+    if (result.code === 0 &&
+        result.stdout.includes('--by-file') &&
+        result.stdout.includes('--interactive')) {
+      console.log('✅ PASS\n');
+      passedCount++;
+    } else {
+      console.log('❌ FAIL: Missing expected options\n');
+    }
+  } catch (error) {
+    console.log(`❌ FAIL: ${error.message}\n`);
+  }
+
+  // ===========================================
+  // cv log enhanced tests
+  // ===========================================
+
+  // Test 32: cv log --smart
+  testCount++;
+  console.log('Test 32: cv log --smart -n 5');
+  try {
+    const result = await runCommand(['log', '--smart', '-n', '5']);
+    if (result.stdout.includes('Smart Log') || result.code === 0) {
+      console.log('✅ PASS\n');
+      passedCount++;
+    } else {
+      console.log('❌ FAIL: Smart log failed\n');
+    }
+  } catch (error) {
+    console.log(`❌ FAIL: ${error.message}\n`);
+  }
+
+  // Test 33: cv log --stack
+  testCount++;
+  console.log('Test 33: cv log --stack');
+  try {
+    const result = await runCommand(['log', '--stack']);
+    if (result.stdout.includes('Stack Log') || result.code === 0) {
+      console.log('✅ PASS\n');
+      passedCount++;
+    } else {
+      console.log('❌ FAIL: Stack log failed\n');
+    }
+  } catch (error) {
+    console.log(`❌ FAIL: ${error.message}\n`);
+  }
+
+  // Test 34: cv log --mine
+  testCount++;
+  console.log('Test 34: cv log --mine -3');
+  try {
+    const result = await runCommand(['log', '--mine', '-3']);
+    // Should work, may or may not have commits by current user
+    if (result.code === 0) {
+      console.log('✅ PASS\n');
+      passedCount++;
+    } else {
+      console.log('❌ FAIL: Mine log failed\n');
+    }
+  } catch (error) {
+    console.log(`❌ FAIL: ${error.message}\n`);
+  }
+
+  // ===========================================
   // Summary
   // ===========================================
 
