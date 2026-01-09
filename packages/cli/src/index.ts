@@ -40,13 +40,25 @@ import { servicesCommand } from './commands/services.js';
 import { createDocsCommand } from './commands/docs.js';
 import { createCacheCommand } from './commands/cache.js';
 import { verifyCommand } from './commands/verify.js';
+import { addCommand } from './commands/add.js';
+import { diffCommand } from './commands/diff.js';
+import { logCommand } from './commands/log.js';
+import { branchCommand } from './commands/branch.js';
+import { checkoutCommand, switchCommand } from './commands/checkout.js';
+import { stashCommand } from './commands/stash.js';
+import { mergeCommand } from './commands/merge.js';
+import { fetchCommand } from './commands/fetch.js';
+import { remoteCommand } from './commands/remote.js';
+import { resetCommand } from './commands/reset.js';
+import { revertCommand } from './commands/revert.js';
+import { tagCommand } from './commands/tag.js';
 
 const program = new Command();
 
 program
   .name('cv')
   .description('AI-Native Version Control with Knowledge Graph & Secure Credentials')
-  .version('0.4.6');
+  .version('0.4.10');
 
 // Add commands
 program.addCommand(configCommand());        // Configuration management
@@ -75,6 +87,19 @@ program.addCommand(explainCommand());
 program.addCommand(reviewCommand());
 program.addCommand(graphCommand());
 program.addCommand(gitCommand());
+program.addCommand(addCommand());             // Git add wrapper
+program.addCommand(diffCommand());            // Git diff with AI analysis
+program.addCommand(logCommand());             // Git log with graph integration
+program.addCommand(branchCommand());          // Branch management
+program.addCommand(checkoutCommand());        // Git checkout wrapper
+program.addCommand(switchCommand());          // Git switch (modern checkout)
+program.addCommand(stashCommand());           // Git stash wrapper
+program.addCommand(mergeCommand());           // Git merge with conflict help
+program.addCommand(fetchCommand());           // Git fetch wrapper
+program.addCommand(remoteCommand());          // Git remote wrapper
+program.addCommand(resetCommand());           // Git reset wrapper
+program.addCommand(revertCommand());          // Git revert wrapper
+program.addCommand(tagCommand());             // Git tag wrapper
 program.addCommand(createPRDCommand());     // PRD management (cv prd)
 program.addCommand(importCommand());        // Import PRD data from cv-prd exports
 program.addCommand(servicesCommand());      // Service discovery and management
