@@ -201,7 +201,8 @@ export function addGlobalOptions(command: any): any {
   return command
     .option('--json', 'Output as JSON')
     .option('--quiet', 'Suppress output')
-    .option('--verbose', 'Show verbose output including debug info');
+    .option('--verbose', 'Show verbose output including debug info')
+    .option('--options', 'Show available options for this command');
 }
 
 /**

@@ -28,6 +28,13 @@ import {
   AnthropicAPICredential,
   OpenAIAPICredential,
   OpenRouterAPICredential,
+  // DNS providers
+  CloudflareCredential,
+  // DevOps/Cloud providers
+  AWSCredential,
+  DigitalOceanTokenCredential,
+  DigitalOceanSpacesCredential,
+  DigitalOceanAppCredential,
 } from './types/index.js';
 
 export interface CredentialManagerOptions {
@@ -254,6 +261,70 @@ export class CredentialManager {
   }
 
   // ============================================================================
+  // DNS Provider Credentials
+  // ============================================================================
+
+  /**
+   * Get Cloudflare API token
+   */
+  async getCloudflareToken(): Promise<string | null> {
+    const cred = await this.retrieve(CredentialType.CLOUDFLARE_API);
+    return cred ? (cred as CloudflareCredential).apiToken : null;
+  }
+
+  /**
+   * Get full Cloudflare credential (includes account ID, email)
+   */
+  async getCloudflareCredential(): Promise<CloudflareCredential | null> {
+    const cred = await this.retrieve(CredentialType.CLOUDFLARE_API);
+    return cred as CloudflareCredential | null;
+  }
+
+  // ============================================================================
+  // DevOps/Cloud Provider Credentials
+  // ============================================================================
+
+  /**
+   * Get AWS credentials
+   */
+  async getAWSCredentials(): Promise<AWSCredential | null> {
+    const cred = await this.retrieve(CredentialType.AWS_CREDENTIALS);
+    return cred as AWSCredential | null;
+  }
+
+  /**
+   * Get DigitalOcean API token
+   */
+  async getDigitalOceanToken(): Promise<string | null> {
+    const cred = await this.retrieve(CredentialType.DIGITALOCEAN_TOKEN);
+    return cred ? (cred as DigitalOceanTokenCredential).apiToken : null;
+  }
+
+  /**
+   * Get full DigitalOcean token credential
+   */
+  async getDigitalOceanCredential(): Promise<DigitalOceanTokenCredential | null> {
+    const cred = await this.retrieve(CredentialType.DIGITALOCEAN_TOKEN);
+    return cred as DigitalOceanTokenCredential | null;
+  }
+
+  /**
+   * Get DigitalOcean Spaces credentials
+   */
+  async getDigitalOceanSpaces(): Promise<DigitalOceanSpacesCredential | null> {
+    const cred = await this.retrieve(CredentialType.DIGITALOCEAN_SPACES);
+    return cred as DigitalOceanSpacesCredential | null;
+  }
+
+  /**
+   * Get DigitalOcean App Platform credential
+   */
+  async getDigitalOceanApp(): Promise<DigitalOceanAppCredential | null> {
+    const cred = await this.retrieve(CredentialType.DIGITALOCEAN_APP);
+    return cred as DigitalOceanAppCredential | null;
+  }
+
+  // ============================================================================
   // Migration from Environment Variables
   // ============================================================================
 
@@ -271,13 +342,16 @@ export class CredentialManager {
       type: CredentialType;
       name: string;
       platform?: GitPlatform;
+      pairedEnvVar?: string; // For credentials that need multiple env vars
     }> = [
+      // Git platforms
       {
         envVar: 'GITHUB_TOKEN',
         type: CredentialType.GIT_PLATFORM_TOKEN,
         name: 'github-default',
         platform: GitPlatform.GITHUB,
       },
+      // AI providers
       {
         envVar: 'ANTHROPIC_API_KEY',
         type: CredentialType.ANTHROPIC_API,
@@ -288,16 +362,62 @@ export class CredentialManager {
         type: CredentialType.OPENAI_API,
         name: 'default',
       },
+      {
+        envVar: 'OPENROUTER_API_KEY',
+        type: CredentialType.OPENROUTER_API,
+        name: 'default',
+      },
+      // DNS providers
+      {
+        envVar: 'CLOUDFLARE_API_TOKEN',
+        type: CredentialType.CLOUDFLARE_API,
+        name: 'default',
+      },
+      {
+        envVar: 'CF_API_TOKEN',
+        type: CredentialType.CLOUDFLARE_API,
+        name: 'default',
+      },
+      // DevOps - AWS
+      {
+        envVar: 'AWS_ACCESS_KEY_ID',
+        type: CredentialType.AWS_CREDENTIALS,
+        name: 'default',
+        pairedEnvVar: 'AWS_SECRET_ACCESS_KEY',
+      },
+      // DevOps - DigitalOcean
+      {
+        envVar: 'DIGITALOCEAN_TOKEN',
+        type: CredentialType.DIGITALOCEAN_TOKEN,
+        name: 'default',
+      },
+      {
+        envVar: 'DO_TOKEN',
+        type: CredentialType.DIGITALOCEAN_TOKEN,
+        name: 'default',
+      },
+      {
+        envVar: 'SPACES_ACCESS_KEY_ID',
+        type: CredentialType.DIGITALOCEAN_SPACES,
+        name: 'default',
+        pairedEnvVar: 'SPACES_SECRET_ACCESS_KEY',
+      },
     ];
 
     const migrated: string[] = [];
     const skipped: string[] = [];
 
-    for (const { envVar, type, name, platform } of migrations) {
+    for (const { envVar, type, name, platform, pairedEnvVar } of migrations) {
       const value = process.env[envVar];
 
       if (!value || !value.trim()) {
         skipped.push(envVar);
+        continue;
+      }
+
+      // For paired env vars (like AWS), check if the paired var exists too
+      if (pairedEnvVar && (!process.env[pairedEnvVar] || !process.env[pairedEnvVar]?.trim())) {
+        skipped.push(`${envVar} (missing ${pairedEnvVar})`);
         continue;
       }
 
@@ -328,6 +448,40 @@ export class CredentialManager {
           type: CredentialType.OPENAI_API,
           name,
           apiKey: value,
+        });
+      } else if (type === CredentialType.OPENROUTER_API) {
+        await this.store<OpenRouterAPICredential>({
+          type: CredentialType.OPENROUTER_API,
+          name,
+          apiKey: value,
+        });
+      } else if (type === CredentialType.CLOUDFLARE_API) {
+        await this.store<CloudflareCredential>({
+          type: CredentialType.CLOUDFLARE_API,
+          name,
+          apiToken: value,
+        });
+      } else if (type === CredentialType.AWS_CREDENTIALS) {
+        await this.store<AWSCredential>({
+          type: CredentialType.AWS_CREDENTIALS,
+          name,
+          accessKeyId: value,
+          secretAccessKey: process.env[pairedEnvVar!]!,
+          region: process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1',
+        });
+      } else if (type === CredentialType.DIGITALOCEAN_TOKEN) {
+        await this.store<DigitalOceanTokenCredential>({
+          type: CredentialType.DIGITALOCEAN_TOKEN,
+          name,
+          apiToken: value,
+        });
+      } else if (type === CredentialType.DIGITALOCEAN_SPACES) {
+        await this.store<DigitalOceanSpacesCredential>({
+          type: CredentialType.DIGITALOCEAN_SPACES,
+          name,
+          accessKey: value,
+          secretKey: process.env[pairedEnvVar!]!,
+          region: process.env.SPACES_REGION || 'nyc3',
         });
       }
 
@@ -367,6 +521,7 @@ export class CredentialManager {
   private extractNonSensitiveMetadata(credential: Credential): Record<string, any> {
     const metadata: Record<string, any> = {};
 
+    // Git platform
     if ('platform' in credential) {
       metadata.platform = credential.platform;
     }
@@ -377,6 +532,41 @@ export class CredentialManager {
 
     if ('expiresAt' in credential && credential.expiresAt) {
       metadata.expiresAt = credential.expiresAt;
+    }
+
+    // Cloudflare
+    if ('accountId' in credential && credential.accountId) {
+      metadata.accountId = credential.accountId;
+    }
+
+    if ('email' in credential && credential.email) {
+      metadata.email = credential.email;
+    }
+
+    // AWS
+    if ('region' in credential && credential.region) {
+      metadata.region = credential.region;
+    }
+
+    if ('userArn' in credential && credential.userArn) {
+      metadata.userArn = credential.userArn;
+    }
+
+    // DigitalOcean
+    if ('accountEmail' in credential && credential.accountEmail) {
+      metadata.accountEmail = credential.accountEmail;
+    }
+
+    if ('accountUuid' in credential && credential.accountUuid) {
+      metadata.accountUuid = credential.accountUuid;
+    }
+
+    if ('endpoint' in credential && credential.endpoint) {
+      metadata.endpoint = credential.endpoint;
+    }
+
+    if ('appId' in credential && credential.appId) {
+      metadata.appId = credential.appId;
     }
 
     return metadata;

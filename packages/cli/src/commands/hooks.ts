@@ -8,6 +8,7 @@ import chalk from 'chalk';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { findRepoRoot } from '@cv-git/shared';
+import { addGlobalOptions } from '../utils/output.js';
 
 const HOOK_MARKER = '# CV-GIT HOOK';
 
@@ -185,6 +186,107 @@ export function hooksCommand(): Command {
       }
     });
 
+  // cv hooks list
+  cmd
+    .command('list')
+    .description('List all installed git hooks')
+    .option('--all', 'Show all hooks (not just cv-git hooks)')
+    .action(async (options: { all?: boolean }) => {
+      try {
+        const repoRoot = await findRepoRoot();
+        if (!repoRoot) {
+          console.error(chalk.red('Not in a git repository'));
+          process.exit(1);
+        }
+
+        const hooksDir = path.join(repoRoot, '.git', 'hooks');
+
+        // Check if hooks directory exists
+        try {
+          await fs.access(hooksDir);
+        } catch {
+          console.log(chalk.yellow('\nNo hooks directory found.'));
+          console.log(chalk.gray('Run: ') + chalk.cyan('cv hooks install'));
+          return;
+        }
+
+        // Get all files in hooks directory
+        const files = await fs.readdir(hooksDir);
+
+        // Filter to actual hook files (not .sample files)
+        const hookFiles = files.filter(
+          (f) => !f.endsWith('.sample') && !f.startsWith('.')
+        );
+
+        if (hookFiles.length === 0) {
+          console.log(chalk.yellow('\nNo hooks installed.'));
+          console.log(chalk.gray('Run: ') + chalk.cyan('cv hooks install'));
+          return;
+        }
+
+        console.log(chalk.bold('\nInstalled Git Hooks:\n'));
+
+        const cvGitHooks: string[] = [];
+        const otherHooks: string[] = [];
+
+        for (const hookFile of hookFiles.sort()) {
+          const hookPath = path.join(hooksDir, hookFile);
+
+          try {
+            const stat = await fs.stat(hookPath);
+            if (!stat.isFile()) continue;
+
+            const content = await fs.readFile(hookPath, 'utf-8');
+            const isCvGit = content.includes(HOOK_MARKER);
+
+            if (isCvGit) {
+              cvGitHooks.push(hookFile);
+            } else {
+              otherHooks.push(hookFile);
+            }
+          } catch {
+            // Skip files that can't be read
+          }
+        }
+
+        // Show CV-Git hooks
+        if (cvGitHooks.length > 0) {
+          console.log(chalk.cyan('  CV-Git Hooks:'));
+          for (const hook of cvGitHooks) {
+            const description = getHookDescription(hook);
+            console.log(chalk.green(`    ✓ ${hook}`) + chalk.gray(` - ${description}`));
+          }
+          console.log();
+        }
+
+        // Show other hooks
+        if (options.all && otherHooks.length > 0) {
+          console.log(chalk.cyan('  Other Hooks:'));
+          for (const hook of otherHooks) {
+            console.log(chalk.yellow(`    ○ ${hook}`));
+          }
+          console.log();
+        }
+
+        // Summary
+        if (cvGitHooks.length > 0) {
+          console.log(
+            chalk.gray(`Total: ${cvGitHooks.length} cv-git hook(s)`) +
+              (otherHooks.length > 0
+                ? chalk.gray(`, ${otherHooks.length} other hook(s)`)
+                : '')
+          );
+        } else {
+          console.log(chalk.yellow('No cv-git hooks installed.'));
+          console.log(chalk.gray('Run: ') + chalk.cyan('cv hooks install'));
+        }
+
+      } catch (error: any) {
+        console.error(chalk.red(`Error: ${error.message}`));
+        process.exit(1);
+      }
+    });
+
   // cv hooks status
   cmd
     .command('status')
@@ -234,6 +336,8 @@ export function hooksCommand(): Command {
         process.exit(1);
       }
     });
+
+  addGlobalOptions(cmd);
 
   return cmd;
 }
@@ -326,4 +430,21 @@ async function getHookStatus(hookPath: string): Promise<'cv-git' | 'other' | 'no
   } catch {
     return 'none';
   }
+}
+
+/**
+ * Get human-readable description for a hook
+ */
+function getHookDescription(hookName: string): string {
+  const descriptions: Record<string, string> = {
+    'post-commit': 'auto-sync after commit',
+    'post-merge': 'auto-sync after merge/pull',
+    'prepare-commit-msg': 'AI commit message generation',
+    'pre-commit': 'runs before commit',
+    'pre-push': 'runs before push',
+    'commit-msg': 'validates commit message',
+    'post-checkout': 'runs after checkout',
+    'post-rewrite': 'runs after rebase/amend',
+  };
+  return descriptions[hookName] || 'custom hook';
 }

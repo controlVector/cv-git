@@ -18,3 +18,7 @@ export * from './config/index.js';
 export * from './code/index.js';
 export * from './storage/index.js';
 export * from './context/index.js';
+
+// Stub modules (not yet implemented)
+export * from './gateway/index.js';
+export * from './security/index.js';

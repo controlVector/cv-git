@@ -111,10 +111,119 @@ async function runTests() {
     console.log(`Updated OpenAI key: ${updatedKey.substring(0, 10)}...`);
     console.log('✅ Update works\n');
 
-    // Test 12: Clean up
-    console.log('Test 12: Clean up all test credentials');
+    // Test 12: Store Cloudflare credential
+    console.log('Test 12: Store Cloudflare API token');
+    await manager.store({
+      type: CredentialType.CLOUDFLARE_API,
+      name: 'default',
+      apiToken: 'test-cloudflare-token-123',
+      accountId: 'test-account-id',
+      email: 'test@example.com',
+    });
+    console.log('✅ Stored Cloudflare credential\n');
+
+    // Test 13: Retrieve Cloudflare credential
+    console.log('Test 13: Retrieve Cloudflare credential');
+    const cfToken = await manager.getCloudflareToken();
+    console.log(`Cloudflare token: ${cfToken.substring(0, 15)}...`);
+    const cfCred = await manager.getCloudflareCredential();
+    console.log(`Account ID: ${cfCred.accountId}`);
+    console.log(`Email: ${cfCred.email}`);
+    console.log('✅ Cloudflare convenience methods work\n');
+
+    // Test 14: Store AWS credential
+    console.log('Test 14: Store AWS credentials');
+    await manager.store({
+      type: CredentialType.AWS_CREDENTIALS,
+      name: 'default',
+      accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+      secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+      region: 'us-east-1',
+      accountId: '123456789012',
+    });
+    console.log('✅ Stored AWS credential\n');
+
+    // Test 15: Retrieve AWS credential
+    console.log('Test 15: Retrieve AWS credential');
+    const awsCred = await manager.getAWSCredentials();
+    console.log(`Access Key ID: ${awsCred.accessKeyId}`);
+    console.log(`Region: ${awsCred.region}`);
+    console.log(`Account ID: ${awsCred.accountId}`);
+    console.log('✅ AWS convenience method works\n');
+
+    // Test 16: Store DigitalOcean token
+    console.log('Test 16: Store DigitalOcean token');
+    await manager.store({
+      type: CredentialType.DIGITALOCEAN_TOKEN,
+      name: 'default',
+      apiToken: 'dop_v1_test_token_example',
+      accountEmail: 'do-test@example.com',
+    });
+    console.log('✅ Stored DigitalOcean token\n');
+
+    // Test 17: Retrieve DigitalOcean token
+    console.log('Test 17: Retrieve DigitalOcean token');
+    const doToken = await manager.getDigitalOceanToken();
+    console.log(`DO Token: ${doToken.substring(0, 10)}...`);
+    const doCred = await manager.getDigitalOceanCredential();
+    console.log(`Account Email: ${doCred.accountEmail}`);
+    console.log('✅ DigitalOcean token convenience methods work\n');
+
+    // Test 18: Store DigitalOcean Spaces credential
+    console.log('Test 18: Store DigitalOcean Spaces credential');
+    await manager.store({
+      type: CredentialType.DIGITALOCEAN_SPACES,
+      name: 'default',
+      accessKey: 'SPACES_ACCESS_KEY_TEST',
+      secretKey: 'spaces-secret-key-test-1234567890',
+      region: 'nyc3',
+      endpoint: 'nyc3.digitaloceanspaces.com',
+    });
+    console.log('✅ Stored DigitalOcean Spaces credential\n');
+
+    // Test 19: Retrieve DigitalOcean Spaces credential
+    console.log('Test 19: Retrieve DigitalOcean Spaces credential');
+    const spacesCred = await manager.getDigitalOceanSpaces();
+    console.log(`Access Key: ${spacesCred.accessKey}`);
+    console.log(`Region: ${spacesCred.region}`);
+    console.log(`Endpoint: ${spacesCred.endpoint}`);
+    console.log('✅ DigitalOcean Spaces convenience method works\n');
+
+    // Test 20: Store DigitalOcean App credential
+    console.log('Test 20: Store DigitalOcean App credential');
+    await manager.store({
+      type: CredentialType.DIGITALOCEAN_APP,
+      name: 'default',
+      appToken: 'dop_v1_app_token_test',
+      appId: 'test-app-id',
+    });
+    console.log('✅ Stored DigitalOcean App credential\n');
+
+    // Test 21: Retrieve DigitalOcean App credential
+    console.log('Test 21: Retrieve DigitalOcean App credential');
+    const appCred = await manager.getDigitalOceanApp();
+    console.log(`App Token: ${appCred.appToken.substring(0, 10)}...`);
+    console.log(`App ID: ${appCred.appId}`);
+    console.log('✅ DigitalOcean App convenience method works\n');
+
+    // Test 22: List all (should have 7 new + 2 existing = many)
+    console.log('Test 22: List all credentials');
+    const allCreds2 = await manager.list();
+    console.log(`Found ${allCreds2.length} credentials:`);
+    allCreds2.forEach(cred => {
+      console.log(`  - ${cred.type}:${cred.name}`);
+    });
+    console.log('✅ All new credential types work\n');
+
+    // Test 23: Clean up all test credentials
+    console.log('Test 23: Clean up all test credentials');
     await manager.delete(CredentialType.ANTHROPIC_API, 'default');
     await manager.delete(CredentialType.OPENAI_API, 'default');
+    await manager.delete(CredentialType.CLOUDFLARE_API, 'default');
+    await manager.delete(CredentialType.AWS_CREDENTIALS, 'default');
+    await manager.delete(CredentialType.DIGITALOCEAN_TOKEN, 'default');
+    await manager.delete(CredentialType.DIGITALOCEAN_SPACES, 'default');
+    await manager.delete(CredentialType.DIGITALOCEAN_APP, 'default');
     const final = await manager.list();
     console.log(`Final count: ${final.length} credentials`);
     console.log('✅ Cleanup complete\n');
@@ -123,8 +232,8 @@ async function runTests() {
 
     return {
       success: true,
-      testsRun: 12,
-      testsPassed: 12,
+      testsRun: 23,
+      testsPassed: 23,
     };
 
   } catch (error) {

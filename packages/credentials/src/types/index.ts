@@ -12,6 +12,14 @@ export {
   type OpenAIAPICredential,
   type OpenRouterAPICredential,
   type APIKeyCredential,
+  // DNS providers
+  type CloudflareCredential,
+  // DevOps/Cloud providers
+  type AWSCredential,
+  type DigitalOceanTokenCredential,
+  type DigitalOceanSpacesCredential,
+  type DigitalOceanAppCredential,
+  // Union and utility types
   type Credential,
   type CreateCredentialInput,
   type UpdateCredentialInput,

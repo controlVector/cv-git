@@ -15,6 +15,15 @@ export enum CredentialType {
   OPENAI_API = 'openai_api',
   OPENROUTER_API = 'openrouter_api',
 
+  // DNS providers
+  CLOUDFLARE_API = 'cloudflare_api',
+
+  // DevOps/Cloud providers
+  AWS_CREDENTIALS = 'aws_credentials',
+  DIGITALOCEAN_TOKEN = 'digitalocean_token',
+  DIGITALOCEAN_SPACES = 'digitalocean_spaces',
+  DIGITALOCEAN_APP = 'digitalocean_app',
+
   // Generic credentials
   API_KEY = 'api_key',
 }
@@ -145,6 +154,100 @@ export interface APIKeyCredential extends BaseCredential {
   endpoint?: string;
 }
 
+// =============================================================================
+// DNS Provider Credentials
+// =============================================================================
+
+/**
+ * Cloudflare API Token credential
+ */
+export interface CloudflareCredential extends BaseCredential {
+  type: CredentialType.CLOUDFLARE_API;
+
+  /** API token (scoped token, not global API key) */
+  apiToken: string;
+
+  /** Account ID (extracted during validation) */
+  accountId?: string;
+
+  /** Email associated with the account */
+  email?: string;
+}
+
+// =============================================================================
+// DevOps/Cloud Provider Credentials
+// =============================================================================
+
+/**
+ * AWS IAM credentials
+ */
+export interface AWSCredential extends BaseCredential {
+  type: CredentialType.AWS_CREDENTIALS;
+
+  /** AWS Access Key ID */
+  accessKeyId: string;
+
+  /** AWS Secret Access Key */
+  secretAccessKey: string;
+
+  /** Default AWS region */
+  region: string;
+
+  /** AWS Account ID (extracted via STS GetCallerIdentity) */
+  accountId?: string;
+
+  /** IAM User ARN */
+  userArn?: string;
+}
+
+/**
+ * DigitalOcean API Token credential
+ */
+export interface DigitalOceanTokenCredential extends BaseCredential {
+  type: CredentialType.DIGITALOCEAN_TOKEN;
+
+  /** Personal access token */
+  apiToken: string;
+
+  /** Account email (extracted during validation) */
+  accountEmail?: string;
+
+  /** Account UUID */
+  accountUuid?: string;
+}
+
+/**
+ * DigitalOcean Spaces credential (S3-compatible object storage)
+ */
+export interface DigitalOceanSpacesCredential extends BaseCredential {
+  type: CredentialType.DIGITALOCEAN_SPACES;
+
+  /** Spaces access key */
+  accessKey: string;
+
+  /** Spaces secret key */
+  secretKey: string;
+
+  /** Spaces region (e.g., nyc3, sfo3, ams3, sgp1) */
+  region: string;
+
+  /** Spaces endpoint (e.g., nyc3.digitaloceanspaces.com) */
+  endpoint?: string;
+}
+
+/**
+ * DigitalOcean App Platform credential
+ */
+export interface DigitalOceanAppCredential extends BaseCredential {
+  type: CredentialType.DIGITALOCEAN_APP;
+
+  /** App Platform access token */
+  appToken: string;
+
+  /** App ID */
+  appId?: string;
+}
+
 /**
  * Union type of all credential types
  */
@@ -154,7 +257,14 @@ export type Credential =
   | AnthropicAPICredential
   | OpenAIAPICredential
   | OpenRouterAPICredential
-  | APIKeyCredential;
+  | APIKeyCredential
+  // DNS providers
+  | CloudflareCredential
+  // DevOps/Cloud providers
+  | AWSCredential
+  | DigitalOceanTokenCredential
+  | DigitalOceanSpacesCredential
+  | DigitalOceanAppCredential;
 
 /**
  * Credential creation input (without id, createdAt, lastUsed)

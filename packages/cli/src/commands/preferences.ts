@@ -80,6 +80,54 @@ export function preferencesCommand(): Command {
       console.log();
     });
 
+  // cv preferences get <key>
+  cmd
+    .command('get <key>')
+    .description('Get a specific preference value')
+    .action(async (key: string) => {
+      const prefsManager = getPreferences();
+      const hasPrefs = await prefsManager.exists();
+
+      if (!hasPrefs) {
+        console.log(chalk.yellow('No preferences set yet.'));
+        console.log(chalk.gray('Run ') + chalk.cyan('cv init') + chalk.gray(' to set up preferences.'));
+        process.exit(1);
+      }
+
+      const prefs = await prefsManager.load();
+      let value: string | undefined;
+
+      switch (key) {
+        case 'git-platform':
+        case 'gitPlatform':
+          value = prefs.gitPlatform;
+          break;
+        case 'ai-provider':
+        case 'aiProvider':
+          value = prefs.aiProvider;
+          break;
+        case 'embedding-provider':
+        case 'embeddingProvider':
+          value = prefs.embeddingProvider;
+          break;
+        case 'setup-complete':
+        case 'setupComplete':
+          value = prefs.setupComplete ? 'true' : 'false';
+          break;
+        case 'updated-at':
+        case 'updatedAt':
+          value = new Date(prefs.updatedAt).toISOString();
+          break;
+        default:
+          console.log(chalk.red(`Unknown preference: ${key}`));
+          console.log(chalk.gray('Valid keys: git-platform, ai-provider, embedding-provider, setup-complete, updated-at'));
+          process.exit(1);
+      }
+
+      // Output just the value (good for scripting)
+      console.log(value);
+    });
+
   // cv preferences set <key> <value>
   cmd
     .command('set <key> <value>')

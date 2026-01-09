@@ -11,6 +11,7 @@ import * as path from 'path';
 import { getConfig } from '../config.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { addGlobalOptions } from '../utils/output.js';
 
 const execAsync = promisify(exec);
 
@@ -24,8 +25,9 @@ interface DiagnosticResult {
 export function doctorCommand(): Command {
   const cmd = new Command('doctor');
   cmd.description('Run diagnostics and health checks');
-  cmd.option('--json', 'Output as JSON');
   cmd.option('--fix', 'Attempt to fix issues automatically');
+
+  addGlobalOptions(cmd);
 
   cmd.action(async (options) => {
     try {

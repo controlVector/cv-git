@@ -1,7 +1,14 @@
 /**
  * cv auth - Credential Management Command
  *
- * Manages credentials for git platforms and AI services.
+ * Manages credentials for git platforms, AI services, DNS providers,
+ * and DevOps/cloud infrastructure.
+ *
+ * Categories:
+ * - git: GitHub, GitLab, Bitbucket
+ * - ai: Anthropic, OpenAI, OpenRouter
+ * - dns: Cloudflare
+ * - devops: AWS, DigitalOcean
  */
 
 import { Command } from 'commander';
@@ -19,57 +26,37 @@ import {
   OpenRouterAPICredential,
 } from '@cv-git/credentials';
 import { GitHubAdapter, GitLabAdapter, BitbucketAdapter } from '@cv-git/platform';
-import { randomBytes } from 'crypto';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { getPreferences } from '../config.js';
 import { getRequiredServices } from '../utils/preference-picker.js';
-
-const execAsync = promisify(exec);
-
-/**
- * Open URL in default browser
- */
-async function openBrowser(url: string): Promise<void> {
-  const platform = process.platform;
-  let command: string;
-
-  if (platform === 'darwin') {
-    command = `open "${url}"`;
-  } else if (platform === 'win32') {
-    command = `start "" "${url}"`;
-  } else {
-    // Check for WSL
-    try {
-      const { stdout } = await execAsync('cat /proc/version');
-      if (stdout.toLowerCase().includes('microsoft') || stdout.toLowerCase().includes('wsl')) {
-        // WSL detected - use cmd.exe to open in Windows browser
-        command = `cmd.exe /c start "" "${url.replace(/&/g, '^&')}"`;
-      } else {
-        command = `xdg-open "${url}"`;
-      }
-    } catch {
-      command = `xdg-open "${url}"`;
-    }
-  }
-
-  try {
-    await execAsync(command);
-  } catch (error) {
-    // Browser open failed, user will need to open manually
-  }
-}
+import { openBrowser } from './auth-utils.js';
+import {
+  AUTH_CATEGORIES,
+  parseServiceArg,
+  selectCategory,
+  selectProvider,
+  getProvider,
+  getAllProviderIds,
+} from './auth/categories.js';
+import { setupCloudflare, testCloudflare } from './auth/dns/cloudflare.js';
+import { setupAWS, testAWS } from './auth/devops/aws.js';
+import {
+  setupDigitalOcean,
+  testDigitalOcean,
+  testDigitalOceanSpaces,
+} from './auth/devops/digitalocean.js';
+import { addGlobalOptions } from '../utils/output.js';
 
 export function authCommand(): Command {
   const cmd = new Command('auth').description(
     'Manage credentials and authentication'
   );
 
-  // cv auth setup
+  // cv auth setup [service]
+  // Supports: category/provider paths, category names, provider names, or interactive
   cmd
     .command('setup [service]')
     .description(
-      'Set up authentication (services: github, gitlab, bitbucket, anthropic, openai, openrouter, all)'
+      'Set up authentication (e.g., github, dns/cloudflare, devops, all)'
     )
     .option('--no-browser', 'Do not open browser automatically')
     .option('--all', 'Set up all services (ignore preferences)')
@@ -97,23 +84,55 @@ export function authCommand(): Command {
 
       console.log();
 
-      // Determine which services to set up
-      let servicesToSetup: string[] = [];
+      // Parse the service argument
+      const parsed = parseServiceArg(forceAll ? 'all' : service);
 
-      if (service === 'all' || forceAll) {
-        // Explicitly asked for all services
-        servicesToSetup = ['github', 'gitlab', 'bitbucket', 'anthropic', 'openai', 'openrouter'];
-      } else if (service) {
-        // Specific service requested
-        servicesToSetup = [service];
+      if (parsed.mode === 'all') {
+        // Set up all providers
+        const allProviders = getAllProviderIds();
+        for (const providerId of allProviders) {
+          await runSetup(providerId, credentials, autoBrowser);
+        }
+      } else if (parsed.mode === 'category') {
+        // Set up all providers in a category
+        const category = AUTH_CATEGORIES.find((c) => c.id === parsed.categoryId);
+        if (!category) {
+          console.log(chalk.red(`Unknown category: ${parsed.categoryId}`));
+          return;
+        }
+        console.log(chalk.bold(`Setting up ${category.name}...\n`));
+        for (const provider of category.providers) {
+          await runSetup(provider.id, credentials, autoBrowser);
+        }
+      } else if (parsed.mode === 'provider') {
+        // Set up specific provider
+        const result = getProvider(parsed.providerId || '');
+        if (!result) {
+          // Try legacy service names
+          if (parsed.providerId && await runSetup(parsed.providerId, credentials, autoBrowser)) {
+            // Legacy setup handled
+          } else {
+            console.log(chalk.red(`Unknown provider: ${parsed.providerId}`));
+            console.log(chalk.gray('\nAvailable providers:'));
+            for (const cat of AUTH_CATEGORIES) {
+              console.log(chalk.cyan(`  ${cat.id}/`));
+              for (const p of cat.providers) {
+                console.log(chalk.gray(`    ${p.id} - ${p.description}`));
+              }
+            }
+          }
+        } else {
+          await runSetup(result.provider.id, credentials, autoBrowser);
+        }
       } else {
-        // No service specified - check preferences
+        // Interactive mode
         const prefsManager = getPreferences();
         const hasPrefs = await prefsManager.exists();
 
-        if (hasPrefs) {
+        if (hasPrefs && !forceAll) {
+          // Use preferences to determine services
           const prefs = await prefsManager.load();
-          servicesToSetup = getRequiredServices({
+          const servicesToSetup = getRequiredServices({
             gitPlatform: prefs.gitPlatform,
             aiProvider: prefs.aiProvider,
             embeddingProvider: prefs.embeddingProvider,
@@ -121,37 +140,24 @@ export function authCommand(): Command {
           console.log(chalk.gray('Setting up services based on your preferences...'));
           console.log(chalk.gray(`Services: ${servicesToSetup.join(', ')}`));
           console.log();
+          for (const svc of servicesToSetup) {
+            await runSetup(svc, credentials, autoBrowser);
+          }
         } else {
-          // No preferences - set up all
-          console.log(chalk.gray('No preferences found. Run "cv init" first or use "cv auth setup --all".'));
-          console.log();
-          servicesToSetup = ['github', 'gitlab', 'bitbucket', 'anthropic', 'openai', 'openrouter'];
-        }
-      }
+          // Interactive category/provider selection
+          const category = await selectCategory();
+          if (!category) {
+            console.log(chalk.gray('Cancelled.'));
+            return;
+          }
 
-      // Set up each service
-      for (const svc of servicesToSetup) {
-        switch (svc) {
-          case 'github':
-            await setupGitHub(credentials, autoBrowser);
-            break;
-          case 'gitlab':
-            await setupGitLab(credentials, autoBrowser);
-            break;
-          case 'bitbucket':
-            await setupBitbucket(credentials, autoBrowser);
-            break;
-          case 'anthropic':
-            await setupAnthropic(credentials, autoBrowser);
-            break;
-          case 'openai':
-            await setupOpenAI(credentials, autoBrowser);
-            break;
-          case 'openrouter':
-            await setupOpenRouter(credentials, autoBrowser);
-            break;
-          default:
-            console.log(chalk.yellow(`Unknown service: ${svc}`));
+          const provider = await selectProvider(category);
+          if (!provider) {
+            // User selected 'Back', recurse to show categories again
+            return;
+          }
+
+          await runSetup(provider.id, credentials, autoBrowser);
         }
       }
 
@@ -204,111 +210,18 @@ export function authCommand(): Command {
       console.log();
     });
 
-  // cv auth test
+  // cv auth test <service>
   cmd
     .command('test <service>')
-    .description('Test authentication for a service (github, gitlab, bitbucket, anthropic, openai)')
+    .description('Test authentication for a service')
     .action(async (service: string) => {
       const credentials = new CredentialManager();
       await credentials.init();
 
-      const spinner = ora('Testing authentication...').start();
-
-      try {
-        if (service === 'github') {
-          const token = await credentials.getGitPlatformToken(GitPlatform.GITHUB);
-          if (!token) {
-            spinner.fail(chalk.red('GitHub token not found'));
-            console.log(chalk.gray('Run: ') + chalk.cyan('cv auth setup github'));
-            return;
-          }
-
-          const adapter = new GitHubAdapter(credentials);
-          const user = await adapter.validateToken(token);
-
-          spinner.succeed(chalk.green('GitHub authentication valid'));
-          console.log(
-            chalk.gray('  Authenticated as: ') +
-              chalk.white(`${user.username} (${user.name || 'no name'})`)
-          );
-        } else if (service === 'gitlab') {
-          const token = await credentials.getGitPlatformToken(GitPlatform.GITLAB);
-          if (!token) {
-            spinner.fail(chalk.red('GitLab token not found'));
-            console.log(chalk.gray('Run: ') + chalk.cyan('cv auth setup gitlab'));
-            return;
-          }
-
-          const adapter = new GitLabAdapter(credentials);
-          const user = await adapter.validateToken(token);
-
-          spinner.succeed(chalk.green('GitLab authentication valid'));
-          console.log(
-            chalk.gray('  Authenticated as: ') +
-              chalk.white(`${user.username} (${user.name || 'no name'})`)
-          );
-        } else if (service === 'bitbucket') {
-          const token = await credentials.getGitPlatformToken(GitPlatform.BITBUCKET);
-          if (!token) {
-            spinner.fail(chalk.red('Bitbucket app password not found'));
-            console.log(chalk.gray('Run: ') + chalk.cyan('cv auth setup bitbucket'));
-            return;
-          }
-
-          const adapter = new BitbucketAdapter(credentials);
-          const user = await adapter.validateToken(token);
-
-          spinner.succeed(chalk.green('Bitbucket authentication valid'));
-          console.log(
-            chalk.gray('  Authenticated as: ') +
-              chalk.white(`${user.username} (${user.name || 'no name'})`)
-          );
-        } else if (service === 'anthropic') {
-          const key = await credentials.getAnthropicKey();
-          if (!key) {
-            spinner.fail(chalk.red('Anthropic API key not found'));
-            console.log(
-              chalk.gray('Run: ') + chalk.cyan('cv auth setup anthropic')
-            );
-            return;
-          }
-
-          // Simple validation (just check format)
-          if (key.startsWith('sk-ant-')) {
-            spinner.succeed(chalk.green('Anthropic API key found'));
-            console.log(
-              chalk.gray('  Key: ') + chalk.white(key.substring(0, 20) + '...')
-            );
-          } else {
-            spinner.fail(chalk.red('Anthropic API key invalid format'));
-          }
-        } else if (service === 'openai') {
-          const key = await credentials.getOpenAIKey();
-          if (!key) {
-            spinner.fail(chalk.red('OpenAI API key not found'));
-            console.log(
-              chalk.gray('Run: ') + chalk.cyan('cv auth setup openai')
-            );
-            return;
-          }
-
-          if (key.startsWith('sk-')) {
-            spinner.succeed(chalk.green('OpenAI API key found'));
-            console.log(
-              chalk.gray('  Key: ') + chalk.white(key.substring(0, 20) + '...')
-            );
-          } else {
-            spinner.fail(chalk.red('OpenAI API key invalid format'));
-          }
-        } else {
-          spinner.fail(chalk.red(`Unknown service: ${service}`));
-        }
-      } catch (error: any) {
-        spinner.fail(chalk.red(`Authentication test failed: ${error.message}`));
-      }
+      await runTest(service, credentials);
     });
 
-  // cv auth remove
+  // cv auth remove <type> <name>
   cmd
     .command('remove <type> <name>')
     .description('Remove a credential')
@@ -340,11 +253,207 @@ export function authCommand(): Command {
       }
     });
 
+  addGlobalOptions(cmd);
+
   return cmd;
 }
 
+/**
+ * Run setup for a provider
+ */
+async function runSetup(
+  providerId: string,
+  credentials: CredentialManager,
+  autoBrowser: boolean
+): Promise<boolean> {
+  switch (providerId) {
+    // Git platforms
+    case 'github':
+      await setupGitHub(credentials, autoBrowser);
+      return true;
+    case 'gitlab':
+      await setupGitLab(credentials, autoBrowser);
+      return true;
+    case 'bitbucket':
+      await setupBitbucket(credentials, autoBrowser);
+      return true;
+
+    // AI providers
+    case 'anthropic':
+      await setupAnthropic(credentials, autoBrowser);
+      return true;
+    case 'openai':
+      await setupOpenAI(credentials, autoBrowser);
+      return true;
+    case 'openrouter':
+      await setupOpenRouter(credentials, autoBrowser);
+      return true;
+
+    // DNS providers
+    case 'cloudflare':
+      await setupCloudflare(credentials, autoBrowser);
+      return true;
+
+    // DevOps providers
+    case 'aws':
+      await setupAWS(credentials, autoBrowser);
+      return true;
+    case 'digitalocean':
+      await setupDigitalOcean(credentials, autoBrowser);
+      return true;
+
+    default:
+      return false;
+  }
+}
+
+/**
+ * Run test for a service
+ */
+async function runTest(service: string, credentials: CredentialManager): Promise<void> {
+  const spinner = ora('Testing authentication...').start();
+
+  try {
+    switch (service) {
+      case 'github': {
+        const token = await credentials.getGitPlatformToken(GitPlatform.GITHUB);
+        if (!token) {
+          spinner.fail(chalk.red('GitHub token not found'));
+          console.log(chalk.gray('Run: ') + chalk.cyan('cv auth setup github'));
+          return;
+        }
+        const adapter = new GitHubAdapter(credentials);
+        const user = await adapter.validateToken(token);
+        spinner.succeed(chalk.green('GitHub authentication valid'));
+        console.log(
+          chalk.gray('  Authenticated as: ') +
+            chalk.white(`${user.username} (${user.name || 'no name'})`)
+        );
+        break;
+      }
+
+      case 'gitlab': {
+        const token = await credentials.getGitPlatformToken(GitPlatform.GITLAB);
+        if (!token) {
+          spinner.fail(chalk.red('GitLab token not found'));
+          console.log(chalk.gray('Run: ') + chalk.cyan('cv auth setup gitlab'));
+          return;
+        }
+        const adapter = new GitLabAdapter(credentials);
+        const user = await adapter.validateToken(token);
+        spinner.succeed(chalk.green('GitLab authentication valid'));
+        console.log(
+          chalk.gray('  Authenticated as: ') +
+            chalk.white(`${user.username} (${user.name || 'no name'})`)
+        );
+        break;
+      }
+
+      case 'bitbucket': {
+        const token = await credentials.getGitPlatformToken(GitPlatform.BITBUCKET);
+        if (!token) {
+          spinner.fail(chalk.red('Bitbucket app password not found'));
+          console.log(chalk.gray('Run: ') + chalk.cyan('cv auth setup bitbucket'));
+          return;
+        }
+        const adapter = new BitbucketAdapter(credentials);
+        const user = await adapter.validateToken(token);
+        spinner.succeed(chalk.green('Bitbucket authentication valid'));
+        console.log(
+          chalk.gray('  Authenticated as: ') +
+            chalk.white(`${user.username} (${user.name || 'no name'})`)
+        );
+        break;
+      }
+
+      case 'anthropic': {
+        const key = await credentials.getAnthropicKey();
+        if (!key) {
+          spinner.fail(chalk.red('Anthropic API key not found'));
+          console.log(chalk.gray('Run: ') + chalk.cyan('cv auth setup anthropic'));
+          return;
+        }
+        if (key.startsWith('sk-ant-')) {
+          spinner.succeed(chalk.green('Anthropic API key found'));
+          console.log(chalk.gray('  Key: ') + chalk.white(key.substring(0, 20) + '...'));
+        } else {
+          spinner.fail(chalk.red('Anthropic API key invalid format'));
+        }
+        break;
+      }
+
+      case 'openai': {
+        const key = await credentials.getOpenAIKey();
+        if (!key) {
+          spinner.fail(chalk.red('OpenAI API key not found'));
+          console.log(chalk.gray('Run: ') + chalk.cyan('cv auth setup openai'));
+          return;
+        }
+        if (key.startsWith('sk-')) {
+          spinner.succeed(chalk.green('OpenAI API key found'));
+          console.log(chalk.gray('  Key: ') + chalk.white(key.substring(0, 20) + '...'));
+        } else {
+          spinner.fail(chalk.red('OpenAI API key invalid format'));
+        }
+        break;
+      }
+
+      case 'openrouter': {
+        const key = await credentials.getOpenRouterKey();
+        if (!key) {
+          spinner.fail(chalk.red('OpenRouter API key not found'));
+          console.log(chalk.gray('Run: ') + chalk.cyan('cv auth setup openrouter'));
+          return;
+        }
+        if (key.startsWith('sk-or-')) {
+          spinner.succeed(chalk.green('OpenRouter API key found'));
+          console.log(chalk.gray('  Key: ') + chalk.white(key.substring(0, 20) + '...'));
+        } else {
+          spinner.fail(chalk.red('OpenRouter API key invalid format'));
+        }
+        break;
+      }
+
+      case 'cloudflare': {
+        spinner.stop();
+        await testCloudflare(credentials);
+        break;
+      }
+
+      case 'aws': {
+        spinner.stop();
+        await testAWS(credentials);
+        break;
+      }
+
+      case 'digitalocean': {
+        spinner.stop();
+        await testDigitalOcean(credentials);
+        break;
+      }
+
+      case 'digitalocean-spaces':
+      case 'spaces': {
+        spinner.stop();
+        await testDigitalOceanSpaces(credentials);
+        break;
+      }
+
+      default:
+        spinner.fail(chalk.red(`Unknown service: ${service}`));
+        console.log(chalk.gray('\nAvailable services:'));
+        console.log(chalk.gray('  Git: github, gitlab, bitbucket'));
+        console.log(chalk.gray('  AI: anthropic, openai, openrouter'));
+        console.log(chalk.gray('  DNS: cloudflare'));
+        console.log(chalk.gray('  DevOps: aws, digitalocean, digitalocean-spaces'));
+    }
+  } catch (error: any) {
+    spinner.fail(chalk.red(`Authentication test failed: ${error.message}`));
+  }
+}
+
 // ============================================================================
-// Setup Functions
+// Git Platform Setup Functions
 // ============================================================================
 
 async function setupGitHub(credentials: CredentialManager, autoBrowser: boolean = true): Promise<void> {
@@ -392,7 +501,6 @@ async function setupGitHub(credentials: CredentialManager, autoBrowser: boolean 
     spinner.succeed(chalk.green(`Token validated for user: ${user.username}`));
     console.log(chalk.gray('  Token scopes: ') + chalk.white(scopes.join(', ')));
 
-    // Store token
     await credentials.store<GitPlatformTokenCredential>({
       type: CredentialType.GIT_PLATFORM_TOKEN,
       name: `github-${user.username}`,
@@ -550,21 +658,24 @@ async function detectGitLabTokenType(token: string): Promise<{
 }> {
   const headers = {
     'PRIVATE-TOKEN': token,
-    'Accept': 'application/json',
+    Accept: 'application/json',
   };
 
   // Try /user endpoint - only works with Personal Access Tokens
   try {
     const userResponse = await fetch('https://gitlab.com/api/v4/user', { headers });
     if (userResponse.ok) {
-      const user = await userResponse.json() as { username: string };
+      const user = (await userResponse.json()) as { username: string };
 
       // Get scopes from personal access token info
       let scopes: string[] = [];
       try {
-        const tokenResponse = await fetch('https://gitlab.com/api/v4/personal_access_tokens/self', { headers });
+        const tokenResponse = await fetch(
+          'https://gitlab.com/api/v4/personal_access_tokens/self',
+          { headers }
+        );
         if (tokenResponse.ok) {
-          const tokenInfo = await tokenResponse.json() as { scopes: string[] };
+          const tokenInfo = (await tokenResponse.json()) as { scopes: string[] };
           scopes = tokenInfo.scopes || [];
         }
       } catch {}
@@ -579,14 +690,17 @@ async function detectGitLabTokenType(token: string): Promise<{
 
   // If /user fails, try to detect group/project token by checking accessible groups
   try {
-    const groupsResponse = await fetch('https://gitlab.com/api/v4/groups?min_access_level=10&per_page=1', { headers });
+    const groupsResponse = await fetch(
+      'https://gitlab.com/api/v4/groups?min_access_level=10&per_page=1',
+      { headers }
+    );
     if (groupsResponse.ok) {
-      const groups = await groupsResponse.json() as Array<{ full_path: string }>;
+      const groups = (await groupsResponse.json()) as Array<{ full_path: string }>;
       if (groups.length > 0) {
         return {
           type: 'group',
           groupPath: groups[0].full_path,
-          scopes: ['api', 'read_api'], // Group tokens typically have these
+          scopes: ['api', 'read_api'],
         };
       }
     }
@@ -594,9 +708,14 @@ async function detectGitLabTokenType(token: string): Promise<{
 
   // Try to detect project token
   try {
-    const projectsResponse = await fetch('https://gitlab.com/api/v4/projects?membership=true&per_page=1', { headers });
+    const projectsResponse = await fetch(
+      'https://gitlab.com/api/v4/projects?membership=true&per_page=1',
+      { headers }
+    );
     if (projectsResponse.ok) {
-      const projects = await projectsResponse.json() as Array<{ path_with_namespace: string }>;
+      const projects = (await projectsResponse.json()) as Array<{
+        path_with_namespace: string;
+      }>;
       if (projects.length > 0) {
         return {
           type: 'project',
@@ -615,7 +734,6 @@ async function setupGitLab(credentials: CredentialManager, autoBrowser: boolean 
   console.log(chalk.bold.cyan('GitLab Authentication'));
   console.log(chalk.bold('──────────────────────────────────────────\n'));
 
-  // Explain token types
   console.log(chalk.yellow('GitLab Token Types:\n'));
   console.log(chalk.green('  Personal Access Token (Recommended)'));
   console.log(chalk.gray('    - Full access to all your projects and groups'));
@@ -633,7 +751,8 @@ async function setupGitLab(credentials: CredentialManager, autoBrowser: boolean 
   console.log(chalk.gray('    - Created at: Project → Settings → Access Tokens'));
   console.log();
 
-  const url = 'https://gitlab.com/-/user_settings/personal_access_tokens?scopes=api,read_user,read_repository,write_repository';
+  const url =
+    'https://gitlab.com/-/user_settings/personal_access_tokens?scopes=api,read_user,read_repository,write_repository';
 
   if (autoBrowser) {
     console.log(chalk.cyan('Opening browser to create Personal Access Token...'));
@@ -642,7 +761,10 @@ async function setupGitLab(credentials: CredentialManager, autoBrowser: boolean 
   }
 
   console.log(chalk.gray('URL: ') + chalk.blue(url));
-  console.log(chalk.gray('Required scopes: ') + chalk.white('api, read_user, read_repository, write_repository'));
+  console.log(
+    chalk.gray('Required scopes: ') +
+      chalk.white('api, read_user, read_repository, write_repository')
+  );
   console.log();
 
   const { token } = await inquirer.prompt([
@@ -674,16 +796,14 @@ async function setupGitLab(credentials: CredentialManager, autoBrowser: boolean 
         console.log(chalk.gray('  Scopes: ') + chalk.white(tokenInfo.scopes.join(', ')));
       }
 
-      // Check for required scopes
       const requiredScopes = ['api', 'read_api'];
-      const hasRequiredScopes = requiredScopes.some(s => tokenInfo.scopes.includes(s));
+      const hasRequiredScopes = requiredScopes.some((s) => tokenInfo.scopes.includes(s));
       if (!hasRequiredScopes && tokenInfo.scopes.length > 0) {
         console.log();
         console.log(chalk.yellow('⚠ Warning: Token may be missing "api" or "read_api" scope'));
         console.log(chalk.gray('  Some features like "cv clone-group" require API access'));
       }
 
-      // Store token
       await credentials.store<GitPlatformTokenCredential>({
         type: CredentialType.GIT_PLATFORM_TOKEN,
         name: `gitlab-${tokenInfo.username}`,
@@ -694,7 +814,6 @@ async function setupGitLab(credentials: CredentialManager, autoBrowser: boolean 
       });
 
       console.log(chalk.green('\n✅ GitLab authentication configured!\n'));
-
     } else if (tokenInfo.type === 'group') {
       spinner.warn(chalk.yellow(`Group Access Token detected`));
       console.log(chalk.gray('  Group: ') + chalk.white(tokenInfo.groupPath));
@@ -728,7 +847,6 @@ async function setupGitLab(credentials: CredentialManager, autoBrowser: boolean 
         console.log(chalk.blue(url));
         console.log();
       }
-
     } else if (tokenInfo.type === 'project') {
       spinner.warn(chalk.yellow(`Project Access Token detected`));
       console.log(chalk.gray('  Project: ') + chalk.white(tokenInfo.projectPath));
@@ -762,7 +880,6 @@ async function setupGitLab(credentials: CredentialManager, autoBrowser: boolean 
         console.log(chalk.blue(url));
         console.log();
       }
-
     } else {
       spinner.fail(chalk.red('Could not validate token'));
       console.log(chalk.yellow('\nThe token could not be validated. Possible reasons:'));
@@ -794,7 +911,11 @@ async function setupBitbucket(credentials: CredentialManager, autoBrowser: boole
   }
 
   console.log(chalk.gray('URL: ') + chalk.blue(url));
-  console.log(chalk.gray('1. Create an App Password with permissions: Repositories (Read, Write), Pull requests (Read, Write)'));
+  console.log(
+    chalk.gray(
+      '1. Create an App Password with permissions: Repositories (Read, Write), Pull requests (Read, Write)'
+    )
+  );
   console.log(chalk.gray('2. Copy the generated app password'));
   console.log();
 
@@ -820,7 +941,6 @@ async function setupBitbucket(credentials: CredentialManager, autoBrowser: boole
 
     spinner.succeed(chalk.green(`App password validated for user: ${user.username}`));
 
-    // Store token
     await credentials.store<GitPlatformTokenCredential>({
       type: CredentialType.GIT_PLATFORM_TOKEN,
       name: `bitbucket-${user.username}`,

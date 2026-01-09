@@ -7,6 +7,7 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { applyOptionsInterceptor } from './utils/options-interceptor.js';
 import { initCommand } from './commands/init.js';
 import { syncCommand } from './commands/sync.js';
 import { doCommand } from './commands/do.js';
@@ -38,6 +39,7 @@ import { importCommand } from './commands/import.js';
 import { servicesCommand } from './commands/services.js';
 import { createDocsCommand } from './commands/docs.js';
 import { createCacheCommand } from './commands/cache.js';
+import { verifyCommand } from './commands/verify.js';
 
 const program = new Command();
 
@@ -78,6 +80,7 @@ program.addCommand(importCommand());        // Import PRD data from cv-prd expor
 program.addCommand(servicesCommand());      // Service discovery and management
 program.addCommand(createDocsCommand());    // Documentation management (cv docs)
 program.addCommand(createCacheCommand());   // Embedding cache management (cv cache)
+program.addCommand(verifyCommand());        // CLI verification (cv verify)
 
 // Error handler
 program.exitOverride((err) => {
@@ -87,6 +90,9 @@ program.exitOverride((err) => {
   console.error(chalk.red('Error:'), err.message);
   process.exit(1);
 });
+
+// Apply options interceptor to all commands
+applyOptionsInterceptor(program);
 
 // Parse arguments
 program.parse();
