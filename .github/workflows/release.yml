@@ -111,6 +111,12 @@ jobs:
           dpkg-deb --build "${PKG_DIR}"
           mv "${PKG_DIR}.deb" dist/release/
 
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: dist/release/*
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
@@ -147,6 +153,133 @@ jobs:
             cv init      # Initialize a repository
             cv sync      # Build knowledge graph
             ```
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build
+        run: pnpm build
+
+      - name: Install pkg
+        run: npm install -g @yao-pkg/pkg
+
+      - name: Create Windows executable
+        run: |
+          $VERSION = "${{ github.ref_name }}".TrimStart('v')
+          mkdir -p dist/release
+          pkg packages/cli/dist/bundle.cjs --targets node20-win-x64 --output dist/release/cv-windows-x64.exe --compress GZip
+        shell: pwsh
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: dist/release/cv-windows-x64.exe
+
+  build-macos:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build
+        run: pnpm build
+
+      - name: Install pkg
+        run: npm install -g @yao-pkg/pkg
+
+      - name: Create macOS executables
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          mkdir -p dist/release
+          # Build for Intel Mac
+          pkg packages/cli/dist/bundle.cjs --targets node20-macos-x64 --output dist/release/cv-macos-x64 --compress GZip
+          # Build for Apple Silicon
+          pkg packages/cli/dist/bundle.cjs --targets node20-macos-arm64 --output dist/release/cv-macos-arm64 --compress GZip
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: |
+            dist/release/cv-macos-x64
+            dist/release/cv-macos-arm64
+
+  release:
+    needs: [build, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p dist/release
+          # Move Linux artifacts
+          cp artifacts/linux-build/* dist/release/ 2>/dev/null || true
+          # Move Windows artifact
+          cp artifacts/windows-build/* dist/release/ 2>/dev/null || true
+          # Move macOS artifacts
+          cp artifacts/macos-build/* dist/release/ 2>/dev/null || true
+          ls -la dist/release/
+
+      - name: Update GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/release/*
+          append_body: true
+          body: |
+            ## Cross-Platform Binaries
+
+            | Platform | Architecture | Download |
+            |----------|--------------|----------|
+            | Windows | x64 | `cv-windows-x64.exe` |
+            | macOS | Intel (x64) | `cv-macos-x64` |
+            | macOS | Apple Silicon (arm64) | `cv-macos-arm64` |
+            | Linux | x64 (.deb) | `cv-git_*_amd64.deb` |
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

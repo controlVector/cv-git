@@ -1,3 +1,10 @@
+cv-git (0.4.8-1) unstable; urgency=medium
+
+  * Added cross-platform builds (Windows x64, macOS x64/arm64)
+  * Release workflow now builds standalone executables using pkg
+
+ -- CV-Git Contributors <cv-git@controlvector.dev>  Thu, 09 Jan 2026 14:00:00 +0000
+
 cv-git (0.4.7-1) unstable; urgency=medium
 
   * Auth command restructuring with category routing (dns/, devops/, ai/, git/)
