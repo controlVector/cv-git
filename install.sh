@@ -44,7 +44,7 @@ install_native_modules() {
   "private": true,
   "dependencies": {
     "keytar": "7.9.0",
-    "tree-sitter": "0.21.1",
+    "tree-sitter": "0.25.0",
     "tree-sitter-go": "0.21.2",
     "tree-sitter-java": "0.21.0",
     "tree-sitter-javascript": "0.21.4",
@@ -88,6 +88,16 @@ fi
 check_nodejs() {
     if command -v node &> /dev/null; then
         NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
+        if [ "$NODE_VERSION" -ge 24 ]; then
+            echo -e "${RED}✗ Node.js $(node -v) is not yet supported${NC}"
+            echo -e "${YELLOW}  CV-Git requires Node.js 18-22 (native modules don't compile on Node 24+)${NC}"
+            echo ""
+            echo "  Fix with nvm:"
+            echo "    nvm install 22"
+            echo "    nvm use 22"
+            echo ""
+            return 1
+        fi
         if [ "$NODE_VERSION" -ge 18 ]; then
             echo -e "${GREEN}✓ Node.js $(node -v) found${NC}"
             return 0
