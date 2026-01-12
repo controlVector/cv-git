@@ -2,17 +2,20 @@
  * Parser Manager
  * Manages language-specific parsers and routes parsing requests
  * Refactored to modular architecture based on FalkorDB pattern
+ *
+ * Falls back to simple regex-based parsing if tree-sitter is unavailable
+ * (e.g., on Node.js 24+ where native modules don't compile)
  */
 
 import { ParsedFile, ParsedDocument } from '@cv-git/shared';
 import { ILanguageParser } from './base.js';
-import { createTypeScriptParser } from './typescript.js';
-import { createPythonParser } from './python.js';
-import { createGoParser } from './go.js';
-import { createRustParser } from './rust.js';
-import { createJavaParser } from './java.js';
 import { createMarkdownParser, MarkdownParser } from './markdown.js';
+import { createSimpleParsers } from './simple.js';
 import * as path from 'path';
+
+// Track if tree-sitter is available
+let treeSitterAvailable = true;
+let treeSitterError: string | null = null;
 
 /**
  * Main parser class that manages all language-specific parsers
@@ -21,6 +24,7 @@ export class CodeParser {
   private parsers: Map<string, ILanguageParser> = new Map();
   private extensionMap: Map<string, string> = new Map();
   private markdownParser: MarkdownParser;
+  private usingSimpleParsers: boolean = false;
 
   constructor() {
     this.markdownParser = createMarkdownParser();
@@ -28,9 +32,52 @@ export class CodeParser {
   }
 
   /**
+   * Check if using full tree-sitter parsing or simple fallback
+   */
+  isUsingTreeSitter(): boolean {
+    return !this.usingSimpleParsers;
+  }
+
+  /**
+   * Get tree-sitter error if it failed to load
+   */
+  getTreeSitterError(): string | null {
+    return treeSitterError;
+  }
+
+  /**
    * Initialize all supported language parsers
+   * Falls back to simple parsers if tree-sitter fails to load
    */
   private initializeParsers(): void {
+    // Try to load tree-sitter parsers first
+    if (treeSitterAvailable) {
+      try {
+        this.initializeTreeSitterParsers();
+        return;
+      } catch (error: any) {
+        treeSitterAvailable = false;
+        treeSitterError = error.message || 'Unknown error loading tree-sitter';
+        console.warn(`[Parser] Tree-sitter unavailable: ${treeSitterError}`);
+        console.warn('[Parser] Falling back to simple regex-based parsing');
+      }
+    }
+
+    // Fall back to simple parsers
+    this.initializeSimpleParsers();
+  }
+
+  /**
+   * Initialize tree-sitter based parsers
+   */
+  private initializeTreeSitterParsers(): void {
+    // Dynamic imports to catch native module errors
+    const { createTypeScriptParser } = require('./typescript.js');
+    const { createPythonParser } = require('./python.js');
+    const { createGoParser } = require('./go.js');
+    const { createRustParser } = require('./rust.js');
+    const { createJavaParser } = require('./java.js');
+
     // TypeScript/JavaScript parser
     const tsParser = createTypeScriptParser();
     this.registerParser('typescript', tsParser);
@@ -50,6 +97,23 @@ export class CodeParser {
     // Java parser
     const javaParser = createJavaParser();
     this.registerParser('java', javaParser);
+
+    // Register markdown extensions
+    for (const ext of this.markdownParser.getSupportedExtensions()) {
+      this.extensionMap.set(ext, 'markdown');
+    }
+  }
+
+  /**
+   * Initialize simple regex-based parsers (fallback)
+   */
+  private initializeSimpleParsers(): void {
+    this.usingSimpleParsers = true;
+    const simpleParsers = createSimpleParsers();
+
+    for (const [language, parser] of simpleParsers) {
+      this.registerParser(language, parser);
+    }
 
     // Register markdown extensions
     for (const ext of this.markdownParser.getSupportedExtensions()) {

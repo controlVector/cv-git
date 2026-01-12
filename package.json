@@ -43,7 +43,9 @@
   "author": "CV-Git Contributors",
   "license": "MIT",
   "dependencies": {
-    "keytar": "7.9.0",
+    "keytar": "7.9.0"
+  },
+  "optionalDependencies": {
     "tree-sitter": "^0.25.0",
     "tree-sitter-go": "^0.21.2",
     "tree-sitter-java": "^0.21.0",

@@ -37,13 +37,16 @@ install_native_modules() {
     echo "Installing native modules..."
 
     # Create a minimal package.json for the native modules
+    # tree-sitter is optional - cv-git works without it (using simple regex parsing)
     sudo tee "$INSTALL_DIR/package.json" > /dev/null << 'PKGJSON'
 {
   "name": "cv-git-runtime",
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "keytar": "7.9.0",
+    "keytar": "7.9.0"
+  },
+  "optionalDependencies": {
     "tree-sitter": "0.25.0",
     "tree-sitter-go": "0.21.2",
     "tree-sitter-java": "0.21.0",
@@ -55,14 +58,17 @@ install_native_modules() {
 }
 PKGJSON
 
-    # Install dependencies
+    # Install dependencies (optional deps may fail on Node 24+, that's OK)
     cd "$INSTALL_DIR"
-    if sudo npm install --production --silent 2>/dev/null; then
+    if sudo npm install --production 2>/dev/null; then
         echo -e "${GREEN}  Native modules installed successfully${NC}"
         return 0
     else
-        echo -e "${YELLOW}  Warning: Some native modules may not have installed correctly${NC}"
-        return 1
+        # Even if tree-sitter fails, keytar might succeed
+        echo -e "${YELLOW}  Note: Some optional modules may not have installed${NC}"
+        echo -e "${YELLOW}  (tree-sitter requires Node 18-22 for full AST parsing)${NC}"
+        echo -e "${YELLOW}  CV-Git will use simple regex parsing as fallback${NC}"
+        return 0  # Don't fail install
     fi
 }
 
@@ -89,14 +95,10 @@ check_nodejs() {
     if command -v node &> /dev/null; then
         NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
         if [ "$NODE_VERSION" -ge 24 ]; then
-            echo -e "${RED}✗ Node.js $(node -v) is not yet supported${NC}"
-            echo -e "${YELLOW}  CV-Git requires Node.js 18-22 (native modules don't compile on Node 24+)${NC}"
-            echo ""
-            echo "  Fix with nvm:"
-            echo "    nvm install 22"
-            echo "    nvm use 22"
-            echo ""
-            return 1
+            echo -e "${YELLOW}⚠ Node.js $(node -v) detected${NC}"
+            echo -e "${YELLOW}  Full AST parsing requires Node 18-22 (tree-sitter native modules)${NC}"
+            echo -e "${YELLOW}  CV-Git will work with simple regex parsing${NC}"
+            return 0  # Don't fail, just warn
         fi
         if [ "$NODE_VERSION" -ge 18 ]; then
             echo -e "${GREEN}✓ Node.js $(node -v) found${NC}"
