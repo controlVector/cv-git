@@ -1,6 +1,6 @@
 {
   "name": "cv-git",
-  "version": "0.4.20",
+  "version": "0.4.21",
   "description": "AI-Native Paired-Programming + Knowledge-Graph Version Control Layer",
   "private": true,
   "engines": {
@@ -46,7 +46,7 @@
     "keytar": "7.9.0"
   },
   "optionalDependencies": {
-    "tree-sitter": "^0.25.0",
+    "tree-sitter": "npm:@keqingmoe/tree-sitter@^0.26.2",
     "tree-sitter-go": "^0.21.2",
     "tree-sitter-java": "^0.21.0",
     "tree-sitter-javascript": "^0.21.1",

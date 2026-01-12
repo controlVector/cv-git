@@ -1,6 +1,6 @@
 {
   "name": "@cv-git/core",
-  "version": "0.4.20",
+  "version": "0.4.21",
   "description": "Core business logic for CV-Git",
   "type": "module",
   "main": "./dist/index.js",
@@ -29,7 +29,7 @@
     "uuid": "^13.0.0"
   },
   "optionalDependencies": {
-    "tree-sitter": "^0.25.0",
+    "tree-sitter": "npm:@keqingmoe/tree-sitter@^0.26.2",
     "tree-sitter-go": "^0.21.2",
     "tree-sitter-java": "^0.21.0",
     "tree-sitter-python": "^0.21.0",
