@@ -56,13 +56,14 @@ import { absorbCommand } from './commands/absorb.js';
 import { undoCommand, reflogCommand } from './commands/undo.js';
 import { stackCommand } from './commands/stack.js';
 import { splitCommand } from './commands/split.js';
+import { bugreportCommand } from './commands/bugreport.js';
 
 const program = new Command();
 
 program
   .name('cv')
   .description('AI-Native Version Control with Knowledge Graph & Secure Credentials')
-  .version('0.4.11');
+  .version('0.4.12');
 
 // Add commands
 program.addCommand(configCommand());        // Configuration management
@@ -115,6 +116,7 @@ program.addCommand(servicesCommand());      // Service discovery and management
 program.addCommand(createDocsCommand());    // Documentation management (cv docs)
 program.addCommand(createCacheCommand());   // Embedding cache management (cv cache)
 program.addCommand(verifyCommand());        // CLI verification (cv verify)
+program.addCommand(bugreportCommand());     // Bug reporting (cv bugreport)
 
 // Error handler
 program.exitOverride((err) => {

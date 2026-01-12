@@ -317,10 +317,12 @@ export class GraphManager {
       throw new GraphError(`Not connected to FalkorDB (state: ${JSON.stringify(state)})`);
     }
 
+    // Declare outside try block so it's available in catch
+    let processedQuery = cypher;
+
     try {
       // Replace parameters in query (FalkorDB doesn't support parameterized queries the same way as Neo4j)
       // We use word-boundary regex to ensure $file doesn't match $filePath
-      let processedQuery = cypher;
       if (params) {
         const sortedKeys = Object.keys(params);
 
@@ -352,6 +354,29 @@ export class GraphManager {
     } catch (error: any) {
       // Include more context in error for debugging
       const errorQuery = process.env.CV_DEBUG === '1' ? cypher : cypher.substring(0, 200);
+      const debugInfo = {
+        query: cypher.substring(0, 500),
+        processedQuery: processedQuery.substring(0, 500),
+        paramKeys: params ? Object.keys(params) : [],
+        errorMessage: error.message
+      };
+
+      // Enhanced error for multi-statement issues
+      if (error.message.includes('more than one statement')) {
+        console.error('\n[GraphManager] Multi-statement error debug info:');
+        console.error('  Original query preview:', cypher.substring(0, 300));
+        console.error('  Processed query preview:', processedQuery.substring(0, 300));
+        if (params) {
+          console.error('  Parameter values (truncated):');
+          for (const [key, value] of Object.entries(params)) {
+            const strVal = String(value);
+            console.error(`    ${key}: ${strVal.substring(0, 100)}${strVal.length > 100 ? '...' : ''}`);
+          }
+        }
+        console.error('\n  Run with CV_DEBUG=1 for full output');
+        console.error('  Report this issue: cv bugreport\n');
+      }
+
       throw new GraphError(`Query failed: ${error.message}\nQuery: ${errorQuery}`, error);
     }
   }
@@ -366,12 +391,17 @@ export class GraphManager {
     }
     if (typeof value === 'string') {
       // Escape backslashes first, then other special characters
+      // Order matters: backslashes must be escaped first
       const escaped = value
-        .replace(/\\/g, '\\\\')     // Backslashes
+        .replace(/\\/g, '\\\\')     // Backslashes (must be first)
         .replace(/'/g, "\\'")       // Single quotes
+        .replace(/"/g, '\\"')       // Double quotes
         .replace(/\n/g, '\\n')      // Newlines
         .replace(/\r/g, '\\r')      // Carriage returns
-        .replace(/\t/g, '\\t');     // Tabs
+        .replace(/\t/g, '\\t')      // Tabs
+        .replace(/\0/g, '')         // Null bytes (remove completely)
+        .replace(/\u2028/g, '\\n')  // Unicode line separator
+        .replace(/\u2029/g, '\\n'); // Unicode paragraph separator
       return `'${escaped}'`;
     }
     if (typeof value === 'number' || typeof value === 'boolean') {
