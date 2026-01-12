@@ -21,6 +21,8 @@ import { findRepoRoot, VectorSearchResult, CodeChunkPayload, SymbolNode } from '
 import { PRDClient } from '@cv-git/prd-client';
 import { addGlobalOptions, createOutput } from '../utils/output.js';
 import { getEmbeddingCredentials } from '../utils/credentials.js';
+import { getPreferences } from '../config.js';
+import { ensureOllama } from '../utils/infrastructure.js';
 
 interface ContextOptions {
   limit: string;
@@ -76,15 +78,44 @@ export function contextCommand(): Command {
 
       const config = await configManager.load(repoRoot);
 
-      // Get embedding credentials (OpenRouter preferred)
-      const embeddingCreds = await getEmbeddingCredentials({
-        openRouterKey: config.embedding?.apiKey,
-        openaiKey: config.ai?.apiKey
-      });
+      // Load user preferences to determine embedding provider
+      const prefsManager = getPreferences();
+      const prefs = await prefsManager.load();
+      const embeddingProvider = config.embedding?.provider || prefs.embeddingProvider || 'ollama';
 
-      if (!embeddingCreds.openrouterApiKey && !embeddingCreds.openaiApiKey) {
-        if (spinner) spinner.fail(chalk.red('No embedding API key found'));
-        else console.error('Error: Run `cv auth setup openrouter` or set OPENROUTER_API_KEY');
+      // Get embedding credentials based on provider
+      let ollamaUrl: string | undefined;
+      let openrouterApiKey: string | undefined;
+      let openaiApiKey: string | undefined;
+
+      if (embeddingProvider === 'ollama') {
+        log('Checking Ollama...');
+        const ollamaInfo = await ensureOllama({ silent: true });
+        if (ollamaInfo) {
+          ollamaUrl = ollamaInfo.url;
+          log(`Using Ollama at ${ollamaUrl}...`);
+        } else {
+          // Fall back to cloud providers
+          log('Ollama not available, checking cloud providers...');
+          const embeddingCreds = await getEmbeddingCredentials({
+            openRouterKey: config.embedding?.apiKey,
+            openaiKey: config.ai?.apiKey
+          });
+          openrouterApiKey = embeddingCreds.openrouterApiKey;
+          openaiApiKey = embeddingCreds.openaiApiKey;
+        }
+      } else {
+        const embeddingCreds = await getEmbeddingCredentials({
+          openRouterKey: config.embedding?.apiKey,
+          openaiKey: config.ai?.apiKey
+        });
+        openrouterApiKey = embeddingCreds.openrouterApiKey;
+        openaiApiKey = embeddingCreds.openaiApiKey;
+      }
+
+      if (!ollamaUrl && !openrouterApiKey && !openaiApiKey) {
+        if (spinner) spinner.fail(chalk.red('No embedding provider available'));
+        else console.error('Error: Run `cv auth setup openrouter` or ensure Ollama is running');
         process.exit(1);
       }
 
@@ -92,9 +123,11 @@ export function contextCommand(): Command {
       log('Connecting to vector database...');
       const vector = createVectorManager({
         url: config.vector.url,
-        openrouterApiKey: embeddingCreds.openrouterApiKey,
-        openaiApiKey: embeddingCreds.openaiApiKey,
-        collections: config.vector.collections
+        ollamaUrl,
+        openrouterApiKey: ollamaUrl ? undefined : openrouterApiKey,
+        openaiApiKey: ollamaUrl ? undefined : openaiApiKey,
+        collections: config.vector.collections,
+        vectorSize: embeddingProvider === 'ollama' ? 768 : 1536
       });
       await vector.connect();
 
