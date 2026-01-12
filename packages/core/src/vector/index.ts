@@ -77,6 +77,8 @@ export interface VectorManagerOptions {
   enableCache?: boolean;
   /** Cache directory (default: .cv/embeddings) */
   cacheDir?: string;
+  /** Vector dimension size (default: auto-detected from model, 1536 for OpenAI, 768 for Ollama nomic-embed-text) */
+  vectorSize?: number;
 }
 
 export class VectorManager {
@@ -122,9 +124,13 @@ export class VectorManager {
     }
 
     this.url = opts.url;
-    this.openaiApiKey = opts.openaiApiKey;
-    this.openrouterApiKey = opts.openrouterApiKey || process.env.OPENROUTER_API_KEY;
-    this.ollamaUrl = opts.ollamaUrl || process.env.OLLAMA_URL || 'http://localhost:11434';
+    this.ollamaUrl = opts.ollamaUrl || process.env.OLLAMA_URL || process.env.CV_OLLAMA_URL || 'http://127.0.0.1:11434';
+
+    // If Ollama URL is explicitly provided, don't auto-detect cloud API keys from env
+    // This ensures local-first operation when Ollama is configured
+    const useOllama = !!opts.ollamaUrl;
+    this.openaiApiKey = useOllama ? undefined : opts.openaiApiKey;
+    this.openrouterApiKey = useOllama ? undefined : (opts.openrouterApiKey || process.env.OPENROUTER_API_KEY);
 
     this.collections = {
       codeChunks: opts.collections?.codeChunks || 'code_chunks',
@@ -136,10 +142,13 @@ export class VectorManager {
     this.cacheEnabled = opts.enableCache ?? true;  // Enabled by default
     this.cacheDir = opts.cacheDir ?? '.cv/embeddings';
 
-    // Default to OpenRouter model if OpenRouter key available, otherwise OpenAI
-    const defaultModel = this.openrouterApiKey
-      ? 'openai/text-embedding-3-small'
-      : 'text-embedding-3-small';
+    // Default model based on available provider
+    // Ollama (local) > OpenRouter > OpenAI
+    const defaultModel = useOllama
+      ? 'nomic-embed-text'
+      : this.openrouterApiKey
+        ? 'openai/text-embedding-3-small'
+        : 'text-embedding-3-small';
 
     this.embeddingModel = opts.embeddingModel || process.env.CV_EMBEDDING_MODEL || defaultModel;
 
@@ -155,7 +164,7 @@ export class VectorManager {
       this.embeddingProvider = 'ollama';
     }
 
-    this.vectorSize = modelConfig?.dimension || 1536;
+    this.vectorSize = opts.vectorSize || modelConfig?.dimension || 1536;
   }
 
   /**
@@ -284,14 +293,27 @@ export class VectorManager {
    * Generate embedding using Ollama
    */
   private async embedWithOllama(text: string): Promise<number[]> {
+    // Truncate long texts to avoid "unable to fit entire input in a batch" panic
+    // Ollama's nomic-embed-text has batch size of 512 tokens by default
+    // Using very conservative limit: 500 chars (~125 tokens) to stay well under batch size
+    // Note: Code tends to tokenize less efficiently than prose
+    const maxLength = 500;
+    const truncatedText = text.length > maxLength
+      ? text.substring(0, maxLength) + '...'
+      : text;
+
+    if (process.env.CV_DEBUG) {
+      console.log(`[VectorManager] Ollama embedding request: url=${this.ollamaUrl}, model=${this.embeddingModel}, textLen=${text.length}${text.length > maxLength ? ' (truncated)' : ''}`);
+    }
+
     const response = await fetch(`${this.ollamaUrl}/api/embeddings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: this.embeddingModel,
-        prompt: text
+        prompt: truncatedText
       }),
-      signal: AbortSignal.timeout(30000)
+      signal: AbortSignal.timeout(60000)  // Increased timeout for first request (model loading)
     });
 
     if (!response.ok) {
@@ -300,17 +322,52 @@ export class VectorManager {
     }
 
     const data = await response.json() as { embedding: number[] };
+
+    if (process.env.CV_DEBUG && data.embedding) {
+      console.log(`[VectorManager] Ollama embedding success: dim=${data.embedding.length}`);
+    }
+
     return data.embedding;
   }
 
   /**
-   * Generate embeddings for multiple texts using Ollama (sequential)
+   * Generate embeddings for multiple texts using Ollama (sequential with progress)
    */
   private async embedBatchWithOllama(texts: string[]): Promise<number[][]> {
     const embeddings: number[][] = [];
-    for (const text of texts) {
-      const embedding = await this.embedWithOllama(text);
-      embeddings.push(embedding);
+    const total = texts.length;
+    let lastProgress = 0;
+
+    for (let i = 0; i < texts.length; i++) {
+      const text = texts[i];
+
+      // Retry logic for transient failures
+      let lastError: Error | null = null;
+      for (let retry = 0; retry < 3; retry++) {
+        try {
+          const embedding = await this.embedWithOllama(text);
+          embeddings.push(embedding);
+          lastError = null;
+          break;
+        } catch (error: any) {
+          lastError = error;
+          // Wait before retry (Ollama runner might be restarting)
+          if (retry < 2) {
+            await new Promise(r => setTimeout(r, 1000 * (retry + 1)));
+          }
+        }
+      }
+
+      if (lastError) {
+        throw lastError;
+      }
+
+      // Show progress every 100 embeddings
+      const progress = Math.floor((i + 1) / total * 100);
+      if (progress >= lastProgress + 10 || i === total - 1) {
+        console.log(`  Ollama embeddings: ${i + 1}/${total} (${progress}%)`);
+        lastProgress = progress;
+      }
     }
     return embeddings;
   }
@@ -323,18 +380,103 @@ export class VectorManager {
       throw new VectorError('OpenRouter client not initialized');
     }
 
+    // Validate input
+    const inputArray = Array.isArray(input) ? input : [input];
+    if (inputArray.length === 0) {
+      return { embeddings: [], model: this.embeddingModel };
+    }
+
+    // Filter out empty strings which can cause API errors
+    const validInputs = inputArray.filter(s => s && s.trim().length > 0);
+    if (validInputs.length === 0) {
+      // Return zero vectors for empty inputs
+      return {
+        embeddings: inputArray.map(() => new Array(this.vectorSize).fill(0)),
+        model: this.embeddingModel
+      };
+    }
+
+    // Models to try in order of preference
+    const modelsToTry = [
+      this.embeddingModel,
+      'openai/text-embedding-3-small',
+      'openai/text-embedding-ada-002',
+    ].filter((m, i, arr) => arr.indexOf(m) === i); // Remove duplicates
+
+    let response: any;
+    let lastError: Error | null = null;
+
+    for (const model of modelsToTry) {
+      try {
+        response = await this.openrouter.embeddings.create({
+          model,
+          input: validInputs.length === 1 ? validInputs[0] : validInputs,
+          encoding_format: 'float'
+        });
+
+        // If we had to fall back to a different model, update our setting
+        if (model !== this.embeddingModel) {
+          console.log(`Switched to embedding model: ${model}`);
+          this.embeddingModel = model;
+        }
+        break;
+      } catch (error: any) {
+        lastError = error;
+        // Check if it's a provider not found error - try next model
+        if (error.message?.includes('No successful provider') || error.status === 404) {
+          continue;
+        }
+        // Other errors should be thrown
+        throw error;
+      }
+    }
+
+    if (!response && lastError) {
+      throw lastError;
+    }
+
     try {
-      const response = await this.openrouter.embeddings.create({
-        model: this.embeddingModel,
-        input,
-        encoding_format: 'float'
+      // Validate response structure
+      if (!response || !response.data || !Array.isArray(response.data)) {
+        const responseStr = response ? JSON.stringify(response).substring(0, 500) : 'null/undefined';
+        throw new VectorError(
+          `OpenRouter returned invalid response (expected data array): ${responseStr}`
+        );
+      }
+
+      // Validate each embedding in the response
+      const embeddings = response.data.map((d: any, i: number) => {
+        if (!d || !Array.isArray(d.embedding)) {
+          throw new VectorError(
+            `OpenRouter embedding ${i} missing or invalid: ${JSON.stringify(d).substring(0, 100)}`
+          );
+        }
+        return d.embedding as number[];
       });
 
+      // If we filtered out empty strings, we need to reconstruct the full array
+      if (validInputs.length !== inputArray.length) {
+        const fullEmbeddings: number[][] = [];
+        let validIndex = 0;
+        for (const inp of inputArray) {
+          if (inp && inp.trim().length > 0) {
+            fullEmbeddings.push(embeddings[validIndex++]);
+          } else {
+            fullEmbeddings.push(new Array(this.vectorSize).fill(0));
+          }
+        }
+        return { embeddings: fullEmbeddings, model: this.embeddingModel };
+      }
+
       return {
-        embeddings: response.data.map(d => d.embedding),
+        embeddings,
         model: this.embeddingModel
       };
     } catch (error: any) {
+      // Re-throw VectorErrors as-is
+      if (error instanceof VectorError) {
+        throw error;
+      }
       throw new VectorError(`OpenRouter embedding failed: ${error.message}`, error);
     }
   }
@@ -588,17 +730,49 @@ export class VectorManager {
       if (this.embeddingProvider === 'ollama') {
         newEmbeddings = await this.embedBatchWithOllama(textsToEmbed);
       }
-      // If using OpenRouter, use OpenRouter batch
+      // If using OpenRouter, use OpenRouter batch with retry logic
       else if (this.embeddingProvider === 'openrouter') {
         if (!this.openrouter) {
           throw new VectorError('OpenRouter client not initialized');
         }
-        const batchSize = 100;
+        const batchSize = 50; // Smaller batches to avoid rate limits
         const batches = chunkArray(textsToEmbed, batchSize);
+        const maxRetries = 3;
 
-        for (const batch of batches) {
-          const result = await this.embedWithOpenRouter(batch);
-          newEmbeddings.push(...result.embeddings);
+        for (let i = 0; i < batches.length; i++) {
+          const batch = batches[i];
+          let lastError: Error | null = null;
+
+          for (let retry = 0; retry < maxRetries; retry++) {
+            try {
+              const result = await this.embedWithOpenRouter(batch);
+              newEmbeddings.push(...result.embeddings);
+              lastError = null;
+              break;
+            } catch (error: any) {
+              lastError = error;
+              const isRetryable = error.message?.includes('No successful provider') ||
+                                  error.message?.includes('rate') ||
+                                  error.message?.includes('429') ||
+                                  error.message?.includes('503');
+              if (isRetryable && retry < maxRetries - 1) {
+                const delay = Math.pow(2, retry) * 1000 + Math.random() * 1000;
+                console.log(`OpenRouter batch ${i + 1}/${batches.length} failed, retrying in ${Math.round(delay / 1000)}s...`);
+                await new Promise(r => setTimeout(r, delay));
+              } else if (!isRetryable) {
+                throw error;
+              }
+            }
+          }
+
+          if (lastError) {
+            throw lastError;
+          }
+
+          // Progress indicator for large batches
+          if (batches.length > 10 && (i + 1) % 10 === 0) {
+            console.log(`Embedding progress: ${i + 1}/${batches.length} batches`);
+          }
         }
       }
       // Using OpenAI directly

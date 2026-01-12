@@ -30,7 +30,8 @@ import * as path from 'path';
 import { CredentialManager } from '@cv-git/credentials';
 import { addGlobalOptions, createOutput } from '../utils/output.js';
 import { checkCredentials, displayCompactStatus } from '../utils/config-check.js';
-import { ensureFalkorDB, ensureQdrant, isDockerAvailable } from '../utils/infrastructure.js';
+import { ensureFalkorDB, ensureQdrant, ensureOllama, isDockerAvailable } from '../utils/infrastructure.js';
+import { getPreferences } from '../config.js';
 
 export function syncCommand(): Command {
   const cmd = new Command('sync');
@@ -115,12 +116,20 @@ export function syncCommand(): Command {
         await graph.connect();
         spinner.succeed('Connected to FalkorDB');
 
-        // Vector manager (optional - requires OpenAI or OpenRouter API key)
+        // Vector manager - check embedding provider preference
         let vector = undefined;
+        let ollamaUrl: string | undefined;
         let openaiApiKey = config.ai.apiKey || process.env.OPENAI_API_KEY;
         let openrouterApiKey = process.env.OPENROUTER_API_KEY;
 
-        // Try to get from credential manager if not in config/env
+        // Load user preferences to determine embedding provider
+        const prefsManager = getPreferences();
+        const prefs = await prefsManager.load();
+        const embeddingProvider = config.embedding?.provider || prefs.embeddingProvider || 'ollama';
+
+        output.debug(`Embedding provider preference: ${embeddingProvider}`);
+
+        // Try to get cloud API keys from credential manager if not in config/env
         try {
           const credentials = new CredentialManager();
           await credentials.init();
@@ -140,10 +149,52 @@ export function syncCommand(): Command {
           output.debug(`Credential manager error: ${credError.message}`);
         }
 
-        // Configure embedding provider for VectorManager
-        // OpenRouter is preferred due to better model availability
-        if (openrouterApiKey) {
-          // Use OpenRouter for embeddings (preferred)
+        // Set up embedding provider based on preference
+        if (embeddingProvider === 'ollama') {
+          // Ollama for local embeddings (default)
+          spinner = output.spinner('Setting up Ollama for embeddings...').start();
+
+          const ollamaInfo = await ensureOllama({
+            silent: true,
+            pullModel: true,
+            model: config.embedding?.model || 'nomic-embed-text',
+          });
+
+          if (ollamaInfo) {
+            ollamaUrl = ollamaInfo.url;
+            if (ollamaInfo.started) {
+              spinner.succeed(`Ollama started on ${ollamaUrl}`);
+            } else {
+              spinner.succeed(`Using Ollama at ${ollamaUrl}`);
+            }
+
+            if (!ollamaInfo.modelReady) {
+              spinner = output.spinner('Downloading embedding model...').start();
+              // Model will be pulled on first use
+              spinner.succeed('Embedding model ready');
+            }
+
+            // Set environment for VectorManager
+            process.env.CV_EMBEDDING_PROVIDER = 'ollama';
+            process.env.CV_OLLAMA_URL = ollamaUrl;
+            process.env.CV_EMBEDDING_MODEL = config.embedding?.model || 'nomic-embed-text';
+          } else {
+            spinner.warn('Ollama not available (Docker required)');
+            // Fall back to cloud providers if Ollama unavailable
+            if (openrouterApiKey) {
+              output.info('Falling back to OpenRouter for embeddings...');
+              if (!process.env.OPENROUTER_API_KEY) {
+                process.env.OPENROUTER_API_KEY = openrouterApiKey;
+              }
+              process.env.CV_EMBEDDING_MODEL = 'openai/text-embedding-3-small';
+            } else if (openaiApiKey) {
+              output.info('Falling back to OpenAI for embeddings...');
+            } else {
+              output.info('Continuing without vector embeddings...');
+            }
+          }
+        } else if (embeddingProvider === 'openrouter' && openrouterApiKey) {
+          // Use OpenRouter for embeddings
           if (!process.env.OPENROUTER_API_KEY) {
             process.env.OPENROUTER_API_KEY = openrouterApiKey;
           }
@@ -152,7 +203,10 @@ export function syncCommand(): Command {
           }
         }
 
-        if ((openaiApiKey || openrouterApiKey) && config.vector) {
+        // Set up Qdrant if we have any embedding capability
+        const hasEmbeddingCapability = ollamaUrl || openaiApiKey || openrouterApiKey;
+
+        if (hasEmbeddingCapability && config.vector) {
           spinner = output.spinner('Setting up Qdrant...').start();
 
           const qdrantInfo = await ensureQdrant({ silent: true });
@@ -180,10 +234,12 @@ export function syncCommand(): Command {
               spinner = output.spinner('Connecting to Qdrant...').start();
               vector = createVectorManager({
                 url: qdrantUrl,
-                openrouterApiKey,
-                openaiApiKey,
+                ollamaUrl,
+                openrouterApiKey: ollamaUrl ? undefined : openrouterApiKey,
+                openaiApiKey: ollamaUrl ? undefined : openaiApiKey,
                 collections: config.vector.collections,
-                cacheDir: path.join(repoRoot, '.cv', 'embeddings')  // Content-addressed cache
+                cacheDir: path.join(repoRoot, '.cv', 'embeddings'),  // Content-addressed cache
+                vectorSize: embeddingProvider === 'ollama' ? 768 : 1536,  // nomic-embed-text is 768 dims
               });
               await vector.connect();
 
@@ -202,9 +258,9 @@ export function syncCommand(): Command {
               vector = undefined;
             }
           }
-        } else if (!openaiApiKey && !openrouterApiKey) {
-          output.info('No embedding API key found - skipping vector embeddings');
-          output.debug('Run "cv auth setup openai" or "cv auth setup openrouter" to enable semantic search');
+        } else if (!hasEmbeddingCapability) {
+          output.info('No embedding provider available - skipping vector embeddings');
+          output.debug('Ollama is the default. Run "cv init" to configure, or set up API keys with "cv auth setup openrouter"');
         }
 
         // Sync engine

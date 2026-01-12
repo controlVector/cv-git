@@ -85,15 +85,19 @@ export async function runPreferencePicker(
       message: 'Which provider should generate embeddings for code search?',
       choices: [
         {
-          name: `${chalk.white('OpenRouter')} ${chalk.gray('- Cost-effective embeddings (recommended)')}`,
+          name: `${chalk.white('Ollama')} ${chalk.gray('- Local, free, runs via Docker (recommended)')}`,
+          value: 'ollama',
+        },
+        {
+          name: `${chalk.white('OpenRouter')} ${chalk.gray('- Cloud-based, requires API key')}`,
           value: 'openrouter',
         },
         {
-          name: `${chalk.white('OpenAI')} ${chalk.gray('- text-embedding-3-small')}`,
+          name: `${chalk.white('OpenAI')} ${chalk.gray('- text-embedding-3-small, requires API key')}`,
           value: 'openai',
         },
       ],
-      default: existingPrefs?.embeddingProvider || 'openrouter',
+      default: existingPrefs?.embeddingProvider || 'ollama',
     },
   ]);
 
@@ -121,6 +125,7 @@ export function displayPreferenceSummary(prefs: PreferenceChoices): void {
   };
 
   const embeddingNames: Record<EmbeddingProvider, string> = {
+    ollama: 'Ollama (Local)',
     openai: 'OpenAI',
     openrouter: 'OpenRouter',
   };
@@ -153,7 +158,8 @@ export function getRequiredServices(prefs: PreferenceChoices): string[] {
   services.push(prefs.aiProvider);
 
   // Embedding provider (if different from AI provider)
-  if (prefs.embeddingProvider !== prefs.aiProvider) {
+  // Note: Ollama runs locally so it doesn't need an API key
+  if (prefs.embeddingProvider !== prefs.aiProvider && prefs.embeddingProvider !== 'ollama') {
     // OpenAI embeddings require OpenAI key
     if (prefs.embeddingProvider === 'openai' && prefs.aiProvider !== 'openai') {
       services.push('openai');

@@ -22,6 +22,13 @@ export interface InfraStatus {
     started?: boolean;
     error?: string;
   };
+  ollama?: {
+    available: boolean;
+    url?: string;
+    started?: boolean;
+    modelReady?: boolean;
+    error?: string;
+  };
 }
 
 /**
@@ -326,12 +333,339 @@ export async function ensureQdrant(options?: {
 }
 
 /**
+ * Detect if NVIDIA GPU is available for Docker
+ */
+export function detectNvidiaGpu(): boolean {
+  try {
+    // Check if nvidia-smi is available
+    execSync('nvidia-smi', { stdio: 'ignore' });
+    // Check if nvidia-container-toolkit is installed
+    execSync('docker run --rm --gpus all nvidia/cuda:11.0.3-base-ubuntu20.04 nvidia-smi', {
+      stdio: 'ignore',
+      timeout: 30000
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Get cv-git-ollama container info
+ */
+function getCVOllamaInfo(): { running: boolean; port?: number; stopped?: boolean; created?: boolean; exists: boolean } {
+  try {
+    const result = execSync('docker ps -a --filter name=^cv-git-ollama$ --format "{{.Status}}|{{.Ports}}"', {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'ignore']
+    }).trim();
+
+    if (!result) {
+      return { running: false, exists: false };
+    }
+
+    const [status, ports] = result.split('|');
+    const statusLower = status.toLowerCase();
+    const isRunning = statusLower.startsWith('up');
+    const isStopped = statusLower.includes('exited');
+    const isCreated = statusLower.includes('created');
+
+    // Parse port from "0.0.0.0:11434->11434/tcp" format
+    let port: number | undefined;
+    if (ports) {
+      const portMatch = ports.match(/:(\d+)->/);
+      if (portMatch) {
+        port = parseInt(portMatch[1], 10);
+      }
+    }
+
+    return { running: isRunning, port, stopped: isStopped, created: isCreated, exists: true };
+  } catch {
+    return { running: false, exists: false };
+  }
+}
+
+/**
+ * Wait for Ollama API to be ready
+ */
+async function waitForOllama(port: number, timeoutMs: number = 30000): Promise<boolean> {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeoutMs) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/tags`);
+      if (response.ok) {
+        return true;
+      }
+    } catch {
+      // Not ready yet
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+
+  return false;
+}
+
+/**
+ * Check if a specific model is available in Ollama
+ */
+async function isOllamaModelAvailable(port: number, model: string): Promise<boolean> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/tags`);
+    if (!response.ok) return false;
+
+    const data = await response.json() as { models?: Array<{ name: string }> };
+    const models = data.models || [];
+
+    // Check for exact match or match without tag (e.g., "nomic-embed-text" matches "nomic-embed-text:latest")
+    return models.some(m =>
+      m.name === model ||
+      m.name.startsWith(model + ':') ||
+      m.name === model + ':latest'
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Pull a model in Ollama (non-blocking, returns immediately)
+ */
+async function pullOllamaModel(port: number, model: string): Promise<boolean> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/pull`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: model, stream: false })
+    });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    // Wait for pull to complete (response comes back when done)
+    await response.json();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Ensure a specific model is available in Ollama
+ */
+export async function ensureOllamaModel(
+  port: number,
+  model: string,
+  options?: { silent?: boolean; onProgress?: (msg: string) => void }
+): Promise<boolean> {
+  const log = options?.onProgress || (options?.silent ? () => {} : console.log);
+
+  // Check if model already exists
+  if (await isOllamaModelAvailable(port, model)) {
+    return true;
+  }
+
+  log(`Pulling Ollama model: ${model} (this may take a few minutes)...`);
+
+  try {
+    // Use streaming to show progress
+    const response = await fetch(`http://127.0.0.1:${port}/api/pull`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: model, stream: true })
+    });
+
+    if (!response.ok || !response.body) {
+      return false;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let lastPercent = -1;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const text = decoder.decode(value, { stream: true });
+      const lines = text.split('\n').filter(l => l.trim());
+
+      for (const line of lines) {
+        try {
+          const data = JSON.parse(line);
+          if (data.total && data.completed) {
+            const percent = Math.round((data.completed / data.total) * 100);
+            if (percent !== lastPercent && percent % 10 === 0) {
+              log(`  Downloading: ${percent}%`);
+              lastPercent = percent;
+            }
+          } else if (data.status && !options?.silent) {
+            // Show status messages like "verifying sha256 digest"
+            if (data.status !== 'pulling manifest' && !data.status.includes('pulling')) {
+              log(`  ${data.status}`);
+            }
+          }
+        } catch {
+          // Ignore JSON parse errors for partial lines
+        }
+      }
+    }
+
+    // Verify model is now available
+    const available = await isOllamaModelAvailable(port, model);
+    if (available) {
+      log(`  Model ${model} ready`);
+    }
+    return available;
+  } catch (error) {
+    return false;
+  }
+}
+
+/**
+ * Check if a system-level Ollama is running (not in Docker)
+ */
+async function isSystemOllamaRunning(port: number = 11434): Promise<boolean> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/tags`, {
+      signal: AbortSignal.timeout(3000)
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Ensure Ollama is running, auto-starting if needed
+ * Checks for system Ollama first, then falls back to Docker container
+ */
+export async function ensureOllama(options?: {
+  silent?: boolean;
+  pullModel?: boolean;
+  model?: string;
+  useGpu?: boolean;
+}): Promise<{ url: string; started: boolean; modelReady: boolean } | null> {
+  const model = options?.model || 'nomic-embed-text';
+  const defaultPort = 11434;
+
+  // First check if a system-level Ollama is already running
+  if (await isSystemOllamaRunning(defaultPort)) {
+    const url = `http://127.0.0.1:${defaultPort}`;
+    let modelReady = false;
+    if (options?.pullModel !== false) {
+      modelReady = await ensureOllamaModel(defaultPort, model, { silent: options?.silent });
+    }
+    return { url, started: false, modelReady };
+  }
+
+  // No system Ollama, try Docker
+  if (!isDockerAvailable()) {
+    return null;
+  }
+
+  const containerInfo = getCVOllamaInfo();
+  let port = containerInfo.port || 11434;
+  let started = false;
+
+  // If our container is running, check API
+  if (containerInfo.running && containerInfo.port) {
+    port = containerInfo.port;
+    const url = `http://127.0.0.1:${port}`;
+    try {
+      const response = await fetch(`${url}/api/tags`);
+      if (response.ok) {
+        // Container running and responding
+        let modelReady = false;
+        if (options?.pullModel !== false) {
+          modelReady = await ensureOllamaModel(port, model, { silent: options?.silent });
+        }
+        return { url, started: false, modelReady };
+      }
+    } catch {
+      // Not responding, try to restart
+    }
+  }
+
+  // If our container exists but is stopped, start it
+  if (containerInfo.stopped && containerInfo.port) {
+    try {
+      execSync('docker start cv-git-ollama', { stdio: 'ignore' });
+      port = containerInfo.port;
+      started = true;
+
+      if (await waitForOllama(port)) {
+        let modelReady = false;
+        if (options?.pullModel !== false) {
+          modelReady = await ensureOllamaModel(port, model, { silent: options?.silent });
+        }
+        return { url: `http://127.0.0.1:${port}`, started: true, modelReady };
+      }
+    } catch {
+      // Failed to start
+    }
+  }
+
+  // If container is in "Created" state, remove it
+  if (containerInfo.created || (containerInfo.exists && !containerInfo.running && !containerInfo.stopped)) {
+    try {
+      execSync('docker rm -f cv-git-ollama', { stdio: 'ignore' });
+    } catch {
+      // Ignore removal errors
+    }
+  }
+
+  // Need to create a new container
+  port = findAvailablePort(11434);
+
+  // Build docker run command
+  let dockerCmd = `docker run -d --name cv-git-ollama -p ${port}:11434 -v ollama-data:/root/.ollama`;
+
+  // Add GPU support if requested and available
+  if (options?.useGpu && detectNvidiaGpu()) {
+    dockerCmd += ' --gpus all';
+  }
+
+  dockerCmd += ' ollama/ollama:latest';
+
+  try {
+    execSync(dockerCmd, { stdio: 'ignore' });
+    started = true;
+  } catch (error: any) {
+    if (error.message?.includes('already in use') || error.status === 125) {
+      try {
+        execSync('docker rm -f cv-git-ollama', { stdio: 'ignore' });
+        execSync(dockerCmd, { stdio: 'ignore' });
+        started = true;
+      } catch {
+        return null;
+      }
+    } else {
+      return null;
+    }
+  }
+
+  if (await waitForOllama(port)) {
+    let modelReady = false;
+    if (options?.pullModel !== false) {
+      modelReady = await ensureOllamaModel(port, model, { silent: options?.silent });
+    }
+    return { url: `http://127.0.0.1:${port}`, started, modelReady };
+  }
+
+  return null;
+}
+
+/**
  * Ensure all infrastructure is running
  */
 export async function ensureInfrastructure(options?: {
   silent?: boolean;
   needGraph?: boolean;
   needVector?: boolean;
+  needOllama?: boolean;
+  ollamaModel?: string;
 }): Promise<InfraStatus> {
   const status: InfraStatus = {
     falkordb: { available: false },
@@ -367,6 +701,27 @@ export async function ensureInfrastructure(options?: {
       }
     } catch (e: any) {
       status.qdrant.error = e.message;
+    }
+  }
+
+  // Start Ollama if needed
+  if (options?.needOllama) {
+    try {
+      const result = await ensureOllama({
+        silent: options?.silent,
+        model: options?.ollamaModel,
+        pullModel: true,
+      });
+      if (result) {
+        status.ollama = {
+          available: true,
+          url: result.url,
+          started: result.started,
+          modelReady: result.modelReady,
+        };
+      }
+    } catch (e: any) {
+      status.ollama = { available: false, error: e.message };
     }
   }
 

@@ -29,6 +29,7 @@ import {
   displayRequiredKeys,
   PreferenceChoices,
 } from '../utils/preference-picker.js';
+import { ensureOllama, isDockerAvailable } from '../utils/infrastructure.js';
 
 export function initCommand(): Command {
   const cmd = new Command('init');
@@ -42,7 +43,7 @@ export function initCommand(): Command {
     .option('-y, --yes', 'Non-interactive mode with defaults (for AI/automation)')
     .option('--platform <platform>', 'Git platform: github, gitlab, bitbucket (default: github)')
     .option('--ai-provider <provider>', 'AI provider: anthropic, openai, openrouter (default: anthropic)')
-    .option('--embedding-provider <provider>', 'Embedding provider: openai, openrouter (default: openrouter)');
+    .option('--embedding-provider <provider>', 'Embedding provider: ollama, openai, openrouter (default: ollama)');
 
   addGlobalOptions(cmd);
 
@@ -74,7 +75,7 @@ export function initCommand(): Command {
           preferences = {
             gitPlatform: (options.platform || 'github') as 'github' | 'gitlab' | 'bitbucket',
             aiProvider: (options.aiProvider || 'anthropic') as 'anthropic' | 'openai' | 'openrouter',
-            embeddingProvider: (options.embeddingProvider || 'openrouter') as 'openai' | 'openrouter',
+            embeddingProvider: (options.embeddingProvider || 'ollama') as 'ollama' | 'openai' | 'openrouter',
           };
           // Save preferences in non-interactive mode too
           if (!hasPrefs) {
@@ -105,6 +106,11 @@ export function initCommand(): Command {
           await savePreferences(preferences);
           console.log(chalk.green('Preferences saved!'));
           console.log();
+
+          // If using Ollama for embeddings, set it up
+          if (preferences.embeddingProvider === 'ollama') {
+            await setupOllamaEmbeddings();
+          }
         } else {
           // Load existing preferences
           const existingPrefs = await prefsManager.load();
@@ -418,4 +424,55 @@ async function checkGlobalCredentials(services: string[]): Promise<{
   }
 
   return { configured, missing };
+}
+
+/**
+ * Set up Ollama for local embeddings
+ */
+async function setupOllamaEmbeddings(): Promise<void> {
+  console.log(chalk.bold('Setting up Ollama for local embeddings...'));
+  console.log();
+
+  // Check if Docker is available
+  if (!isDockerAvailable()) {
+    console.log(chalk.yellow('Docker is not available.'));
+    console.log(chalk.gray('Ollama requires Docker to run. Please install Docker and try again.'));
+    console.log(chalk.gray('Or switch to a cloud provider: cv config set embedding.provider openrouter'));
+    console.log();
+    return;
+  }
+
+  console.log(chalk.gray('Starting Ollama container...'));
+
+  try {
+    const result = await ensureOllama({
+      pullModel: true,
+      model: 'nomic-embed-text',
+    });
+
+    if (result) {
+      if (result.started) {
+        console.log(chalk.green('  ✓ Ollama container started'));
+      } else {
+        console.log(chalk.green('  ✓ Ollama container already running'));
+      }
+
+      if (result.modelReady) {
+        console.log(chalk.green('  ✓ nomic-embed-text model ready'));
+      } else {
+        console.log(chalk.yellow('  ⚠ Model not yet available (will download on first sync)'));
+      }
+
+      console.log(chalk.gray(`  URL: ${result.url}`));
+      console.log();
+    } else {
+      console.log(chalk.yellow('  ⚠ Could not start Ollama container'));
+      console.log(chalk.gray('  Embeddings will be set up during first sync'));
+      console.log();
+    }
+  } catch (error: any) {
+    console.log(chalk.yellow(`  ⚠ Ollama setup warning: ${error.message}`));
+    console.log(chalk.gray('  Embeddings will be set up during first sync'));
+    console.log();
+  }
 }

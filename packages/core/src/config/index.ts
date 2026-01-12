@@ -29,10 +29,10 @@ const DEFAULT_CONFIG: CVConfig = {
     temperature: 0.2
   },
   embedding: {
-    provider: 'openrouter',
-    model: 'openai/text-embedding-3-small',
-    apiKey: process.env.CV_OPENROUTER_KEY || process.env.OPENROUTER_API_KEY,
-    dimensions: 1536
+    provider: 'ollama',
+    model: 'nomic-embed-text',
+    url: 'http://localhost:11434',
+    dimensions: 768
   },
   graph: {
     provider: 'falkordb',

@@ -36,10 +36,37 @@ services:
     networks:
       - cv-git-network
 
+  # Ollama - Local LLM & Embedding Server (default for embeddings)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: cv-git-ollama
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - cv-git-network
+    # Uncomment below to enable GPU support (requires nvidia-container-toolkit)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
 volumes:
   falkordb-data:
     driver: local
   qdrant-data:
+    driver: local
+  ollama-data:
     driver: local
 
 networks:

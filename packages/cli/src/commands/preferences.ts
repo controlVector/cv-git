@@ -57,6 +57,7 @@ export function preferencesCommand(): Command {
       };
 
       const embeddingNames: Record<EmbeddingProvider, string> = {
+        ollama: 'Ollama (Local)',
         openai: 'OpenAI',
         openrouter: 'OpenRouter',
       };

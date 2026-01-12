@@ -15,6 +15,8 @@ import { findRepoRoot, getCVDir } from '@cv-git/shared';
 import { VectorSearchResult, CodeChunkPayload } from '@cv-git/shared';
 import { addGlobalOptions, createOutput } from '../utils/output.js';
 import { getEmbeddingCredentials } from '../utils/credentials.js';
+import { getPreferences } from '../config.js';
+import { ensureOllama } from '../utils/infrastructure.js';
 
 export function findCommand(): Command {
   const cmd = new Command('find');
@@ -45,15 +47,46 @@ export function findCommand(): Command {
         // Load configuration
         const config = await configManager.load(repoRoot);
 
-        // Get embedding credentials (OpenRouter > OpenAI > Ollama)
-        const embeddingCreds = await getEmbeddingCredentials({
-          openRouterKey: config.embedding?.apiKey,
-          openaiKey: config.ai?.apiKey
-        });
+        // Load user preferences to determine embedding provider
+        const prefsManager = getPreferences();
+        const prefs = await prefsManager.load();
+        const embeddingProvider = config.embedding?.provider || prefs.embeddingProvider || 'ollama';
 
-        if (embeddingCreds.provider === 'ollama') {
-          spinner.text = 'Using Ollama for embeddings (no API key found)...';
+        // Get embedding credentials
+        let ollamaUrl: string | undefined;
+        let openrouterApiKey: string | undefined;
+        let openaiApiKey: string | undefined;
+
+        if (embeddingProvider === 'ollama') {
+          spinner.text = 'Checking Ollama...';
+          // Try to ensure Ollama is available
+          const ollamaInfo = await ensureOllama({ silent: true });
+          if (ollamaInfo) {
+            ollamaUrl = ollamaInfo.url;
+            spinner.text = `Using Ollama at ${ollamaUrl}...`;
+          } else {
+            // Fall back to cloud providers
+            spinner.text = 'Ollama not available, checking cloud providers...';
+            const embeddingCreds = await getEmbeddingCredentials({
+              openRouterKey: config.embedding?.apiKey,
+              openaiKey: config.ai?.apiKey
+            });
+            openrouterApiKey = embeddingCreds.openrouterApiKey;
+            openaiApiKey = embeddingCreds.openaiApiKey;
+            if (openrouterApiKey) {
+              spinner.text = 'Using OpenRouter for embeddings (Ollama fallback)...';
+            } else if (openaiApiKey) {
+              spinner.text = 'Using OpenAI for embeddings (Ollama fallback)...';
+            }
+          }
         } else {
+          // Use cloud provider as configured
+          const embeddingCreds = await getEmbeddingCredentials({
+            openRouterKey: config.embedding?.apiKey,
+            openaiKey: config.ai?.apiKey
+          });
+          openrouterApiKey = embeddingCreds.openrouterApiKey;
+          openaiApiKey = embeddingCreds.openaiApiKey;
           spinner.text = `Using ${embeddingCreds.provider} for embeddings...`;
         }
 
@@ -61,9 +94,11 @@ export function findCommand(): Command {
         spinner.text = 'Connecting to Qdrant...';
         const vector = createVectorManager({
           url: config.vector.url,
-          openrouterApiKey: embeddingCreds.openrouterApiKey,
-          openaiApiKey: embeddingCreds.openaiApiKey,
-          collections: config.vector.collections
+          ollamaUrl,
+          openrouterApiKey: ollamaUrl ? undefined : openrouterApiKey,
+          openaiApiKey: ollamaUrl ? undefined : openaiApiKey,
+          collections: config.vector.collections,
+          vectorSize: embeddingProvider === 'ollama' ? 768 : 1536
         });
 
         await vector.connect();

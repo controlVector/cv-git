@@ -65,7 +65,7 @@ export interface FeaturesConfig {
  * These are the user's preferred choices for interfaces/providers
  */
 export type AIProvider = 'anthropic' | 'openai' | 'openrouter';
-export type EmbeddingProvider = 'openai' | 'openrouter';
+export type EmbeddingProvider = 'ollama' | 'openai' | 'openrouter';
 export type GitPlatformType = 'github' | 'gitlab' | 'bitbucket';
 
 export interface UserPreferences {
@@ -276,7 +276,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   version: '1.0.0',
   gitPlatform: 'github',
   aiProvider: 'anthropic',
-  embeddingProvider: 'openrouter',
+  embeddingProvider: 'ollama',
   setupComplete: false,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),

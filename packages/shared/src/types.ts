@@ -527,6 +527,7 @@ export interface CVConfig {
     provider: 'openrouter' | 'openai' | 'ollama';
     model: string;
     apiKey?: string;
+    url?: string;
     dimensions: number;
   };
   graph: {

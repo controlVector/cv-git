@@ -43,6 +43,7 @@ export function doctorCommand(): Command {
       results.push(await checkCredentials());
       results.push(await checkFalkorDB());
       results.push(await checkQdrant());
+      results.push(await checkOllama());
       results.push(await checkDiskSpace());
       results.push(await checkNetworkConnectivity());
 
@@ -345,6 +346,103 @@ async function checkQdrant(): Promise<DiagnosticResult> {
       status: 'warn',
       message: 'Not available',
       fix: 'Start Qdrant: docker run -d --name qdrant -p 6333:6333 qdrant/qdrant',
+    };
+  }
+}
+
+/**
+ * Check Ollama (local embeddings)
+ */
+async function checkOllama(): Promise<DiagnosticResult> {
+  try {
+    // First check if any Ollama (system or container) is responding
+    try {
+      const response = await fetch('http://127.0.0.1:11434/api/tags', {
+        signal: AbortSignal.timeout(5000)
+      });
+      if (response.ok) {
+        const data = await response.json() as { models?: Array<{ name: string }> };
+        const models = data.models || [];
+        const hasEmbeddingModel = models.some(m => m.name.includes('nomic-embed'));
+
+        // Check if this is the Docker container or system install
+        let source = 'system';
+        try {
+          const { stdout } = await execAsync('docker ps --filter name=cv-git-ollama --format "{{.Status}}"');
+          if (stdout.trim().toLowerCase().startsWith('up')) {
+            source = 'Docker';
+          }
+        } catch {
+          // Not Docker, must be system
+        }
+
+        if (hasEmbeddingModel) {
+          return {
+            name: 'Ollama (Local Embeddings)',
+            status: 'pass',
+            message: `Running (${source}) with embedding model ready`,
+          };
+        } else {
+          return {
+            name: 'Ollama (Local Embeddings)',
+            status: 'warn',
+            message: `Running (${source}) but embedding model not installed`,
+            fix: 'Run: cv sync (will auto-download model)',
+          };
+        }
+      }
+    } catch {
+      // Ollama not responding, continue to check container/docker
+    }
+
+    // Check if container exists but not running
+    try {
+      const { stdout } = await execAsync('docker ps -a --filter name=cv-git-ollama --format "{{.Status}}"');
+      if (stdout.trim()) {
+        // Container exists
+        if (stdout.trim().toLowerCase().startsWith('up')) {
+          return {
+            name: 'Ollama (Local Embeddings)',
+            status: 'warn',
+            message: 'Container running but API not responding',
+            fix: 'Check Ollama logs: docker logs cv-git-ollama',
+          };
+        } else {
+          return {
+            name: 'Ollama (Local Embeddings)',
+            status: 'warn',
+            message: 'Container stopped',
+            fix: 'Run: docker start cv-git-ollama',
+          };
+        }
+      }
+    } catch {
+      // Docker not available or command failed
+    }
+
+    // Container not running, check if Docker is available
+    try {
+      await execAsync('docker info');
+      return {
+        name: 'Ollama (Local Embeddings)',
+        status: 'warn',
+        message: 'Not running (Docker available)',
+        fix: 'Run: cv sync (will auto-start Ollama)',
+      };
+    } catch {
+      return {
+        name: 'Ollama (Local Embeddings)',
+        status: 'warn',
+        message: 'Docker not available',
+        fix: 'Install Docker or use cloud embeddings: cv config set embedding.provider openrouter',
+      };
+    }
+  } catch (error: any) {
+    return {
+      name: 'Ollama (Local Embeddings)',
+      status: 'warn',
+      message: 'Not available',
+      fix: 'Install Docker to enable local embeddings, or use: cv auth setup openrouter',
     };
   }
 }
