@@ -394,14 +394,24 @@ export class GraphManager {
       // Order matters: backslashes must be escaped first
       const escaped = value
         .replace(/\\/g, '\\\\')     // Backslashes (must be first)
-        .replace(/'/g, "\\'")       // Single quotes
-        .replace(/"/g, '\\"')       // Double quotes
+        .replace(/'/g, "\\'")       // ASCII single quote (U+0027)
+        .replace(/'/g, "\\'")       // Unicode right single quote (U+2019)
+        .replace(/'/g, "\\'")       // Unicode left single quote (U+2018)
+        .replace(/ʼ/g, "\\'")       // Modifier letter apostrophe (U+02BC)
+        .replace(/"/g, '\\"')       // ASCII double quote
+        .replace(/"/g, '\\"')       // Unicode left double quote (U+201C)
+        .replace(/"/g, '\\"')       // Unicode right double quote (U+201D)
         .replace(/\n/g, '\\n')      // Newlines
         .replace(/\r/g, '\\r')      // Carriage returns
         .replace(/\t/g, '\\t')      // Tabs
         .replace(/\0/g, '')         // Null bytes (remove completely)
         .replace(/\u2028/g, '\\n')  // Unicode line separator
-        .replace(/\u2029/g, '\\n'); // Unicode paragraph separator
+        .replace(/\u2029/g, '\\n')  // Unicode paragraph separator
+        .replace(/\u0008/g, '')     // Backspace (remove)
+        .replace(/\u000B/g, '')     // Vertical tab (remove)
+        .replace(/\u000C/g, '')     // Form feed (remove)
+        .replace(/\u0085/g, '\\n')  // Next line (NEL)
+        .replace(/[\x00-\x1F\x7F]/g, ''); // Remove other control characters
       return `'${escaped}'`;
     }
     if (typeof value === 'number' || typeof value === 'boolean') {

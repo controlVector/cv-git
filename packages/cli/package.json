@@ -1,6 +1,6 @@
 {
   "name": "@controlvector/cv-git",
-  "version": "0.4.12",
+  "version": "0.4.13",
   "description": "AI-Native Paired-Programming + Knowledge-Graph Version Control Layer",
   "type": "module",
   "bin": {
