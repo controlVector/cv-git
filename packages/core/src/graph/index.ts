@@ -394,13 +394,30 @@ export class GraphManager {
       // Order matters: backslashes must be escaped first
       const escaped = value
         .replace(/\\/g, '\\\\')     // Backslashes (must be first)
+        // Single quote variants (all to escaped ASCII single quote)
         .replace(/'/g, "\\'")       // ASCII single quote (U+0027)
-        .replace(/'/g, "\\'")       // Unicode right single quote (U+2019)
         .replace(/'/g, "\\'")       // Unicode left single quote (U+2018)
+        .replace(/'/g, "\\'")       // Unicode right single quote (U+2019)
+        .replace(/‚/g, "\\'")       // Single low-9 quotation mark (U+201A)
+        .replace(/‛/g, "\\'")       // Single high-reversed-9 quotation mark (U+201B)
         .replace(/ʼ/g, "\\'")       // Modifier letter apostrophe (U+02BC)
-        .replace(/"/g, '\\"')       // ASCII double quote
+        .replace(/ʻ/g, "\\'")       // Modifier letter turned comma (U+02BB)
+        .replace(/ˈ/g, "\\'")       // Modifier letter vertical line (U+02C8)
+        .replace(/ˊ/g, "\\'")       // Modifier letter acute accent (U+02CA)
+        .replace(/ˋ/g, "\\'")       // Modifier letter grave accent (U+02CB)
+        .replace(/´/g, "\\'")       // Acute accent (U+00B4)
+        .replace(/`/g, "\\'")       // Grave accent / backtick (U+0060)
+        .replace(/′/g, "\\'")       // Prime (U+2032)
+        .replace(/‵/g, "\\'")       // Reversed prime (U+2035)
+        // Double quote variants (all to escaped ASCII double quote)
+        .replace(/"/g, '\\"')       // ASCII double quote (U+0022)
         .replace(/"/g, '\\"')       // Unicode left double quote (U+201C)
         .replace(/"/g, '\\"')       // Unicode right double quote (U+201D)
+        .replace(/„/g, '\\"')       // Double low-9 quotation mark (U+201E)
+        .replace(/‟/g, '\\"')       // Double high-reversed-9 quotation mark (U+201F)
+        .replace(/″/g, '\\"')       // Double prime (U+2033)
+        .replace(/‶/g, '\\"')       // Reversed double prime (U+2036)
+        // Whitespace and control characters
         .replace(/\n/g, '\\n')      // Newlines
         .replace(/\r/g, '\\r')      // Carriage returns
         .replace(/\t/g, '\\t')      // Tabs
