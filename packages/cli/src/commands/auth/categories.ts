@@ -108,6 +108,21 @@ export const AUTH_CATEGORIES: AuthCategory[] = [
       },
     ],
   },
+  {
+    id: 'publish',
+    name: 'Package Registries',
+    description: 'Package publishing (npm, PyPI, crates.io)',
+    providers: [
+      {
+        id: 'npm',
+        name: 'npm',
+        description: 'Node.js package registry token',
+      },
+      // Future providers:
+      // { id: 'pypi', name: 'PyPI', description: 'Python Package Index' },
+      // { id: 'crates', name: 'crates.io', description: 'Rust package registry' },
+    ],
+  },
 ];
 
 /**

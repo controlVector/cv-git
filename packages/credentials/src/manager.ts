@@ -35,6 +35,8 @@ import {
   DigitalOceanTokenCredential,
   DigitalOceanSpacesCredential,
   DigitalOceanAppCredential,
+  // Package registry/publish providers
+  NPMCredential,
 } from './types/index.js';
 
 export interface CredentialManagerOptions {
@@ -325,6 +327,26 @@ export class CredentialManager {
   }
 
   // ============================================================================
+  // Package Registry/Publish Credentials
+  // ============================================================================
+
+  /**
+   * Get npm token
+   */
+  async getNPMToken(): Promise<string | null> {
+    const cred = await this.retrieve(CredentialType.NPM_TOKEN);
+    return cred ? (cred as NPMCredential).token : null;
+  }
+
+  /**
+   * Get full npm credential
+   */
+  async getNPMCredential(): Promise<NPMCredential | null> {
+    const cred = await this.retrieve(CredentialType.NPM_TOKEN);
+    return cred as NPMCredential | null;
+  }
+
+  // ============================================================================
   // Migration from Environment Variables
   // ============================================================================
 
@@ -401,6 +423,17 @@ export class CredentialManager {
         type: CredentialType.DIGITALOCEAN_SPACES,
         name: 'default',
         pairedEnvVar: 'SPACES_SECRET_ACCESS_KEY',
+      },
+      // Package registry/publish
+      {
+        envVar: 'NPM_TOKEN',
+        type: CredentialType.NPM_TOKEN,
+        name: 'default',
+      },
+      {
+        envVar: 'NPM_AUTH_TOKEN',
+        type: CredentialType.NPM_TOKEN,
+        name: 'default',
       },
     ];
 

@@ -19,6 +19,8 @@ export {
   type DigitalOceanTokenCredential,
   type DigitalOceanSpacesCredential,
   type DigitalOceanAppCredential,
+  // Package registry/publish providers
+  type NPMCredential,
   // Union and utility types
   type Credential,
   type CreateCredentialInput,

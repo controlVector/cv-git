@@ -44,6 +44,7 @@ import {
   testDigitalOcean,
   testDigitalOceanSpaces,
 } from './auth/devops/digitalocean.js';
+import { setupNPM, testNPM, configureNPMCLI } from './auth/publish/npm.js';
 import { addGlobalOptions } from '../utils/output.js';
 
 export function authCommand(): Command {
@@ -302,6 +303,11 @@ async function runSetup(
       await setupDigitalOcean(credentials, autoBrowser);
       return true;
 
+    // Package registry/publish providers
+    case 'npm':
+      await setupNPM(credentials, autoBrowser);
+      return true;
+
     default:
       return false;
   }
@@ -439,6 +445,12 @@ async function runTest(service: string, credentials: CredentialManager): Promise
         break;
       }
 
+      case 'npm': {
+        spinner.stop();
+        await testNPM(credentials);
+        break;
+      }
+
       default:
         spinner.fail(chalk.red(`Unknown service: ${service}`));
         console.log(chalk.gray('\nAvailable services:'));
@@ -446,6 +458,7 @@ async function runTest(service: string, credentials: CredentialManager): Promise
         console.log(chalk.gray('  AI: anthropic, openai, openrouter'));
         console.log(chalk.gray('  DNS: cloudflare'));
         console.log(chalk.gray('  DevOps: aws, digitalocean, digitalocean-spaces'));
+        console.log(chalk.gray('  Publish: npm'));
     }
   } catch (error: any) {
     spinner.fail(chalk.red(`Authentication test failed: ${error.message}`));

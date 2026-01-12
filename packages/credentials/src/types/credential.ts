@@ -24,6 +24,10 @@ export enum CredentialType {
   DIGITALOCEAN_SPACES = 'digitalocean_spaces',
   DIGITALOCEAN_APP = 'digitalocean_app',
 
+  // Package registry/publish providers
+  NPM_TOKEN = 'npm_token',
+  // Future: PYPI_TOKEN, CRATES_IO_TOKEN, etc.
+
   // Generic credentials
   API_KEY = 'api_key',
 }
@@ -248,6 +252,32 @@ export interface DigitalOceanAppCredential extends BaseCredential {
   appId?: string;
 }
 
+// =============================================================================
+// Package Registry/Publish Credentials
+// =============================================================================
+
+/**
+ * npm registry token credential
+ */
+export interface NPMCredential extends BaseCredential {
+  type: CredentialType.NPM_TOKEN;
+
+  /** npm auth token (automation or publish token) */
+  token: string;
+
+  /** npm registry URL (default: https://registry.npmjs.org/) */
+  registry?: string;
+
+  /** Username associated with the token */
+  username?: string;
+
+  /** Email associated with the token */
+  email?: string;
+
+  /** Token type: automation (CI/CD) or publish (interactive) */
+  tokenType?: 'automation' | 'publish' | 'granular';
+}
+
 /**
  * Union type of all credential types
  */
@@ -264,7 +294,9 @@ export type Credential =
   | AWSCredential
   | DigitalOceanTokenCredential
   | DigitalOceanSpacesCredential
-  | DigitalOceanAppCredential;
+  | DigitalOceanAppCredential
+  // Package registry/publish providers
+  | NPMCredential;
 
 /**
  * Credential creation input (without id, createdAt, lastUsed)
