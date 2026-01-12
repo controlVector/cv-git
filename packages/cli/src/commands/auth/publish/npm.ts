@@ -95,7 +95,9 @@ export async function setupNPM(
   console.log(chalk.bold.cyan('npm Authentication'));
   console.log(chalk.bold('──────────────────────────────────────────\n'));
 
-  const url = 'https://www.npmjs.com/settings/~/tokens/granular-access-tokens/new';
+  // Note: npmjs.com doesn't support ~ for current user, so we link to the main settings
+  // The user will need to navigate to Access Tokens from there
+  const url = 'https://www.npmjs.com/settings';
 
   if (autoBrowser) {
     console.log(chalk.cyan('Opening browser to create access token...'));
@@ -107,7 +109,8 @@ export async function setupNPM(
   console.log();
   console.log(chalk.yellow('Token Setup Guide:'));
   console.log(chalk.gray('  1. Sign in to npmjs.com'));
-  console.log(chalk.gray('  2. Go to Access Tokens settings'));
+  console.log(chalk.gray('  2. Click your profile icon → Access Tokens'));
+  console.log(chalk.gray('     (or go to: npmjs.com/settings/YOUR_USERNAME/tokens)'));
   console.log(chalk.gray('  3. Click "Generate New Token"'));
   console.log(chalk.gray('  4. Choose token type:'));
   console.log(chalk.gray('     - ') + chalk.white('Granular Access Token') + chalk.gray(' (recommended)'));
