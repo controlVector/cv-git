@@ -13,7 +13,7 @@ import {
   findRepoRoot,
   getCVDir
 } from '@cv-git/shared';
-import { configManager } from '@cv-git/core';
+import { configManager, SyncReport } from '@cv-git/core';
 import { addGlobalOptions } from '../utils/output.js';
 
 interface BugReportData {
@@ -43,6 +43,7 @@ interface BugReportData {
     vectorEnabled: boolean;
   };
   recentLogs?: string[];
+  syncReport?: SyncReport;
   errorContext?: string;
   userDescription?: string;
 }
@@ -184,6 +185,23 @@ async function collectRecentLogs(repoRoot: string | null): Promise<string[]> {
 }
 
 /**
+ * Read the most recent sync report from .cv directory
+ */
+async function collectSyncReport(repoRoot: string | null): Promise<SyncReport | undefined> {
+  if (!repoRoot) return undefined;
+
+  const cvDir = getCVDir(repoRoot);
+  const reportFile = path.join(cvDir, 'sync-report.json');
+
+  try {
+    const content = await fs.readFile(reportFile, 'utf8');
+    return JSON.parse(content) as SyncReport;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Sanitize log lines to remove sensitive info
  */
 function sanitizeLine(line: string): string {
@@ -250,6 +268,28 @@ function formatReport(data: BugReportData): string {
     lines.push(data.userDescription);
   }
 
+  if (data.syncReport) {
+    lines.push('');
+    lines.push('## Last Sync Report');
+    lines.push(`- Timestamp: ${new Date(data.syncReport.timestamp).toISOString()}`);
+    lines.push(`- Type: ${data.syncReport.type}`);
+    lines.push(`- Success: ${data.syncReport.success}`);
+    lines.push(`- Duration: ${data.syncReport.duration}s`);
+    lines.push(`- Files Processed: ${data.syncReport.stats.filesProcessed}`);
+    lines.push(`- Files Failed: ${data.syncReport.stats.filesFailed}`);
+
+    if (data.syncReport.errors.length > 0) {
+      lines.push('');
+      lines.push('### Sync Errors (last 20)');
+      lines.push('```');
+      const recentErrors = data.syncReport.errors.slice(-20);
+      for (const err of recentErrors) {
+        lines.push(`[${err.phase}] ${err.file}: ${err.error}`);
+      }
+      lines.push('```');
+    }
+  }
+
   if (data.recentLogs && data.recentLogs.length > 0) {
     lines.push('');
     lines.push('## Recent Logs');
@@ -302,6 +342,7 @@ export function bugreportCommand(): Command {
       services: await collectServiceInfo(),
       config: await collectConfigInfo(repoRoot),
       recentLogs: await collectRecentLogs(repoRoot),
+      syncReport: await collectSyncReport(repoRoot),
       errorContext: options.error,
       userDescription: options.message
     };

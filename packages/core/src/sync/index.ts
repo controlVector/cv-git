@@ -50,6 +50,38 @@ export interface DocumentSyncResult {
   errors: string[];
 }
 
+/**
+ * Sync error details for reporting
+ */
+export interface SyncError {
+  file: string;
+  error: string;
+  phase: 'parse' | 'graph' | 'vector' | 'commit' | 'document';
+  timestamp: number;
+}
+
+/**
+ * Sync report saved to .cv/sync-report.json
+ */
+export interface SyncReport {
+  timestamp: number;
+  duration: number;
+  type: 'full' | 'delta' | 'incremental';
+  success: boolean;
+  stats: {
+    filesProcessed: number;
+    filesFailed: number;
+    symbolsCreated: number;
+    vectorsCreated: number;
+  };
+  errors: SyncError[];
+  systemInfo?: {
+    nodeVersion: string;
+    platform: string;
+    cvVersion: string;
+  };
+}
+
 export class SyncEngine {
   private delta: DeltaSyncManager;
 
@@ -64,11 +96,67 @@ export class SyncEngine {
   }
 
   /**
+   * Save sync report to .cv/sync-report.json
+   * This is used for error tracking and bug reports
+   */
+  async saveSyncReport(report: SyncReport): Promise<void> {
+    try {
+      const cvDir = getCVDir(this.repoRoot);
+      const reportPath = path.join(cvDir, 'sync-report.json');
+
+      // Ensure .cv directory exists
+      await fs.mkdir(cvDir, { recursive: true });
+
+      // Save the report
+      await fs.writeFile(reportPath, JSON.stringify(report, null, 2));
+
+      // If there were errors, also append to a rolling error log
+      if (report.errors.length > 0) {
+        const errorLogPath = path.join(cvDir, 'sync-errors.log');
+        const errorLogEntry = `\n--- ${new Date(report.timestamp).toISOString()} (${report.type} sync) ---\n` +
+          report.errors.map(e => `[${e.phase}] ${e.file}: ${e.error}`).join('\n') + '\n';
+
+        // Append to error log (create if doesn't exist)
+        await fs.appendFile(errorLogPath, errorLogEntry);
+
+        // Trim error log if it gets too large (keep last 100KB)
+        try {
+          const stats = await fs.stat(errorLogPath);
+          if (stats.size > 100 * 1024) {
+            const content = await fs.readFile(errorLogPath, 'utf-8');
+            const trimmed = content.slice(-80 * 1024); // Keep last 80KB
+            await fs.writeFile(errorLogPath, trimmed);
+          }
+        } catch {
+          // Ignore trim errors
+        }
+      }
+    } catch (error: any) {
+      // Don't fail sync if report saving fails
+      console.warn(`Failed to save sync report: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get the most recent sync report
+   */
+  async getSyncReport(): Promise<SyncReport | null> {
+    try {
+      const cvDir = getCVDir(this.repoRoot);
+      const reportPath = path.join(cvDir, 'sync-report.json');
+      const content = await fs.readFile(reportPath, 'utf-8');
+      return JSON.parse(content);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Perform full repository sync
    */
   async fullSync(options: SyncOptions = {}): Promise<SyncState> {
     const startTime = Date.now();
-    const errors: string[] = [];
+    const syncErrors: SyncError[] = [];
 
     console.log('Starting full sync...');
 
@@ -109,8 +197,12 @@ export class SyncEngine {
           if (result.status === 'fulfilled') {
             parsedFiles.push(result.value);
           } else {
-            errors.push(`Failed to parse ${file}: ${result.reason?.message || 'Unknown error'}`);
-            console.error(`Error parsing ${file}:`, result.reason?.message);
+            syncErrors.push({
+              file,
+              error: result.reason?.message || 'Unknown error',
+              phase: 'parse',
+              timestamp: Date.now()
+            });
           }
         }
 
@@ -159,11 +251,32 @@ export class SyncEngine {
         vectorCount,
         languages: this.countLanguages(parsedFiles),
         syncDuration: (Date.now() - startTime) / 1000,
-        errors
+        errors: syncErrors.map(e => `${e.file}: ${e.error}`)
       };
 
       // 8. Save sync state
       await this.saveSyncState(syncState);
+
+      // 9. Save sync report for error tracking
+      const syncReport: SyncReport = {
+        timestamp: Date.now(),
+        duration: syncState.syncDuration ?? 0,
+        type: 'full',
+        success: syncErrors.length === 0,
+        stats: {
+          filesProcessed: parsedFiles.length,
+          filesFailed: syncErrors.length,
+          symbolsCreated: stats.symbolCount,
+          vectorsCreated: vectorCount
+        },
+        errors: syncErrors,
+        systemInfo: {
+          nodeVersion: process.version,
+          platform: process.platform,
+          cvVersion: '0.4.17'
+        }
+      };
+      await this.saveSyncReport(syncReport);
 
       console.log(`Sync completed in ${syncState.syncDuration}s`);
       console.log(`- Files: ${syncState.fileCount}`);
@@ -171,6 +284,9 @@ export class SyncEngine {
       console.log(`- Relationships: ${syncState.edgeCount}`);
       if (vectorCount > 0) {
         console.log(`- Vectors: ${vectorCount}`);
+      }
+      if (syncErrors.length > 0) {
+        console.log(`- Parse errors: ${syncErrors.length} (see .cv/sync-report.json for details)`);
       }
 
       return syncState;
@@ -269,7 +385,7 @@ export class SyncEngine {
    */
   async deltaSync(options: SyncOptions = {}): Promise<SyncState & { delta: SyncDelta }> {
     const startTime = Date.now();
-    const errors: string[] = [];
+    const syncErrors: SyncError[] = [];
 
     console.log('Starting delta sync...');
 
@@ -398,8 +514,12 @@ export class SyncEngine {
           const parsed = await this.parseFile(file);
           parsedFiles.push(parsed);
         } catch (error: any) {
-          errors.push(`Failed to parse ${file}: ${error.message}`);
-          console.error(`Error parsing ${file}:`, error.message);
+          syncErrors.push({
+            file,
+            error: error.message,
+            phase: 'parse',
+            timestamp: Date.now()
+          });
         }
       }
 
@@ -423,7 +543,12 @@ export class SyncEngine {
           try {
             await this.graph.deleteFileNode(file);
           } catch (error: any) {
-            errors.push(`Failed to delete ${file}: ${error.message}`);
+            syncErrors.push({
+              file,
+              error: error.message,
+              phase: 'graph',
+              timestamp: Date.now()
+            });
           }
         }
 
@@ -467,16 +592,40 @@ export class SyncEngine {
         vectorCount,
         languages: this.countLanguages(parsedFiles),
         syncDuration: (Date.now() - startTime) / 1000,
-        errors,
+        errors: syncErrors.map(e => `${e.file}: ${e.error}`),
         delta
       };
 
       await this.saveSyncState(syncState);
 
+      // Save sync report for error tracking
+      const syncReport: SyncReport = {
+        timestamp: Date.now(),
+        duration: syncState.syncDuration ?? 0,
+        type: 'delta',
+        success: syncErrors.length === 0,
+        stats: {
+          filesProcessed: parsedFiles.length,
+          filesFailed: syncErrors.length,
+          symbolsCreated: stats.symbolCount,
+          vectorsCreated: vectorCount
+        },
+        errors: syncErrors,
+        systemInfo: {
+          nodeVersion: process.version,
+          platform: process.platform,
+          cvVersion: '0.4.17'
+        }
+      };
+      await this.saveSyncReport(syncReport);
+
       console.log(`Delta sync completed in ${syncState.syncDuration}s`);
       console.log(`- Added: ${delta.added.length}`);
       console.log(`- Modified: ${delta.modified.length}`);
       console.log(`- Deleted: ${delta.deleted.length}`);
+      if (syncErrors.length > 0) {
+        console.log(`- Parse errors: ${syncErrors.length} (see .cv/sync-report.json for details)`);
+      }
 
       return syncState;
 
