@@ -63,7 +63,7 @@ const program = new Command();
 program
   .name('cv')
   .description('AI-Native Version Control with Knowledge Graph & Secure Credentials')
-  .version('0.4.14');
+  .version('0.4.16');
 
 // Add commands
 program.addCommand(configCommand());        // Configuration management
