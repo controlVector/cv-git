@@ -311,3 +311,24 @@ Examples:
 - `packages/cli/src/commands/git.ts` - Remove shell:true
 - `packages/mcp-server/src/index.ts` - Add resources, subscriptions
 - `packages/mcp-server/src/tools/*.ts` - Enhanced descriptions
+
+---
+
+## Future Features (Post v0.5)
+
+### Multilingual Code Comment Normalization
+**Design Doc**: [FEATURE-i18n-comments.md](./FEATURE-i18n-comments.md)
+
+Addresses the three-way language barrier in modern development:
+1. **AI-Human**: AI generates comments in various languages
+2. **Human-Human**: International teams write in native languages
+3. **Mixed Sources**: Codebases accumulate multilingual comments
+
+Key capabilities:
+- Per-user language preferences for viewing/writing
+- Automatic language detection and storage
+- On-demand translation with caching
+- Cross-language semantic search
+- Source language preserved in knowledge graph
+
+See design doc for full technical specification.
