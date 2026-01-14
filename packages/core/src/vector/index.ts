@@ -16,11 +16,13 @@ import {
 } from '@cv-git/shared';
 import { chunkArray } from '@cv-git/shared';
 import { EmbeddingCache, createEmbeddingCache, CacheStats } from './embedding-cache.js';
+import { getVectorCollectionName } from '../storage/repo-id.js';
 
 export interface VectorCollections {
   codeChunks: string;
   docstrings: string;
   commits: string;
+  documentChunks: string;
 }
 
 // Embedding model configurations with their vector dimensions
@@ -63,11 +65,13 @@ const OLLAMA_MODEL_ORDER = [
 export interface VectorManagerOptions {
   /** Qdrant URL */
   url: string;
+  /** Repository ID - when provided, uses isolated collections {repoId}_{collection} */
+  repoId?: string;
   /** OpenRouter API key (preferred for embeddings) */
   openrouterApiKey?: string;
   /** OpenAI API key (fallback) */
   openaiApiKey?: string;
-  /** Collection names */
+  /** Collection names (overrides repoId-based naming if provided) */
   collections?: Partial<VectorCollections>;
   /** Embedding model to use */
   embeddingModel?: string;
@@ -98,6 +102,7 @@ export class VectorManager {
   private cache: EmbeddingCache | null = null;
   private cacheEnabled: boolean = false;
   private cacheDir: string;
+  private repoId?: string;
 
   constructor(options: VectorManagerOptions);
   /** @deprecated Use options object instead */
@@ -124,6 +129,7 @@ export class VectorManager {
     }
 
     this.url = opts.url;
+    this.repoId = opts.repoId;
     this.ollamaUrl = opts.ollamaUrl || process.env.OLLAMA_URL || process.env.CV_OLLAMA_URL || 'http://127.0.0.1:11434';
 
     // If Ollama URL is explicitly provided, don't auto-detect cloud API keys from env
@@ -132,11 +138,25 @@ export class VectorManager {
     this.openaiApiKey = useOllama ? undefined : opts.openaiApiKey;
     this.openrouterApiKey = useOllama ? undefined : (opts.openrouterApiKey || process.env.OPENROUTER_API_KEY);
 
-    this.collections = {
-      codeChunks: opts.collections?.codeChunks || 'code_chunks',
-      docstrings: opts.collections?.docstrings || 'docstrings',
-      commits: opts.collections?.commits || 'commits'
-    };
+    // Collection naming: if repoId provided, use repo-specific names for isolation
+    // Otherwise use explicit collections or defaults
+    if (opts.repoId && !opts.collections) {
+      // Use repo-specific collection names for isolation
+      this.collections = {
+        codeChunks: getVectorCollectionName(opts.repoId, 'code_chunks'),
+        docstrings: getVectorCollectionName(opts.repoId, 'docstrings'),
+        commits: getVectorCollectionName(opts.repoId, 'commits'),
+        documentChunks: getVectorCollectionName(opts.repoId, 'document_chunks')
+      };
+    } else {
+      // Use explicit collections or defaults (shared mode)
+      this.collections = {
+        codeChunks: opts.collections?.codeChunks || 'code_chunks',
+        docstrings: opts.collections?.docstrings || 'docstrings',
+        commits: opts.collections?.commits || 'commits',
+        documentChunks: opts.collections?.documentChunks || 'document_chunks'
+      };
+    }
 
     // Cache settings
     this.cacheEnabled = opts.enableCache ?? true;  // Enabled by default
@@ -497,6 +517,9 @@ export class VectorManager {
 
     // Create commits collection
     await this.ensureCollection(this.collections.commits, this.vectorSize);
+
+    // Create document chunks collection
+    await this.ensureCollection(this.collections.documentChunks, this.vectorSize);
   }
 
   /**
@@ -1326,6 +1349,20 @@ export class VectorManager {
    */
   isConnected(): boolean {
     return this.connected;
+  }
+
+  /**
+   * Get the repository ID (if using isolated mode)
+   */
+  getRepoId(): string | undefined {
+    return this.repoId;
+  }
+
+  /**
+   * Get the current collection names
+   */
+  getCollectionNames(): VectorCollections {
+    return { ...this.collections };
   }
 
   /**

@@ -20,6 +20,7 @@ import {
   TouchesEdge
 } from '@cv-git/shared';
 import { compareVersions } from '../storage/manifest.js';
+import { getGraphDatabaseName } from '../storage/repo-id.js';
 
 // Schema version for graph migrations
 const GRAPH_SCHEMA_VERSION = '1.0.0';
@@ -34,17 +35,58 @@ interface SchemaVersionResult {
   to?: string;
 }
 
+/**
+ * Options for creating a GraphManager instance
+ */
+export interface GraphManagerOptions {
+  /** FalkorDB/Redis URL */
+  url: string;
+  /** Explicit database name (for workspace mode or legacy) */
+  database?: string;
+  /** Repository ID - when provided, uses isolated database cv_{repoId} */
+  repoId?: string;
+}
+
 export class GraphManager {
   private client: RedisClientType | null = null;
   private graphName: string;
   private connected: boolean = false;
   private instanceId: string;
+  private url: string;
+  private repoId?: string;
 
-  constructor(private url: string, private database: string = 'cv-git') {
-    this.graphName = database;
+  /**
+   * Create a GraphManager instance
+   *
+   * @param urlOrOptions - Either a URL string (legacy) or GraphManagerOptions
+   * @param database - Database name (legacy, only used if first param is string)
+   */
+  constructor(urlOrOptions: string | GraphManagerOptions, database?: string) {
+    // Support both legacy signature and new options object
+    if (typeof urlOrOptions === 'string') {
+      // Legacy: constructor(url, database)
+      this.url = urlOrOptions;
+      this.graphName = database || 'cv-git';
+    } else {
+      // New: constructor(options)
+      this.url = urlOrOptions.url;
+      this.repoId = urlOrOptions.repoId;
+
+      if (urlOrOptions.repoId) {
+        // Use repo-specific database for isolation
+        this.graphName = getGraphDatabaseName(urlOrOptions.repoId);
+      } else if (urlOrOptions.database) {
+        // Explicit database name (workspace mode)
+        this.graphName = urlOrOptions.database;
+      } else {
+        // Default fallback
+        this.graphName = 'cv-git';
+      }
+    }
+
     this.instanceId = Math.random().toString(36).substring(7);
     if (process.env.CV_DEBUG) {
-      console.log(`[GraphManager] Created instance ${this.instanceId}`);
+      console.log(`[GraphManager] Created instance ${this.instanceId} with database: ${this.graphName}`);
     }
   }
 
@@ -1322,11 +1364,28 @@ export class GraphManager {
   getInstanceId(): string {
     return this.instanceId;
   }
+
+  /**
+   * Get the current graph database name
+   */
+  getDatabaseName(): string {
+    return this.graphName;
+  }
+
+  /**
+   * Get the repository ID (if using isolated mode)
+   */
+  getRepoId(): string | undefined {
+    return this.repoId;
+  }
 }
 
 /**
  * Create a GraphManager instance
+ *
+ * @param urlOrOptions - Either a URL string (legacy) or GraphManagerOptions
+ * @param database - Database name (legacy, only used if first param is string)
  */
-export function createGraphManager(url: string, database: string = 'cv-git'): GraphManager {
-  return new GraphManager(url, database);
+export function createGraphManager(urlOrOptions: string | GraphManagerOptions, database?: string): GraphManager {
+  return new GraphManager(urlOrOptions, database);
 }

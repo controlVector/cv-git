@@ -14,7 +14,9 @@ import {
   createGraphManager,
   createVectorManager,
   createSyncEngine,
-  exportToStorage
+  exportToStorage,
+  generateRepoId,
+  readManifest
 } from '@cv-git/core';
 import {
   findRepoRoot,
@@ -80,6 +82,12 @@ export function syncCommand(): Command {
         // Initialize components
         spinner = output.spinner('Initializing components...').start();
 
+        // Get repository ID for database isolation
+        const cvDir = getCVDir(repoRoot);
+        const manifest = await readManifest(cvDir);
+        const repoId = manifest?.repository?.id || generateRepoId(repoRoot);
+        output.debug(`Repository ID: ${repoId}`);
+
         // Git manager
         const git = createGitManager(repoRoot);
         if (!(await git.isGitRepo())) {
@@ -111,10 +119,11 @@ export function syncCommand(): Command {
           await configManager.update({ graph: { ...config.graph, url: graphUrl } });
         }
 
-        const graph = createGraphManager(graphUrl, config.graph.database);
-        spinner.text = 'Connecting to FalkorDB...';
+        // Create graph manager with repo-specific database for isolation
+        const graph = createGraphManager({ url: graphUrl, repoId });
+        spinner.text = `Connecting to FalkorDB (database: ${graph.getDatabaseName()})...`;
         await graph.connect();
-        spinner.succeed('Connected to FalkorDB');
+        spinner.succeed(`Connected to FalkorDB: ${graph.getDatabaseName()}`);
 
         // Vector manager - check embedding provider preference
         let vector = undefined;
@@ -232,16 +241,21 @@ export function syncCommand(): Command {
           if (qdrantUrl) {
             try {
               spinner = output.spinner('Connecting to Qdrant...').start();
+              // Create vector manager with repo-specific collections for isolation
               vector = createVectorManager({
                 url: qdrantUrl,
+                repoId,  // Use repo-specific collections for isolation
                 ollamaUrl,
                 openrouterApiKey: ollamaUrl ? undefined : openrouterApiKey,
                 openaiApiKey: ollamaUrl ? undefined : openaiApiKey,
-                collections: config.vector.collections,
                 cacheDir: path.join(repoRoot, '.cv', 'embeddings'),  // Content-addressed cache
                 vectorSize: embeddingProvider === 'ollama' ? 768 : 1536,  // nomic-embed-text is 768 dims
               });
               await vector.connect();
+
+              // Log collection names being used
+              const collections = vector.getCollectionNames();
+              output.debug(`Qdrant collections: ${collections.codeChunks}, ${collections.docstrings}, ${collections.commits}`);
 
               // Log cache status
               if (vector.isCacheEnabled()) {
@@ -251,7 +265,7 @@ export function syncCommand(): Command {
                 }
               }
 
-              spinner.succeed('Connected to Qdrant');
+              spinner.succeed(`Connected to Qdrant (collections: ${repoId}_*)`);
             } catch (error: any) {
               spinner.warn(`Could not connect to Qdrant: ${error.message}`);
               output.info('Continuing without vector search...');
