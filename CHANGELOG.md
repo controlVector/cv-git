@@ -2,6 +2,104 @@
 
 All notable changes to CV-Git will be documented in this file.
 
+## [0.4.23] - 2026-01-14
+
+### Added
+
+#### Repository Isolation for Multi-Repo Support
+- **GraphRAG Database Isolation** - Each repository now gets its own isolated FalkorDB and Qdrant storage
+  - FalkorDB: Databases named `cv_{repoId}` (e.g., `cv_d8cb6fc6bb1b`)
+  - Qdrant: Collections prefixed with `{repoId}_` (e.g., `abc123_code_chunks`)
+  - Prevents cross-contamination when using cv-git across multiple repositories
+  - Repository ID generated from git remote URL or path (stable, deterministic 12-char hex)
+
+#### Native Dependency Analysis (`cv deps`)
+- **`cv deps analyze`** - Detect build systems and extract dependencies for C/C++ projects
+- **`cv deps check`** - Verify system availability via pkg-config, headers, and libraries
+- **`cv deps install`** - Generate installation commands for missing dependencies
+- Supports: CMake, Meson, SCons, and Autotools build systems
+
+#### Tree-sitter Improvements
+- **Node 24+ Support** - Using `@keqingmoe/tree-sitter` fork for Node.js 24 compatibility
+- **Optional Tree-sitter** - Falls back to simple regex-based parser if tree-sitter unavailable
+- Removed 32KB file size limit by upgrading to tree-sitter 0.25.0
+
+#### Test Coverage
+- Added 42 unit tests for repository isolation feature
+- Tests cover repo-id generation, GraphManager, and VectorManager isolation
+
+### Fixed
+- **Cypher Query Parameter Corruption** - Fixed bug where `$author` corrupted `$authorEmail` in queries
+- **Unicode Quote Escaping** - Expanded Cypher string escaping for Unicode and control characters
+
+---
+
+## [0.4.20] - 2026-01-10
+
+### Added
+
+#### Ollama Local Embeddings (Default)
+- **Ollama as Default Provider** - Local embeddings using `nomic-embed-text` model
+- No API keys required for basic functionality
+- Falls back to OpenRouter/OpenAI if Ollama unavailable
+
+#### Sync Error Reporting
+- **`sync-report.json`** - Detailed sync error reports saved to `.cv/` directory
+- Helps diagnose parsing and sync failures
+
+### Fixed
+- **Node.js Version Requirements** - Documented support for Node 18-22 (not 24+)
+- **cv context Embeddings** - Fixed to use Ollama for embeddings
+
+---
+
+## [0.4.14] - 2026-01-08
+
+### Added
+
+#### Authentication Improvements
+- **npm Token Support** - New 'publish' auth category for npm registry tokens
+- **Auth Setup URLs** - Fixed npm settings URL in auth setup instructions
+
+#### Modern VCS Features
+- **`cv absorb`** - Automatically absorb uncommitted changes into relevant commits
+- **`cv undo`** - Undo last commit while preserving changes
+- **`cv stack`** - Manage stacked branches for incremental reviews
+- **`cv split`** - Split a commit into multiple smaller commits
+- **`cv smart-log`** - Enhanced git log with graph visualization
+
+#### Bug Reporting
+- **`cv bug`** - Submit bug reports with system diagnostics
+
+### Fixed
+- **Cypher String Escaping** - Enhanced escaping for Unicode and control characters
+- **Windows Build** - Removed glob patterns in esbuild externals for Windows compatibility
+
+---
+
+## [0.4.7] - 2026-01-05
+
+### Added
+
+#### Cross-Platform Support
+- **Windows Builds** - Native `.exe` executables for Windows x64
+- **macOS Universal** - Support for both Intel (x64) and Apple Silicon (ARM64)
+- **Improved Release Workflow** - Automated builds for Linux, Windows, and macOS
+
+#### Git Integration Enhancements
+- **Auto-Initialize Git** - `cv init` now automatically initializes git repository if needed
+- **Initial Commit Creation** - Creates initial commit when auto-initializing
+
+#### Auth Categories
+- New credential type system with categories (ai, platform, publish)
+- Improved CLI for credential management
+
+### Fixed
+- **Word-Boundary Regex** - Fixed Cypher parameter replacement to use word boundaries
+- **Default Model ID** - Use valid model ID in default configuration
+
+---
+
 ## [0.4.0] - 2025-12-30
 
 ### Added
@@ -204,6 +302,11 @@ All notable changes to CV-Git will be documented in this file.
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 0.4.23 | 2026-01-14 | Repository isolation, cv deps, tree-sitter improvements |
+| 0.4.20 | 2026-01-10 | Ollama local embeddings, sync error reporting |
+| 0.4.14 | 2026-01-08 | Modern VCS features, npm auth, bug reporting |
+| 0.4.7 | 2026-01-05 | Cross-platform builds, auto-init git |
+| 0.4.0 | 2025-12-30 | AI context integration, version-aware tools |
 | 0.3.0 | 2025-11-25 | AI chat, auto-sync, design-first scaffolding |
 | 0.2.0 | 2024-11-21 | Feature complete, production ready |
 | 0.1.0 | 2024-11-01 | Initial development release |

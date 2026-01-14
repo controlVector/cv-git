@@ -1,7 +1,7 @@
 # CV-Git MCP Integration Guide
 
-**Version:** 0.3.9
-**Last Updated:** 2025-12-30
+**Version:** 0.4.23
+**Last Updated:** 2026-01-14
 
 This guide explains how to integrate CV-Git with AI coding assistants like Claude Code via the Model Context Protocol (MCP).
 
@@ -16,6 +16,15 @@ CV-Git provides an MCP server that exposes the knowledge graph to AI coding assi
 - Query code relationships with `cv_graph_*` tools
 - Track code evolution with `cv_commits`, `cv_file_history`, `cv_blame`
 - Access real-time status via MCP Resources
+
+### Repository Isolation (v0.4.23+)
+
+Each repository now gets its own isolated GraphRAG storage:
+
+- **FalkorDB**: Databases named `cv_{repoId}` (e.g., `cv_d8cb6fc6bb1b`)
+- **Qdrant**: Collections prefixed with `{repoId}_` (e.g., `abc123_code_chunks`)
+
+This prevents cross-contamination when using CV-Git across multiple repositories. The repository ID is a deterministic 12-character hex string generated from the git remote URL or path.
 
 ---
 
@@ -318,6 +327,84 @@ List documents in knowledge graph.
 
 ---
 
+### PRD & Requirements Tools
+
+Track requirements, test coverage, and documentation for product requirements documents.
+
+#### cv_prd_context
+Get unified PRD context for AI including requirements, tests, and documentation.
+
+```json
+{
+  "query": "user authentication requirements",
+  "prdId": "PRD-001",
+  "includeTypes": ["requirement", "test_case", "documentation"]
+}
+```
+
+#### cv_requirement_trace
+Get full traceability for a requirement.
+
+```json
+{
+  "chunkId": "REQ-001-auth",
+  "depth": 3
+}
+```
+
+Returns: dependencies, tests, documentation, designs, and code implementations.
+
+#### cv_test_coverage
+Get test coverage metrics for a PRD.
+
+```json
+{
+  "prdId": "PRD-001"
+}
+```
+
+#### cv_doc_coverage
+Get documentation coverage metrics for a PRD.
+
+```json
+{
+  "prdId": "PRD-001"
+}
+```
+
+---
+
+### AI Commit Tools
+
+Generate intelligent commit messages using knowledge graph context.
+
+#### cv_commit_analyze
+Analyze staged git changes using AI and knowledge graph.
+
+```json
+{}
+```
+
+Returns structured info about:
+- Files changed
+- Symbols added/modified/deleted
+- Breaking changes detected
+- Suggested commit type/scope
+
+#### cv_commit_generate
+Generate a conventional commit message from staged changes.
+
+```json
+{
+  "type": "feat",
+  "scope": "auth"
+}
+```
+
+Returns a ready-to-use commit message in conventional commit format.
+
+---
+
 ### Platform Integration
 
 #### cv_pr_create
@@ -513,5 +600,5 @@ cv sync --force
 
 ---
 
-**Last Updated:** 2025-12-30
-**Version:** 0.3.9
+**Last Updated:** 2026-01-14
+**Version:** 0.4.23

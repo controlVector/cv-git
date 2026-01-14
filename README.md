@@ -35,7 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/controlVector/cv-git/main/install.s
 ### Option 3: Download .deb directly
 
 ```bash
-wget https://github.com/controlVector/cv-git/releases/latest/download/cv-git_0.4.3_amd64.deb
+wget https://github.com/controlVector/cv-git/releases/latest/download/cv-git_0.4.23_amd64.deb
 sudo dpkg -i cv-git_*.deb
 ```
 
@@ -70,19 +70,23 @@ cv explain src/auth/login.ts
 
 | Requirement | Version | Purpose |
 |-------------|---------|---------|
-| Node.js | 18+ | Runtime |
+| Node.js | 18-22 | Runtime |
 | Docker | Any | FalkorDB & Qdrant databases |
-| Anthropic API Key | - | AI features (explain, do, review) |
-| OpenAI API Key | - | Embeddings for semantic search |
+| Ollama | Optional | Local embeddings (recommended) |
+| Anthropic API Key | Optional | AI features (explain, do, review) |
+| OpenAI API Key | Optional | Embeddings (fallback if no Ollama) |
 
 ### Configure API Keys
 
 ```bash
-# Option 1: Environment variables
-export ANTHROPIC_API_KEY=sk-ant-...
-export OPENAI_API_KEY=sk-...
+# Option 1: Local embeddings with Ollama (no API key needed!)
+ollama pull nomic-embed-text
 
-# Option 2: Use cv auth (stored securely in system keychain)
+# Option 2: Environment variables (for AI features)
+export ANTHROPIC_API_KEY=sk-ant-...
+export OPENAI_API_KEY=sk-...  # Optional, Ollama is preferred
+
+# Option 3: Use cv auth (stored securely in system keychain)
 cv auth set anthropic sk-ant-...
 cv auth set openai sk-...
 ```
@@ -116,6 +120,27 @@ cv auth set openai sk-...
 - **`cv graph dead-code`** - Detect unreachable code
 - **`cv graph cycles`** - Find circular dependencies
 - **`cv graph complexity`** - Find high-complexity functions
+
+### Repository Isolation (Multi-Repo Support)
+- **Isolated GraphRAG databases** per repository
+- **No cross-contamination** between projects
+- **Deterministic repo IDs** from git remote URL or path
+
+### Modern VCS Features
+- **`cv absorb`** - Automatically absorb uncommitted changes into relevant commits
+- **`cv undo`** - Undo last commit while preserving changes
+- **`cv stack`** - Manage stacked branches for incremental reviews
+- **`cv split`** - Split a commit into multiple smaller commits
+- **`cv smart-log`** - Enhanced git log with graph visualization
+
+### Native Dependency Analysis (C/C++)
+- **`cv deps analyze`** - Detect build systems and extract dependencies
+- **`cv deps check`** - Verify system availability via pkg-config
+- **`cv deps install`** - Generate installation commands for missing dependencies
+
+### Local-First Embeddings
+- **Ollama integration** - Local embeddings with `nomic-embed-text` (no API key required)
+- **Automatic fallback** to OpenRouter/OpenAI if Ollama unavailable
 
 ---
 

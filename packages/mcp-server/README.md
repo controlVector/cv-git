@@ -6,14 +6,25 @@ Model Context Protocol (MCP) server for CV-Git, enabling AI assistants like Clau
 
 [Model Context Protocol](https://modelcontextprotocol.io/) is Anthropic's open protocol for connecting AI assistants to external tools and data sources. This MCP server exposes CV-Git's powerful code analysis capabilities as tools that Claude and other AI assistants can use.
 
-## Available Tools (23 total)
+## Available Tools (34 total)
 
-### Code Understanding (5 tools)
+### Code Understanding (7 tools)
 
 **cv_find** - Semantic code search
 - Search your codebase using natural language queries
 - Uses vector embeddings for intelligent matching
 - Returns relevant code chunks with context
+
+**cv_context** - Rich context generation
+- Generate comprehensive context for AI coding assistants
+- Includes code chunks, graph relationships, and file contents
+- Supports markdown, XML, and JSON output formats
+
+**cv_auto_context** - Proactive context retrieval (Recommended first tool)
+- Automatically assembles relevant context from the knowledge graph
+- Includes semantic code matches, call graph relationships, and documentation
+- Token budget control for efficient context usage
+- Optimized for AI system prompts
 
 **cv_explain** - AI-powered code explanation
 - Get detailed explanations of functions, classes, or concepts
@@ -125,6 +136,57 @@ Model Context Protocol (MCP) server for CV-Git, enabling AI assistants like Clau
 - View all documents in the knowledge graph
 - Filter by type (design_spec, readme, guide, etc.)
 - See archived vs active status
+
+### Version-Aware Tools (3 tools)
+
+**cv_commits** - List recent commits
+- List commits with filtering by file or author
+- Shows commit history with metadata
+- Useful for understanding code evolution
+
+**cv_file_history** - File modification history
+- Get complete history of changes to a file
+- Shows insertion/deletion counts per commit
+- Tracks who changed what and when
+
+**cv_blame** - Code attribution
+- Show which commits last modified code
+- For files, shows blame for each symbol
+- For symbols, shows recent commits affecting them
+
+### PRD & Requirements Tools (4 tools)
+
+**cv_prd_context** - PRD context for AI
+- Get unified PRD context including requirements, tests, and documentation
+- Returns comprehensive context for understanding what to build
+- Query by PRD ID or natural language
+
+**cv_requirement_trace** - Requirement traceability
+- Get full traceability for a requirement
+- Shows dependencies, tests, documentation, designs, and code implementations
+- Configurable graph traversal depth
+
+**cv_test_coverage** - Test coverage metrics
+- Get test coverage metrics for a PRD
+- Shows how many requirements have test cases
+- Helps ensure adequate testing
+
+**cv_doc_coverage** - Documentation coverage
+- Get documentation coverage metrics for a PRD
+- Shows how many requirements are documented
+- Helps ensure adequate documentation
+
+### AI Commit Tools (2 tools)
+
+**cv_commit_analyze** - Analyze staged changes
+- Analyze staged git changes using AI and knowledge graph
+- Returns structured info about files changed, symbols added/modified/deleted
+- Detects breaking changes and suggests commit type/scope
+
+**cv_commit_generate** - Generate commit message
+- Generate conventional commit messages from staged changes
+- Uses knowledge graph to detect breaking changes
+- Returns ready-to-use commit message
 
 ### System Operations (3 tools)
 
