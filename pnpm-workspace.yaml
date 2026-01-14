@@ -1,13 +1,15 @@
 packages:
   - packages/*
 
-onlyBuiltDependencies:
+ignoredBuiltDependencies:
+  - '@keqingmoe/tree-sitter'
   - esbuild
   - keytar
-  - tree-sitter
   - tree-sitter-go
   - tree-sitter-java
   - tree-sitter-javascript
   - tree-sitter-python
   - tree-sitter-rust
   - tree-sitter-typescript
+
+onlyBuiltDependencies: '["@keqingmoe/tree-sitter", "keytar"]'
