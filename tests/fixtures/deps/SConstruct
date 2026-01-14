@@ -1,0 +1,20 @@
+env = Environment()
+
+conf = Configure(env)
+if not conf.CheckLib('ssl'):
+    print('OpenSSL not found!')
+if not conf.CheckLib('crypto'):
+    print('libcrypto not found!')
+conf.CheckLibWithHeader('curl', 'curl/curl.h', 'c')
+conf.CheckHeader('openssl/ssl.h')
+conf.CheckCHeader('zlib.h')
+conf.CheckCXXHeader('boost/shared_ptr.hpp')
+conf.CheckProg('python3')
+conf.CheckProg('cmake')
+env = conf.Finish()
+
+env['LIBS'] = ['ssl', 'crypto', 'z']
+env.AppendUnique(LIBS=['boost_system', 'boost_filesystem'])
+
+env.ParseConfig('pkg-config --cflags --libs libcurl')
+env.ParseConfig('pkg-config glib-2.0')

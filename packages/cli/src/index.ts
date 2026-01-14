@@ -57,6 +57,7 @@ import { undoCommand, reflogCommand } from './commands/undo.js';
 import { stackCommand } from './commands/stack.js';
 import { splitCommand } from './commands/split.js';
 import { bugreportCommand } from './commands/bugreport.js';
+import { depsCommand } from './commands/deps.js';
 
 const program = new Command();
 
@@ -117,6 +118,7 @@ program.addCommand(createDocsCommand());    // Documentation management (cv docs
 program.addCommand(createCacheCommand());   // Embedding cache management (cv cache)
 program.addCommand(verifyCommand());        // CLI verification (cv verify)
 program.addCommand(bugreportCommand());     // Bug reporting (cv bugreport)
+program.addCommand(depsCommand());          // Dependency analysis (cv deps)
 
 // Error handler
 program.exitOverride((err) => {

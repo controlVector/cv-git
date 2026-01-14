@@ -637,3 +637,229 @@ export class ConfigError extends CVError {
     this.name = 'ConfigError';
   }
 }
+
+// ========== Dependency Management Types ==========
+
+/**
+ * Supported build systems
+ */
+export type BuildSystem =
+  | 'cmake'
+  | 'meson'
+  | 'scons'
+  | 'autotools'
+  | 'make'
+  | 'npm'
+  | 'pip'
+  | 'cargo'
+  | 'go'
+  | 'gradle'
+  | 'maven'
+  | 'bazel'
+  | 'unknown';
+
+/**
+ * Supported package managers for system dependencies
+ */
+export type PackageManager =
+  | 'apt'
+  | 'yum'
+  | 'dnf'
+  | 'pacman'
+  | 'brew'
+  | 'port'
+  | 'apk'
+  | 'zypper'
+  | 'pkg'
+  | 'choco'
+  | 'scoop'
+  | 'unknown';
+
+/**
+ * Dependency status
+ */
+export type DependencyStatus =
+  | 'found'
+  | 'not_found'
+  | 'version_mismatch'
+  | 'unknown';
+
+/**
+ * Where the dependency was detected from
+ */
+export type DependencySource =
+  | 'cmake_find_package'
+  | 'cmake_pkg_config'
+  | 'meson_dependency'
+  | 'meson_find_library'
+  | 'meson_find_program'
+  | 'autotools_check_lib'
+  | 'autotools_pkg_check'
+  | 'autoconf_check'
+  | 'scons_configure'
+  | 'pkg_config'
+  | 'header_include'
+  | 'linker_flag'
+  | 'npm_package'
+  | 'pip_requirement'
+  | 'cargo_dependency'
+  | 'go_module'
+  | 'manual';
+
+/**
+ * A detected build dependency
+ */
+export interface BuildDependency {
+  /** Dependency name as referenced in build system */
+  name: string;
+
+  /** Type of dependency */
+  type: 'library' | 'tool' | 'header' | 'package' | 'module';
+
+  /** Whether this dependency is required or optional */
+  required: boolean;
+
+  /** Version constraint (e.g., ">=1.0.0", "^2.0") */
+  versionConstraint?: string;
+
+  /** Where this dependency was detected */
+  source: DependencySource;
+
+  /** File where dependency was declared */
+  sourceFile: string;
+
+  /** Line number in source file */
+  sourceLine?: number;
+
+  /** Current status on system */
+  status?: DependencyStatus;
+
+  /** Installed version if found */
+  installedVersion?: string;
+
+  /** pkg-config name if different from dependency name */
+  pkgConfigName?: string;
+
+  /** CMake package name if different */
+  cmakeName?: string;
+
+  /** System package names by package manager */
+  systemPackages?: Partial<Record<PackageManager, string>>;
+
+  /** Header files to check for */
+  headers?: string[];
+
+  /** Library files to check for */
+  libraries?: string[];
+}
+
+/**
+ * Detected build system in a project
+ */
+export interface DetectedBuildSystem {
+  /** Type of build system */
+  type: BuildSystem;
+
+  /** Primary build file */
+  primaryFile: string;
+
+  /** All related build files */
+  buildFiles: string[];
+
+  /** Confidence score (0-1) */
+  confidence: number;
+
+  /** Version of build system if detectable */
+  version?: string;
+}
+
+/**
+ * Result of dependency analysis
+ */
+export interface DependencyAnalysis {
+  /** Detected build systems */
+  buildSystems: DetectedBuildSystem[];
+
+  /** All detected dependencies */
+  dependencies: BuildDependency[];
+
+  /** Required dependencies (filtered) */
+  requiredDependencies?: BuildDependency[];
+
+  /** Optional dependencies (filtered) */
+  optionalDependencies?: BuildDependency[];
+
+  /** System information */
+  system?: {
+    platform: NodeJS.Platform;
+    arch: string;
+    packageManager?: PackageManager;
+  };
+
+  /** Summary statistics */
+  summary?: {
+    total: number;
+    found: number;
+    missing: number;
+    versionMismatch: number;
+    unknown: number;
+  };
+
+  /** Generated install commands */
+  installCommands?: string[];
+
+  /** Analysis timestamp (ISO string or Unix timestamp) */
+  analyzedAt: string | number;
+}
+
+/**
+ * Package mapping for a dependency
+ */
+export interface PackageMapping {
+  /** Canonical name */
+  name: string;
+
+  /** Alternative names (pkg-config, cmake, etc.) */
+  aliases: string[];
+
+  /** System packages by package manager */
+  packages: Partial<Record<PackageManager, string | string[]>>;
+
+  /** Header files that indicate presence */
+  headers?: string[];
+
+  /** Library files that indicate presence */
+  libraries?: string[];
+
+  /** pkg-config module name */
+  pkgConfig?: string;
+
+  /** CMake find_package name */
+  cmake?: string;
+
+  /** Description */
+  description?: string;
+}
+
+/**
+ * System package availability information
+ */
+export interface SystemPackageInfo {
+  /** Package/dependency name */
+  name: string;
+
+  /** Whether package is available on system */
+  available: boolean;
+
+  /** Installed version if available */
+  version?: string;
+
+  /** How availability was determined */
+  source: 'pkg_config' | 'library_file' | 'header_file' | 'path' | 'unknown';
+
+  /** Installation path if found */
+  installPath?: string;
+
+  /** pkg-config module name */
+  pkgConfigName?: string;
+}
