@@ -1,6 +1,6 @@
 {
   "name": "@cv-git/prd-client",
-  "version": "0.4.23",
+  "version": "0.4.24",
   "description": "Client for cvPRD API integration",
   "type": "module",
   "main": "./dist/index.js",

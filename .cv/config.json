@@ -18,9 +18,10 @@
     "temperature": 0.2
   },
   "embedding": {
-    "provider": "openai",
-    "model": "text-embedding-3-small",
-    "dimensions": 1536
+    "provider": "ollama",
+    "model": "nomic-embed-text",
+    "url": "http://127.0.0.1:11434",
+    "dimensions": 768
   },
   "graph": {
     "provider": "falkordb",

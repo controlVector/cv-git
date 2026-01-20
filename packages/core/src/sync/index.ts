@@ -281,7 +281,7 @@ export class SyncEngine {
         systemInfo: {
           nodeVersion: process.version,
           platform: process.platform,
-          cvVersion: '0.4.17'
+          cvVersion: '0.4.24'
         }
       };
       await this.saveSyncReport(syncReport);
@@ -622,7 +622,7 @@ export class SyncEngine {
         systemInfo: {
           nodeVersion: process.version,
           platform: process.platform,
-          cvVersion: '0.4.17'
+          cvVersion: '0.4.24'
         }
       };
       await this.saveSyncReport(syncReport);
