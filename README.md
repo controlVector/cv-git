@@ -7,6 +7,8 @@ CV-Git is an intelligent wrapper around Git that adds a knowledge graph, semanti
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org/)
+[![codecov](https://codecov.io/gh/controlVector/cv-git/graph/badge.svg)](https://codecov.io/gh/controlVector/cv-git)
+[![CI](https://github.com/controlVector/cv-git/actions/workflows/ci.yml/badge.svg)](https://github.com/controlVector/cv-git/actions/workflows/ci.yml)
 
 ---
 

@@ -1,0 +1,47 @@
+# Codecov configuration for cv-git
+# https://docs.codecov.com/docs/codecov-yaml
+
+coverage:
+  precision: 2
+  round: down
+  range: "15...80"  # Color range for coverage percentage
+
+  status:
+    project:
+      default:
+        target: auto  # Compare against base commit
+        threshold: 1%  # Allow 1% decrease without failing
+        informational: false
+    patch:
+      default:
+        target: 60%  # New code should have 60% coverage
+        threshold: 5%
+        informational: false
+
+parsers:
+  gcov:
+    branch_detection:
+      conditional: yes
+      loop: yes
+      method: no
+      macro: no
+
+comment:
+  layout: "reach,diff,flags,files"
+  behavior: default
+  require_changes: true
+  require_base: no
+  require_head: yes
+
+flags:
+  unittests:
+    paths:
+      - packages/
+    carryforward: true
+
+ignore:
+  - "tests/**/*"
+  - "examples/**/*"
+  - "**/*.test.ts"
+  - "**/node_modules/**"
+  - "dist/**"

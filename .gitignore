@@ -66,6 +66,11 @@ yarn-error.log*
 coverage/
 .nyc_output/
 
+# Benchmark output (not test files)
+benchmarks/results/
+benchmarks/baseline.json
+benchmark-results.json
+
 # Temporary files
 tmp/
 temp/
