@@ -3,10 +3,11 @@
  * Local LLM support via Ollama API
  *
  * Ollama provides OpenAI-compatible API at /v1/chat/completions
- * Default URL: http://localhost:11434
+ * Default URL: http://localhost:11434 (configurable via CV_OLLAMA_URL)
  */
 
 import { AIClient, AIMessage, AIStreamHandler, RECOMMENDED_MODELS } from './types.js';
+import { getOllamaUrl } from '../config/service-urls.js';
 
 export interface OllamaOptions {
   baseUrl?: string;
@@ -30,7 +31,8 @@ export class OllamaClient implements AIClient {
   private temperature: number;
 
   constructor(options: OllamaOptions = {}) {
-    this.baseUrl = (options.baseUrl || 'http://localhost:11434').replace(/\/$/, '');
+    // Use service URL helper for default, with option override taking precedence
+    this.baseUrl = options.baseUrl ? options.baseUrl.replace(/\/$/, '') : getOllamaUrl();
     this.model = options.model || DEFAULT_MODEL;
     this.maxTokens = options.maxTokens || 8192;
     this.temperature = options.temperature || 0.7;
@@ -309,9 +311,10 @@ export function getRecommendedOllamaModels(): string[] {
 
 /**
  * Check if Ollama is running
+ * Uses CV_OLLAMA_URL env var or default if baseUrl not provided
  */
 export async function isOllamaRunning(baseUrl?: string): Promise<boolean> {
-  const url = (baseUrl || 'http://localhost:11434').replace(/\/$/, '');
+  const url = baseUrl ? baseUrl.replace(/\/$/, '') : getOllamaUrl();
   try {
     const response = await fetch(`${url}/api/tags`, { method: 'GET' });
     return response.ok;

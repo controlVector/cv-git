@@ -7,6 +7,11 @@ import * as fs from 'fs/promises';
 import { CVConfig, ConfigError } from '@cv-git/shared';
 import { getCVDir, ensureDir, loadSharedCredentials } from '@cv-git/shared';
 
+// Re-export service URL utilities
+export * from './service-urls.js';
+
+import { getFalkorDbUrl, getQdrantUrl, getOllamaUrl } from './service-urls.js';
+
 const DEFAULT_CONFIG: CVConfig = {
   version: '0.1.0',
   repository: {
@@ -31,18 +36,18 @@ const DEFAULT_CONFIG: CVConfig = {
   embedding: {
     provider: 'ollama',
     model: 'nomic-embed-text',
-    url: 'http://localhost:11434',
+    url: getOllamaUrl(),
     dimensions: 768
   },
   graph: {
     provider: 'falkordb',
-    url: 'redis://localhost:6379',
+    url: getFalkorDbUrl(),
     embedded: true,
     database: 'cv-git'
   },
   vector: {
     provider: 'qdrant',
-    url: 'http://localhost:6333',
+    url: getQdrantUrl(),
     embedded: true,
     collections: {
       codeChunks: 'code_chunks',

@@ -8,6 +8,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { GitPlatform } from '@cv-git/credentials';
+import { getFalkorDbUrl, getQdrantUrl } from '@cv-git/core';
 
 export interface CVGitConfig {
   version: string;
@@ -96,11 +97,11 @@ const DEFAULT_CONFIG: CVGitConfig = {
     temperature: 0.7,
   },
   graph: {
-    url: 'redis://localhost:6379',
+    url: getFalkorDbUrl(),  // Configurable via CV_FALKORDB_URL env var
     database: 'cv-graph',
   },
   vector: {
-    url: 'http://localhost:6333',
+    url: getQdrantUrl(),  // Configurable via CV_QDRANT_URL env var
     collection: 'cv-vectors',
   },
   features: {
