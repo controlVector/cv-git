@@ -14,3 +14,4 @@ export * from './exporter.js';
 export * from './loader.js';
 export * from './authored.js';
 export * from './ingest.js';
+export * from './local-search.js';

@@ -394,11 +394,30 @@ CV-Git is designed to work with reduced functionality when services are unavaila
 
 | Service | When Unavailable |
 |---------|-----------------|
-| FalkorDB | **Required** - Most commands will fail |
-| Qdrant | Semantic search disabled, graph queries still work |
-| Ollama/OpenAI | Cannot generate embeddings, existing vectors still searchable |
+| FalkorDB | **Required for sync** - Most write commands will fail, but read commands may use cached data |
+| Qdrant | Falls back to local `.cv/vectors/` cache for semantic search |
+| Ollama/OpenAI | Cannot generate new embeddings, but cached embeddings still searchable |
 | Tree-sitter | Falls back to regex parsing (less accurate) |
 | Docker | Cannot auto-start services, must start manually |
+
+### Local Vector Cache Fallback
+
+When Qdrant is unavailable, CV-Git automatically falls back to searching the local vector cache stored in `.cv/vectors/code_chunks.jsonl`. This enables:
+
+- **Semantic search** using pre-computed embeddings
+- **MCP tools** (`cv_find`, `cv_context`) continue working
+- **Offline operation** after initial sync
+
+The fallback is transparent - you'll see a notice like:
+```
+(Using local cache - Qdrant unavailable)
+```
+
+**Requirements for local fallback:**
+1. Run `cv sync` at least once while Qdrant is available to populate the cache
+2. Have API keys configured for query embedding generation
+
+**Performance note:** Local search is slower than Qdrant (brute-force vs. HNSW index) but functional for most use cases.
 
 ### Checking Available Features
 

@@ -1,6 +1,10 @@
 /**
  * Search Tool Handler
  * Implements cv_find - semantic code search
+ *
+ * Supports graceful degradation:
+ * - Primary: Qdrant vector database
+ * - Fallback: Local .cv/vectors/ cache search
  */
 
 import { FindArgs, ToolResult, SearchResult } from '../types.js';
@@ -8,6 +12,9 @@ import { successResult, errorResult, formatSearchResults } from '../utils.js';
 import {
   configManager,
   createVectorManager,
+  hasLocalVectors,
+  searchLocalVectors,
+  createEmbedding,
 } from '@cv-git/core';
 import { findRepoRoot } from '@cv-git/shared';
 import { getOpenAIApiKey, getOpenRouterApiKey } from '../credentials.js';
@@ -38,39 +45,86 @@ export async function handleFind(args: FindArgs): Promise<ToolResult> {
       );
     }
 
-    // Initialize vector manager with proper options
-    const vector = createVectorManager({
-      url: config.vector.url,
-      openrouterApiKey,
-      openaiApiKey,
-      collections: config.vector.collections,
-    });
+    // Try Qdrant first, fall back to local cache if unavailable
+    let results: SearchResult[] = [];
+    let usedFallback = false;
 
-    await vector.connect();
+    try {
+      // Initialize vector manager with proper options
+      const vector = createVectorManager({
+        url: config.vector.url,
+        openrouterApiKey,
+        openaiApiKey,
+        collections: config.vector.collections,
+      });
 
-    // Perform search
-    const vectorResults = await vector.searchCode(query, limit, {
-      language,
-      file,
-      minScore,
-    });
+      await vector.connect();
 
-    await vector.close();
+      // Perform search
+      const vectorResults = await vector.searchCode(query, limit, {
+        language,
+        file,
+        minScore,
+      });
 
-    // Map VectorSearchResult<CodeChunkPayload> to SearchResult
-    const results: SearchResult[] = vectorResults.map(vr => ({
-      file: vr.payload.file,
-      startLine: vr.payload.startLine,
-      endLine: vr.payload.endLine,
-      symbolName: vr.payload.symbolName,
-      language: vr.payload.language,
-      text: vr.payload.text,
-      score: vr.score,
-      docstring: vr.payload.docstring,
-    }));
+      await vector.close();
+
+      // Map VectorSearchResult<CodeChunkPayload> to SearchResult
+      results = vectorResults.map(vr => ({
+        file: vr.payload.file,
+        startLine: vr.payload.startLine,
+        endLine: vr.payload.endLine,
+        symbolName: vr.payload.symbolName,
+        language: vr.payload.language,
+        text: vr.payload.text,
+        score: vr.score,
+        docstring: vr.payload.docstring,
+      }));
+    } catch (qdrantError: any) {
+      // Qdrant unavailable - try local fallback
+      const hasLocal = await hasLocalVectors(repoRoot);
+
+      if (!hasLocal) {
+        return errorResult(
+          'Qdrant unavailable and no local vector cache found.\n' +
+          'Start Qdrant: docker run -d -p 6333:6333 qdrant/qdrant\n' +
+          'Or run `cv sync` to populate the local cache.'
+        );
+      }
+
+      // Generate embedding for query
+      const queryVector = await createEmbedding(query, {
+        openrouterApiKey,
+        openaiApiKey,
+      });
+
+      // Search local cache
+      const localResults = await searchLocalVectors(repoRoot, queryVector, limit, {
+        minScore,
+        language,
+        file,
+      });
+
+      results = localResults.map(lr => ({
+        file: lr.payload.file,
+        startLine: lr.payload.startLine,
+        endLine: lr.payload.endLine,
+        symbolName: lr.payload.symbolName,
+        language: lr.payload.language,
+        text: lr.text,
+        score: lr.score,
+      }));
+
+      usedFallback = true;
+    }
 
     // Format and return results
-    const formattedResults = formatSearchResults(results);
+    let formattedResults = formatSearchResults(results);
+
+    if (usedFallback) {
+      formattedResults = '(Using local cache - Qdrant unavailable)\n\n' + formattedResults;
+    }
+
     return successResult(formattedResults);
   } catch (error: any) {
     return errorResult('Code search failed', error);

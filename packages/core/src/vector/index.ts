@@ -1430,3 +1430,76 @@ export function createVectorManager(
 // Re-export cache types for external use
 export { EmbeddingCache, createEmbeddingCache, CacheStats } from './embedding-cache.js';
 export type { EmbeddingMetadata, EmbeddingIndex, EmbeddingCacheConfig } from './embedding-cache.js';
+
+/**
+ * Standalone embedding generation function
+ *
+ * Useful for generating query embeddings without a full VectorManager.
+ * Uses OpenRouter or OpenAI based on available API keys.
+ */
+export interface CreateEmbeddingOptions {
+  openrouterApiKey?: string;
+  openaiApiKey?: string;
+  model?: string;
+}
+
+export async function createEmbedding(
+  text: string,
+  options: CreateEmbeddingOptions
+): Promise<number[]> {
+  const { openrouterApiKey, openaiApiKey, model } = options;
+
+  // Prefer OpenRouter if available
+  if (openrouterApiKey) {
+    const embeddingModel = model || 'openai/text-embedding-3-small';
+    const response = await fetch('https://openrouter.ai/api/v1/embeddings', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openrouterApiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://github.com/controlVector/cv-git',
+        'X-Title': 'CV-Git',
+      },
+      body: JSON.stringify({
+        model: embeddingModel,
+        input: text,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new VectorError(`OpenRouter embedding failed: ${response.status} ${errorText}`);
+    }
+
+    const result = await response.json() as { data: Array<{ embedding: number[] }> };
+    return result.data[0].embedding;
+  }
+
+  // Fall back to OpenAI
+  if (openaiApiKey) {
+    const embeddingModel = model || 'text-embedding-3-small';
+    const response = await fetch('https://api.openai.com/v1/embeddings', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openaiApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: embeddingModel,
+        input: text,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new VectorError(`OpenAI embedding failed: ${response.status} ${errorText}`);
+    }
+
+    const result = await response.json() as { data: Array<{ embedding: number[] }> };
+    return result.data[0].embedding;
+  }
+
+  throw new VectorError(
+    'No embedding API key provided. Set openrouterApiKey or openaiApiKey.'
+  );
+}

@@ -1,6 +1,10 @@
 /**
  * Context Tool Handler
  * Implements cv_context - generate rich context for AI coding assistants
+ *
+ * Supports graceful degradation:
+ * - Primary: Qdrant + FalkorDB
+ * - Fallback: Local .cv/ cache when services unavailable
  */
 
 import { ToolResult } from '../types.js';
@@ -9,6 +13,9 @@ import {
   configManager,
   createVectorManager,
   createGraphManager,
+  hasLocalVectors,
+  searchLocalVectors,
+  createEmbedding,
 } from '@cv-git/core';
 import { findRepoRoot, VectorSearchResult, CodeChunkPayload, SymbolNode } from '@cv-git/shared';
 import { promises as fs } from 'fs';
@@ -59,14 +66,62 @@ export async function handleContext(args: ContextArgs): Promise<ToolResult> {
       );
     }
 
-    // Initialize vector manager with proper options
-    const vector = createVectorManager({
-      url: config.vector.url,
-      openrouterApiKey,
-      openaiApiKey,
-      collections: config.vector.collections,
-    });
-    await vector.connect();
+    // Try to connect to Qdrant, fall back to local cache if unavailable
+    let vector: any = null;
+    let chunks: VectorSearchResult<CodeChunkPayload>[] = [];
+    let usedFallback = false;
+
+    try {
+      // Initialize vector manager with proper options
+      vector = createVectorManager({
+        url: config.vector.url,
+        openrouterApiKey,
+        openaiApiKey,
+        collections: config.vector.collections,
+      });
+      await vector.connect();
+
+      // Search for relevant code
+      chunks = await vector.searchCode(query, limit, { minScore });
+    } catch (qdrantError: any) {
+      // Qdrant unavailable - try local fallback
+      const hasLocal = await hasLocalVectors(repoRoot);
+
+      if (!hasLocal) {
+        return errorResult(
+          'Qdrant unavailable and no local vector cache found.\n' +
+          'Start Qdrant: docker run -d -p 6333:6333 qdrant/qdrant\n' +
+          'Or run `cv sync` to populate the local cache.'
+        );
+      }
+
+      // Generate embedding for query
+      const queryVector = await createEmbedding(query, {
+        openrouterApiKey,
+        openaiApiKey,
+      });
+
+      // Search local cache
+      const localResults = await searchLocalVectors(repoRoot, queryVector, limit, {
+        minScore,
+      });
+
+      // Convert to expected format
+      chunks = localResults.map(lr => ({
+        id: lr.id,
+        score: lr.score,
+        payload: {
+          text: lr.text,
+          file: lr.payload.file,
+          startLine: lr.payload.startLine,
+          endLine: lr.payload.endLine,
+          symbolName: lr.payload.symbolName,
+          language: lr.payload.language,
+        } as CodeChunkPayload,
+      }));
+
+      usedFallback = true;
+    }
 
     // Initialize graph manager (optional)
     let graph = null;
@@ -78,9 +133,6 @@ export async function handleContext(args: ContextArgs): Promise<ToolResult> {
         // Graph is optional
       }
     }
-
-    // Search for relevant code
-    const chunks = await vector.searchCode(query, limit, { minScore });
 
     // Get related symbols from graph
     let symbols: SymbolNode[] = [];
@@ -151,8 +203,13 @@ export async function handleContext(args: ContextArgs): Promise<ToolResult> {
     }
 
     // Cleanup
-    await vector.close();
+    if (vector) await vector.close();
     if (graph) await graph.close();
+
+    // Add fallback notice if used
+    if (usedFallback) {
+      contextOutput = '> Note: Using local cache (Qdrant unavailable)\n\n' + contextOutput;
+    }
 
     return successResult(contextOutput);
   } catch (error: any) {
