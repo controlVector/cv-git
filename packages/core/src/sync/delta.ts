@@ -3,12 +3,15 @@
  *
  * Tracks file state to enable efficient incremental syncing.
  * Only processes files that have actually changed since last sync.
+ *
+ * Uses file locking to prevent corruption from parallel sync operations.
  */
 
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { createHash } from 'crypto';
 import { getCVDir } from '@cv-git/shared';
+import { acquireLock, LockHandle } from './file-lock.js';
 
 /**
  * Tracked file entry
@@ -50,6 +53,7 @@ export class DeltaSyncManager {
   private state: DeltaState | null = null;
   private loaded = false;
   private dirty = false;
+  private lock: LockHandle | null = null;
 
   constructor(repoRoot: string) {
     this.cvDir = getCVDir(repoRoot);
@@ -57,17 +61,46 @@ export class DeltaSyncManager {
   }
 
   /**
+   * Acquire exclusive lock on the state file
+   * Must be called before any operations that read/write state
+   */
+  async acquireLock(): Promise<void> {
+    if (this.lock) return; // Already locked
+
+    this.lock = await acquireLock(this.statePath, {
+      timeout: 30000,
+      staleTimeout: 60000,
+    });
+  }
+
+  /**
+   * Release the lock on the state file
+   * Should be called when done with sync operations
+   */
+  async releaseLock(): Promise<void> {
+    if (this.lock) {
+      await this.lock.release();
+      this.lock = null;
+    }
+  }
+
+  /**
    * Load delta state from disk
+   * Automatically acquires lock if not already held
    */
   async load(): Promise<void> {
     if (this.loaded) return;
 
+    // Ensure we have the lock before reading
+    await this.acquireLock();
+
     try {
       const content = await fs.readFile(this.statePath, 'utf-8');
       this.state = JSON.parse(content) as DeltaState;
-    } catch (error: any) {
-      if (error.code !== 'ENOENT') {
-        console.warn(`Failed to load delta state: ${error.message}`);
+    } catch (error: unknown) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code !== 'ENOENT') {
+        console.warn(`Failed to load delta state: ${err.message}`);
       }
       // Initialize fresh state
       this.state = {
@@ -83,9 +116,14 @@ export class DeltaSyncManager {
 
   /**
    * Save delta state to disk
+   * Lock must be held (automatically acquired by load())
    */
   async save(): Promise<void> {
     if (!this.dirty || !this.state) return;
+
+    if (!this.lock) {
+      throw new Error('Cannot save delta state without holding lock. Call load() first.');
+    }
 
     await fs.mkdir(this.cvDir, { recursive: true });
     await fs.writeFile(this.statePath, JSON.stringify(this.state, null, 2));
@@ -297,10 +335,14 @@ export class DeltaSyncManager {
   }
 
   /**
-   * Close and save pending changes
+   * Close and save pending changes, release lock
    */
   async close(): Promise<void> {
-    await this.save();
+    try {
+      await this.save();
+    } finally {
+      await this.releaseLock();
+    }
   }
 }
 

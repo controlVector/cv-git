@@ -26,8 +26,9 @@ import { DeltaSyncManager, createDeltaSyncManager, SyncDelta } from './delta.js'
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
-// Re-export delta types
+// Re-export delta types and file locking
 export * from './delta.js';
+export * from './file-lock.js';
 
 export interface SyncOptions {
   incremental?: boolean;
