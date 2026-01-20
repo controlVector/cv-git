@@ -26,9 +26,12 @@ import { DeltaSyncManager, createDeltaSyncManager, SyncDelta } from './delta.js'
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
-// Re-export delta types and file locking
+// Re-export delta types, file locking, and file utilities
 export * from './delta.js';
 export * from './file-lock.js';
+export * from './file-utils.js';
+
+import { safeReadFile, logSkippedFile } from './file-utils.js';
 
 export interface SyncOptions {
   incremental?: boolean;
@@ -408,15 +411,15 @@ export class SyncEngine {
           shouldSyncFile(f, excludePatterns, includeLanguages)
         );
 
-        // Read content and mark as synced
+        // Read content and mark as synced (using safe file reading with size limits)
         const fileContents = new Map<string, string>();
         for (const file of filesToTrack) {
-          try {
-            const absolutePath = path.join(this.repoRoot, file);
-            const content = await fs.readFile(absolutePath, 'utf-8');
-            fileContents.set(file, content);
-          } catch (error) {
-            // Skip files that can't be read
+          const absolutePath = path.join(this.repoRoot, file);
+          const result = await safeReadFile(absolutePath);
+          if ('content' in result) {
+            fileContents.set(file, result.content);
+          } else {
+            logSkippedFile(file, result.error);
           }
         }
 
@@ -446,15 +449,15 @@ export class SyncEngine {
         shouldSyncFile(f, excludePatterns, includeLanguages)
       );
 
-      // Read current file contents
+      // Read current file contents (using safe file reading with size limits)
       const fileContents = new Map<string, string>();
       for (const file of currentFiles) {
-        try {
-          const absolutePath = path.join(this.repoRoot, file);
-          const content = await fs.readFile(absolutePath, 'utf-8');
-          fileContents.set(file, content);
-        } catch (error) {
-          // Skip files that can't be read
+        const absolutePath = path.join(this.repoRoot, file);
+        const result = await safeReadFile(absolutePath);
+        if ('content' in result) {
+          fileContents.set(file, result.content);
+        } else {
+          logSkippedFile(file, result.error);
         }
       }
 
@@ -670,15 +673,15 @@ export class SyncEngine {
 
       const docFiles = allFiles.filter(f => this.matchesDocPattern(f, docPatterns, excludePatterns));
 
-      // Read current file contents
+      // Read current file contents (using safe file reading with size limits)
       const fileContents = new Map<string, string>();
       for (const file of docFiles) {
-        try {
-          const absolutePath = path.join(this.repoRoot, file);
-          const content = await fs.readFile(absolutePath, 'utf-8');
-          fileContents.set(file, content);
-        } catch (error) {
-          // Skip files that can't be read
+        const absolutePath = path.join(this.repoRoot, file);
+        const result = await safeReadFile(absolutePath);
+        if ('content' in result) {
+          fileContents.set(file, result.content);
+        } else {
+          logSkippedFile(file, result.error);
         }
       }
 
@@ -793,14 +796,18 @@ export class SyncEngine {
   }
 
   /**
-   * Parse a single file
+   * Parse a single file (with safe file reading)
    */
   private async parseFile(filePath: string): Promise<ParsedFile> {
     const absolutePath = path.join(this.repoRoot, filePath);
-    const content = await fs.readFile(absolutePath, 'utf-8');
-    const language = detectLanguage(filePath);
+    const result = await safeReadFile(absolutePath);
 
-    const parsed = await this.parser.parseFile(filePath, content, language);
+    if ('error' in result) {
+      throw new Error(result.error);
+    }
+
+    const language = detectLanguage(filePath);
+    const parsed = await this.parser.parseFile(filePath, result.content, language);
     // Ensure absolutePath is correctly set (parser may not know the repo root)
     parsed.absolutePath = absolutePath;
     return parsed;
@@ -1093,9 +1100,14 @@ export class SyncEngine {
       for (const file of docFiles) {
         try {
           const absolutePath = path.join(this.repoRoot, file);
-          const content = await fs.readFile(absolutePath, 'utf-8');
+          const result = await safeReadFile(absolutePath);
 
-          const parsed = await this.parser.parseDocument(file, content);
+          if ('error' in result) {
+            logSkippedFile(file, result.error);
+            continue;
+          }
+
+          const parsed = await this.parser.parseDocument(file, result.content);
           parsedDocs.push(parsed);
           totalSections += parsed.sections.length;
         } catch (error: any) {
