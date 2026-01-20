@@ -45,6 +45,10 @@ export interface SyncOptions {
   // Commit history sync options
   syncCommits?: boolean;          // Sync commit history (default: true)
   commitDepth?: number;           // Number of commits to sync (default: 50)
+  // Chunked processing options (for large repos)
+  maxFiles?: number;              // Maximum files to process per run
+  batchSize?: number;             // Batch size for embeddings (default: 50)
+  continueFromLast?: boolean;     // Continue from last chunked sync position
 }
 
 export interface DocumentSyncResult {
@@ -793,6 +797,201 @@ export class SyncEngine {
    */
   async resetDelta(): Promise<void> {
     await this.delta.reset();
+  }
+
+  /**
+   * Get chunked sync progress (for --continue flag)
+   */
+  async getChunkedProgress() {
+    return this.delta.getChunkedProgress();
+  }
+
+  /**
+   * Chunked full sync - processes files in chunks for large repositories
+   *
+   * Use this for repositories with thousands of files that would otherwise
+   * overwhelm memory or take too long in a single run.
+   *
+   * @param options.maxFiles - Maximum files to process per run
+   * @param options.continueFromLast - Continue from previous chunked sync
+   * @param options.batchSize - Batch size for embedding generation
+   */
+  async chunkedFullSync(options: SyncOptions = {}): Promise<{
+    syncState: SyncState;
+    progress: {
+      processed: number;
+      total: number;
+      complete: boolean;
+      remaining: number;
+    };
+  }> {
+    const startTime = Date.now();
+    const syncErrors: SyncError[] = [];
+    const maxFiles = options.maxFiles || 500;
+    const batchSize = options.batchSize || 50;
+
+    console.log(`Starting chunked sync (max ${maxFiles} files per run)...`);
+
+    try {
+      // Get all tracked files
+      const allFiles = await this.git.getTrackedFiles();
+      const defaultPatterns = this.getDefaultExcludePatterns();
+      const customPatterns = options.excludePatterns || [];
+      const excludePatterns = [...new Set([...defaultPatterns, ...customPatterns])];
+      const includeLanguages = options.includeLanguages || this.getDefaultIncludeLanguages();
+
+      const filesToSync = allFiles.filter(f =>
+        shouldSyncFile(f, excludePatterns, includeLanguages)
+      );
+
+      // Check for existing progress
+      let progress = await this.delta.getChunkedProgress();
+      let startIndex = 0;
+
+      if (options.continueFromLast && progress && !progress.complete) {
+        // Continue from previous run
+        startIndex = progress.lastProcessedIndex + 1;
+        console.log(`Continuing from file ${startIndex + 1}/${progress.totalFiles}`);
+
+        // Verify file list hasn't changed (simple length check)
+        if (progress.fileList.length !== filesToSync.length) {
+          console.warn('File list changed since last run, starting fresh');
+          await this.delta.clearChunkedProgress();
+          progress = await this.delta.startChunkedSync(filesToSync);
+          startIndex = 0;
+        }
+      } else {
+        // Start fresh
+        if (progress && !progress.complete) {
+          console.log('Starting fresh chunked sync (use --continue to resume previous)');
+        }
+        await this.delta.clearChunkedProgress();
+        progress = await this.delta.startChunkedSync(filesToSync);
+      }
+
+      // Calculate chunk to process
+      const endIndex = Math.min(startIndex + maxFiles, filesToSync.length);
+      const chunkFiles = filesToSync.slice(startIndex, endIndex);
+
+      console.log(`Processing files ${startIndex + 1}-${endIndex} of ${filesToSync.length}`);
+
+      // Parse files in this chunk
+      const parsedFiles: ParsedFile[] = [];
+      const CONCURRENCY = 10;
+
+      for (let i = 0; i < chunkFiles.length; i += CONCURRENCY) {
+        const batch = chunkFiles.slice(i, i + CONCURRENCY);
+        const batchResults = await Promise.allSettled(
+          batch.map(file => this.parseFile(file))
+        );
+
+        for (let j = 0; j < batchResults.length; j++) {
+          const result = batchResults[j];
+          const file = batch[j];
+          if (result.status === 'fulfilled') {
+            parsedFiles.push(result.value);
+          } else {
+            syncErrors.push({
+              file,
+              error: result.reason?.message || 'Unknown error',
+              phase: 'parse',
+              timestamp: Date.now()
+            });
+          }
+        }
+
+        // Update progress periodically
+        const currentIndex = startIndex + i + batch.length - 1;
+        await this.delta.updateChunkedProgress(currentIndex);
+
+        const progressPct = Math.round(((i + batch.length) / chunkFiles.length) * 100);
+        if (progressPct % 20 === 0) {
+          console.log(`Progress: ${progressPct}% (${i + batch.length}/${chunkFiles.length} in this chunk)`);
+        }
+      }
+
+      console.log(`Parsed ${parsedFiles.length} files in this chunk`);
+
+      // Update graph
+      if (parsedFiles.length > 0) {
+        console.log('Updating knowledge graph...');
+        await this.updateGraph(parsedFiles);
+      }
+
+      // Check if complete
+      const isComplete = endIndex >= filesToSync.length;
+      if (isComplete) {
+        await this.delta.completeChunkedSync();
+        console.log('Chunked sync complete!');
+
+        // Sync commit history only when complete
+        if (options.syncCommits !== false) {
+          console.log('Syncing commit history...');
+          const commitDepth = options.commitDepth || 50;
+          await this.syncCommitHistory(commitDepth);
+        }
+      }
+
+      // Update final progress
+      await this.delta.updateChunkedProgress(endIndex - 1);
+
+      // Get statistics
+      const stats = await this.graph.getStats();
+
+      let vectorCount = 0;
+      if (this.vector && this.vector.isConnected()) {
+        try {
+          const info = await this.vector.getCollectionInfo('code_chunks');
+          vectorCount = info.points_count || 0;
+        } catch {
+          vectorCount = 0;
+        }
+      }
+
+      // Track files for delta
+      const fileContents = new Map<string, string>();
+      for (const file of chunkFiles) {
+        const absolutePath = path.join(this.repoRoot, file);
+        const result = await safeReadFile(absolutePath);
+        if ('content' in result) {
+          fileContents.set(file, result.content);
+        }
+      }
+      await this.delta.markSynced(fileContents, 'code');
+      await this.delta.setLastCommit(await this.git.getLastCommitSha());
+      await this.delta.close();
+
+      const syncState: SyncState = {
+        lastFullSync: Date.now(),
+        lastCommitSynced: await this.git.getLastCommitSha(),
+        fileCount: stats.fileCount,
+        symbolCount: stats.symbolCount,
+        nodeCount: stats.fileCount + stats.symbolCount,
+        edgeCount: stats.relationshipCount,
+        vectorCount,
+        languages: this.countLanguages(parsedFiles),
+        syncDuration: (Date.now() - startTime) / 1000,
+        errors: syncErrors.map(e => `${e.file}: ${e.error}`)
+      };
+
+      await this.saveSyncState(syncState);
+
+      console.log(`\nChunk processed in ${syncState.syncDuration?.toFixed(1)}s`);
+
+      return {
+        syncState,
+        progress: {
+          processed: endIndex,
+          total: filesToSync.length,
+          complete: isComplete,
+          remaining: filesToSync.length - endIndex
+        }
+      };
+
+    } catch (error: any) {
+      console.error('Chunked sync failed:', error);
+      throw error;
+    }
   }
 
   /**

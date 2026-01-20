@@ -35,6 +35,24 @@ export interface SyncDelta {
 }
 
 /**
+ * Chunked sync progress tracking
+ */
+export interface ChunkedSyncProgress {
+  /** Total files to process */
+  totalFiles: number;
+  /** Files processed so far */
+  processedFiles: number;
+  /** Index of last processed file (for continuation) */
+  lastProcessedIndex: number;
+  /** List of file paths being processed (ordered) */
+  fileList: string[];
+  /** Timestamp when chunked sync started */
+  startedAt: string;
+  /** Whether the chunked sync is complete */
+  complete: boolean;
+}
+
+/**
  * Delta state stored on disk
  */
 interface DeltaState {
@@ -42,6 +60,8 @@ interface DeltaState {
   lastSyncedAt: string;
   lastCommit: string;
   files: Record<string, TrackedFile>;
+  /** Progress for chunked syncing (large repos) */
+  chunkedProgress?: ChunkedSyncProgress;
 }
 
 /**
@@ -332,6 +352,72 @@ export class DeltaSyncManager {
     };
     this.dirty = true;
     await this.save();
+  }
+
+  /**
+   * Get chunked sync progress
+   */
+  async getChunkedProgress(): Promise<ChunkedSyncProgress | null> {
+    await this.load();
+    return this.state!.chunkedProgress || null;
+  }
+
+  /**
+   * Start a new chunked sync session
+   */
+  async startChunkedSync(fileList: string[]): Promise<ChunkedSyncProgress> {
+    await this.load();
+
+    const progress: ChunkedSyncProgress = {
+      totalFiles: fileList.length,
+      processedFiles: 0,
+      lastProcessedIndex: -1,
+      fileList,
+      startedAt: new Date().toISOString(),
+      complete: false
+    };
+
+    this.state!.chunkedProgress = progress;
+    this.dirty = true;
+    return progress;
+  }
+
+  /**
+   * Update chunked sync progress
+   */
+  async updateChunkedProgress(processedIndex: number): Promise<void> {
+    await this.load();
+
+    if (!this.state!.chunkedProgress) {
+      throw new Error('No chunked sync in progress. Call startChunkedSync first.');
+    }
+
+    this.state!.chunkedProgress.lastProcessedIndex = processedIndex;
+    this.state!.chunkedProgress.processedFiles = processedIndex + 1;
+    this.dirty = true;
+  }
+
+  /**
+   * Mark chunked sync as complete
+   */
+  async completeChunkedSync(): Promise<void> {
+    await this.load();
+
+    if (this.state!.chunkedProgress) {
+      this.state!.chunkedProgress.complete = true;
+      this.state!.chunkedProgress.processedFiles = this.state!.chunkedProgress.totalFiles;
+    }
+
+    this.dirty = true;
+  }
+
+  /**
+   * Clear chunked sync progress (start fresh)
+   */
+  async clearChunkedProgress(): Promise<void> {
+    await this.load();
+    delete this.state!.chunkedProgress;
+    this.dirty = true;
   }
 
   /**

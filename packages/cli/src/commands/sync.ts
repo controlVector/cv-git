@@ -44,7 +44,10 @@ export function syncCommand(): Command {
     .option('--incremental', 'Only sync changed files (legacy)')
     .option('--full', 'Force full sync of all files')
     .option('--force', 'Force full rebuild (clears graph first)')
-    .option('--reset-delta', 'Reset delta tracking (forces full sync next time)');
+    .option('--reset-delta', 'Reset delta tracking (forces full sync next time)')
+    .option('--max-files <number>', 'Maximum number of files to process per run (for large repos)', parseInt)
+    .option('--batch-size <number>', 'Batch size for embedding generation (default: 50)', parseInt)
+    .option('--continue', 'Continue from where the last chunked sync left off');
 
   addGlobalOptions(cmd);
 
@@ -285,6 +288,66 @@ export function syncCommand(): Command {
           spinner = output.spinner('Resetting delta tracking...').start();
           await syncEngine.resetDelta();
           spinner.succeed('Delta tracking reset. Next sync will be a full sync.');
+          await graph.close();
+          if (vector) await vector.close();
+          return;
+        }
+
+        // Handle chunked sync (for large repositories)
+        if (options.maxFiles || options.continue) {
+          const chunkedOptions = {
+            maxFiles: options.maxFiles || 500,
+            batchSize: options.batchSize || 50,
+            continueFromLast: options.continue,
+            excludePatterns: config.sync?.excludePatterns,
+            includeLanguages: config.sync?.includeLanguages
+          };
+
+          // Check for existing progress if --continue
+          if (options.continue) {
+            const existingProgress = await syncEngine.getChunkedProgress();
+            if (!existingProgress || existingProgress.complete) {
+              console.log(chalk.yellow('No incomplete chunked sync to continue. Starting fresh.'));
+            } else {
+              console.log(chalk.cyan(`Resuming: ${existingProgress.processedFiles}/${existingProgress.totalFiles} files processed`));
+            }
+          }
+
+          spinner = output.spinner('Starting chunked sync...').start();
+          spinner.stop();
+
+          const result = await syncEngine.chunkedFullSync(chunkedOptions);
+
+          console.log();
+          if (result.progress.complete) {
+            console.log(chalk.green('✔ Chunked sync complete!'));
+          } else {
+            console.log(chalk.yellow(`✔ Chunk processed: ${result.progress.processed}/${result.progress.total} files`));
+            console.log(chalk.cyan(`  Remaining: ${result.progress.remaining} files`));
+            console.log(chalk.gray('  Run `cv sync --continue` to continue'));
+          }
+
+          displaySyncResults(result.syncState);
+
+          // Export to .cv/ if complete
+          if (result.progress.complete) {
+            spinner = output.spinner('Exporting to .cv/ storage...').start();
+            try {
+              const embeddingConfig = config.embedding ? {
+                provider: config.embedding.provider || 'openrouter',
+                model: config.embedding.model || 'openai/text-embedding-3-small',
+                dimensions: 1536
+              } : undefined;
+
+              const exportResult = await exportToStorage(repoRoot, graph, vector, embeddingConfig);
+              spinner.succeed(
+                `Exported to .cv/: ${exportResult.stats.files} files, ${exportResult.stats.symbols} symbols`
+              );
+            } catch (exportError: any) {
+              spinner.warn(`Export to .cv/ failed: ${exportError.message}`);
+            }
+          }
+
           await graph.close();
           if (vector) await vector.close();
           return;
