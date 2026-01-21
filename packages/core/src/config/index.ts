@@ -305,3 +305,34 @@ export class ConfigManager {
 
 // Export singleton instance
 export const configManager = new ConfigManager();
+
+// Re-export privilege configuration utilities
+export {
+  type PrivilegeMode,
+  type PrivilegeConfig,
+  detectPrivilegeMode,
+  getEffectivePrivilegeMode,
+  getDefaultPaths,
+  isDockerAvailable,
+  isPodmanAvailable,
+  getRecommendedRuntime,
+  isCI,
+  isInContainer,
+} from './privilege-config.js';
+
+// Re-export global CV-Git configuration utilities
+export {
+  type CVGitConfig,
+  type PrivilegeSettings,
+  type ContainerSettings,
+  type DatabaseSettings,
+  type DatabasesSettings,
+  type CredentialSettings,
+  type AISettings,
+  getConfigFilePath,
+  loadCVGitConfig,
+  saveCVGitConfig,
+  updateCVGitConfig,
+  setConfigValue,
+  getConfigValue,
+} from './cv-git-config.js';

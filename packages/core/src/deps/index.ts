@@ -1,7 +1,7 @@
 /**
  * Dependency Analysis Module
  *
- * Provides build system detection and dependency extraction
+ * Provides build system detection, dependency extraction, and build diagnostics
  */
 
 export { DependencyAnalyzer, type AnalyzerOptions } from './analyzer.js';
@@ -12,5 +12,28 @@ export {
   CMakeParser,
   MesonParser,
   SConsParser,
-  AutotoolsParser
+  AutotoolsParser,
+  BazelParser
 } from './parsers/index.js';
+
+// Build diagnostics
+export {
+  BuildDiagnostics,
+  createBuildDiagnostics
+} from './diagnostics.js';
+
+// Issue registry types
+export type {
+  KnownIssue,
+  IssueRegistry,
+  DiagnosisResult,
+  BuildResult,
+  DiagnoseOptions,
+  Workaround,
+  WorkaroundAction
+} from './issues/index.js';
+
+export {
+  loadIssueRegistry,
+  matchIssue
+} from './issues/index.js';

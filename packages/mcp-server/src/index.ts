@@ -53,7 +53,11 @@ import {
   handleGraphDeadCode,
   handleGraphComplexity,
   handleGraphCycles,
-  handleGraphHotspots
+  handleGraphHotspots,
+  handleGraphNeighborhood,
+  handleGraphImpact,
+  handleGraphBridge,
+  handleSummaryView
 } from './tools/graph.js';
 import { handleDo, handleReview } from './tools/modify.js';
 import { handleSync } from './tools/sync.js';
@@ -90,6 +94,7 @@ import {
   CommitAnalyzeArgs,
   CommitGenerateArgs,
 } from './tools/commit.js';
+import { handleReason, ReasonArgs } from './tools/reason.js';
 
 /**
  * Tool definitions
@@ -240,6 +245,38 @@ This provides richer context than searching manually.`,
     },
   },
   {
+    name: 'cv_reason',
+    description: `Deep codebase reasoning using recursive LLM analysis. Uses a decompose-execute-aggregate pattern to break complex queries into sub-tasks (graph queries, semantic search, explanations) and synthesize comprehensive answers.
+
+USE THIS TOOL when:
+- Questions require understanding multiple connected code components
+- You need to trace through call chains or dependencies
+- The answer requires synthesizing information from multiple sources
+- Simple search or explain doesn't provide enough context
+
+This provides deeper analysis than cv_explain by recursively gathering context.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'The question to reason about (e.g., "how does authentication work in this codebase", "what would break if I change this function")',
+        },
+        maxDepth: {
+          type: 'number',
+          description: 'Maximum recursion depth for reasoning (default: 5)',
+          default: 5,
+        },
+        showTrace: {
+          type: 'boolean',
+          description: 'Include the reasoning trace showing each step taken',
+          default: false,
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
     name: 'cv_graph_query',
     description: 'Query the knowledge graph for relationships between code elements (calls, imports, dependencies).',
     inputSchema: {
@@ -362,6 +399,88 @@ This provides richer context than searching manually.`,
           type: 'number',
           description: 'Number of hot spots to return',
           default: 20,
+        },
+      },
+    },
+  },
+  {
+    name: 'cv_graph_neighborhood',
+    description: 'Explore the neighborhood of a symbol - shows callers, callees, and related code within a radius. Useful for understanding the local context of a symbol.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        symbol: {
+          type: 'string',
+          description: 'Symbol name to explore',
+        },
+        depth: {
+          type: 'number',
+          description: 'Exploration depth (default: 2)',
+          default: 2,
+        },
+        direction: {
+          type: 'string',
+          enum: ['incoming', 'outgoing', 'both'],
+          description: 'Direction to explore (incoming=callers, outgoing=callees)',
+          default: 'both',
+        },
+      },
+      required: ['symbol'],
+    },
+  },
+  {
+    name: 'cv_graph_impact',
+    description: 'Analyze the impact of changing a symbol. Shows all code that would be affected by modifications, including risk assessment.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        symbol: {
+          type: 'string',
+          description: 'Symbol to analyze',
+        },
+        depth: {
+          type: 'number',
+          description: 'Impact analysis depth (default: 3)',
+          default: 3,
+        },
+      },
+      required: ['symbol'],
+    },
+  },
+  {
+    name: 'cv_graph_bridge',
+    description: 'Find code that connects two symbols or concepts. Useful for understanding relationships and dependencies between distant parts of the codebase.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        source: {
+          type: 'string',
+          description: 'Source symbol or concept',
+        },
+        target: {
+          type: 'string',
+          description: 'Target symbol or concept',
+        },
+        maxDepth: {
+          type: 'number',
+          description: 'Maximum path depth to search (default: 5)',
+          default: 5,
+        },
+      },
+      required: ['source', 'target'],
+    },
+  },
+  {
+    name: 'cv_summary_view',
+    description: 'Get a high-level summary of the codebase including architecture, patterns, key components, and statistics. Useful for understanding codebase at a glance.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        aspect: {
+          type: 'string',
+          enum: ['overview', 'architecture', 'patterns', 'statistics'],
+          description: 'Which aspect of the summary to focus on (default: overview)',
+          default: 'overview',
         },
       },
     },
@@ -913,6 +1032,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         result = await handleExplain(args as unknown as ExplainArgs);
         break;
 
+      case 'cv_reason':
+        validateArgs(args, ['query']);
+        result = await handleReason(args as unknown as ReasonArgs);
+        break;
+
       case 'cv_graph_query':
         validateArgs(args, ['queryType']);
         result = await handleGraphQuery(args as unknown as GraphQueryArgs);
@@ -946,6 +1070,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'cv_graph_hotspots':
         result = await handleGraphHotspots(args as { limit?: number });
+        break;
+
+      case 'cv_graph_neighborhood':
+        validateArgs(args, ['symbol']);
+        result = await handleGraphNeighborhood(args as { symbol: string; depth?: number; direction?: string });
+        break;
+
+      case 'cv_graph_impact':
+        validateArgs(args, ['symbol']);
+        result = await handleGraphImpact(args as { symbol: string; depth?: number });
+        break;
+
+      case 'cv_graph_bridge':
+        validateArgs(args, ['source', 'target']);
+        result = await handleGraphBridge(args as { source: string; target: string; maxDepth?: number });
+        break;
+
+      case 'cv_summary_view':
+        result = await handleSummaryView(args as { aspect?: string });
         break;
 
       // Version-Aware Tools

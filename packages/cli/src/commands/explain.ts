@@ -11,7 +11,8 @@ import {
   createAIManager,
   createVectorManager,
   createGraphManager,
-  createGitManager
+  createGitManager,
+  createRLMRouter
 } from '@cv-git/core';
 import { findRepoRoot } from '@cv-git/shared';
 import { addGlobalOptions } from '../utils/output.js';
@@ -23,7 +24,10 @@ export function explainCommand(): Command {
   cmd
     .description('Explain code, files, or concepts using AI')
     .argument('<target>', 'What to explain (symbol name, file path, or concept)')
-    .option('--no-stream', 'Disable streaming output');
+    .option('--no-stream', 'Disable streaming output')
+    .option('--deep', 'Use RLM-powered deep reasoning for complex queries')
+    .option('--trace', 'Show reasoning trace (only with --deep)')
+    .option('--max-depth <n>', 'Maximum recursion depth for deep reasoning (default: 5)', '5');
 
   addGlobalOptions(cmd);
 
@@ -94,6 +98,72 @@ export function explainCommand(): Command {
           graph,
           git
         );
+
+        // Use RLM Router for deep reasoning if --deep flag is set
+        if (options.deep) {
+          spinner.text = 'Starting deep reasoning...';
+
+          const rlm = createRLMRouter(
+            {
+              apiKey: anthropicApiKey,
+              model: config.ai.model || 'claude-sonnet-4-5-20250514',
+              maxDepth: parseInt(options.maxDepth, 10) || 5,
+              maxTokens: config.ai.maxTokens
+            },
+            vector,
+            graph,
+            git
+          );
+
+          try {
+            const result = await rlm.reason(target);
+
+            spinner.succeed(chalk.green(`Deep reasoning complete (depth: ${result.depth})`));
+
+            // Show sources if any
+            if (result.sources.length > 0) {
+              console.log();
+              console.log(chalk.bold.cyan('Sources:'));
+              result.sources.slice(0, 10).forEach(source => {
+                console.log(chalk.gray(`  • ${source}`));
+              });
+            }
+
+            // Show trace if --trace flag
+            if (options.trace && result.trace.length > 0) {
+              console.log();
+              console.log(chalk.bold.cyan('Reasoning Trace:'));
+              console.log(chalk.gray('─'.repeat(80)));
+              result.trace.forEach((step, i) => {
+                const indent = '  '.repeat(step.depth);
+                const duration = step.duration ? chalk.gray(` (${step.duration}ms)`) : '';
+                console.log(`${indent}${chalk.yellow(`${i + 1}.`)} ${chalk.cyan(step.taskType)}${duration}`);
+                console.log(`${indent}   ${chalk.gray(step.query.substring(0, 80))}${step.query.length > 80 ? '...' : ''}`);
+              });
+            }
+
+            // Show answer
+            console.log();
+            console.log(chalk.bold.cyan('Answer:'));
+            console.log(chalk.gray('─'.repeat(80)));
+            console.log();
+            console.log(result.answer);
+            console.log();
+            console.log(chalk.gray('─'.repeat(80)));
+
+            // Close connections
+            await graph.close();
+            if (vector) await vector.close();
+            return;
+
+          } catch (error: any) {
+            spinner.fail(chalk.red('Deep reasoning failed'));
+            console.error(chalk.red(`Error: ${error.message}`));
+            await graph.close();
+            if (vector) await vector.close();
+            process.exit(1);
+          }
+        }
 
         spinner.text = 'Gathering context...';
 

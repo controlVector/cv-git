@@ -1,12 +1,16 @@
 #!/bin/bash
-# CV-Git Installer for Ubuntu/Debian
+# CV-Git Installer for Linux
+# Supports both user-mode and system-mode installation
 # Usage: curl -fsSL https://raw.githubusercontent.com/controlVector/cv-git/main/install.sh | bash
+#
+# Environment variables:
+#   CV_GIT_VERSION        - Version to install (default: latest)
+#   CV_GIT_INSTALL_MODE   - 'user' or 'system' (default: auto-detect)
 
 set -e
 
-VERSION=""  # Will be populated by get_version()
-INSTALL_DIR="/usr/local/lib/cv-git"
-BIN_DIR="/usr/local/bin"
+VERSION="${CV_GIT_VERSION:-}"
+INSTALL_MODE="${CV_GIT_INSTALL_MODE:-}"
 
 # Colors
 RED='\033[0;31m'
@@ -14,6 +18,11 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+
+log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
 
 # Get version dynamically from package.json
 get_version() {
@@ -27,71 +36,58 @@ get_version() {
     fi
     # Ultimate fallback
     if [ -z "$VERSION" ]; then
-        VERSION="0.4.0"
+        VERSION="0.5.0"
     fi
 }
 
-# Install native modules using npm
-# This ensures all dependencies are properly resolved
-install_native_modules() {
-    echo "Installing native modules..."
+# Detect install mode based on environment
+detect_install_mode() {
+    if [[ -n "$INSTALL_MODE" ]]; then
+        # User specified mode
+        if [[ "$INSTALL_MODE" == "system" ]] && [[ $EUID -ne 0 ]]; then
+            log_error "System install requires root. Run with sudo or use: CV_GIT_INSTALL_MODE=user"
+            exit 1
+        fi
+        return
+    fi
 
-    # Create a minimal package.json for the native modules
-    # Uses community fork @keqingmoe/tree-sitter which supports Node 24+
-    sudo tee "$INSTALL_DIR/package.json" > /dev/null << 'PKGJSON'
-{
-  "name": "cv-git-runtime",
-  "version": "1.0.0",
-  "private": true,
-  "dependencies": {
-    "keytar": "7.9.0",
-    "tree-sitter": "npm:@keqingmoe/tree-sitter@0.26.2",
-    "tree-sitter-go": "0.21.2",
-    "tree-sitter-java": "0.21.0",
-    "tree-sitter-javascript": "0.21.4",
-    "tree-sitter-python": "0.21.0",
-    "tree-sitter-rust": "0.21.0",
-    "tree-sitter-typescript": "0.21.2"
-  }
-}
-PKGJSON
-
-    # Install dependencies
-    cd "$INSTALL_DIR"
-    if sudo npm install --production 2>/dev/null; then
-        echo -e "${GREEN}  Native modules installed successfully${NC}"
-        return 0
+    # Auto-detect based on context
+    if [[ $EUID -eq 0 ]]; then
+        INSTALL_MODE="system"
+        log_info "Running as root - using system mode"
     else
-        echo -e "${YELLOW}  Note: Some native modules may not have installed${NC}"
-        echo -e "${YELLOW}  CV-Git will use simple regex parsing as fallback${NC}"
-        return 0  # Don't fail install
+        INSTALL_MODE="user"
+        log_info "Installing in user mode (no root required)"
     fi
 }
 
-# Get version before showing banner
-get_version
-
-echo -e "${BLUE}"
-echo "╔═══════════════════════════════════════╗"
-echo "║        CV-Git Installer v${VERSION}        ║"
-echo "║  AI-Native Version Control Layer      ║"
-echo "╚═══════════════════════════════════════╝"
-echo -e "${NC}"
-
-# Check if running as root for system install
-if [ "$EUID" -ne 0 ]; then
-    echo -e "${YELLOW}Note: Running without sudo - will install to ~/.local${NC}"
-    INSTALL_DIR="$HOME/.local/lib/cv-git"
-    BIN_DIR="$HOME/.local/bin"
-    mkdir -p "$BIN_DIR"
-fi
+# Set paths based on mode (XDG Base Directory compliant)
+set_paths() {
+    if [[ "$INSTALL_MODE" == "user" ]]; then
+        # User mode - XDG Base Directory spec
+        BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
+        DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/cv-git"
+        CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/cv-git"
+        CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/cv-git"
+        LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/cv-git/logs"
+        INSTALL_DIR="$DATA_DIR/lib"
+    else
+        # System mode
+        BIN_DIR="/usr/local/bin"
+        DATA_DIR="/var/lib/cv-git"
+        CONFIG_DIR="/etc/cv-git"
+        CACHE_DIR="/var/cache/cv-git"
+        LOG_DIR="/var/log/cv-git"
+        INSTALL_DIR="/usr/local/lib/cv-git"
+    fi
+}
 
 # Check for Node.js
 check_nodejs() {
     if command -v node &> /dev/null; then
         NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
         if [ "$NODE_VERSION" -ge 18 ]; then
-            echo -e "${GREEN}✓ Node.js $(node -v) found${NC}"
+            log_info "Node.js $(node -v) found"
             return 0
         fi
     fi
@@ -100,7 +96,7 @@ check_nodejs() {
 
 # Install Node.js if needed
 install_nodejs() {
-    echo -e "${YELLOW}Installing Node.js 20.x...${NC}"
+    log_step "Installing Node.js 20.x..."
 
     if command -v apt-get &> /dev/null; then
         # Debian/Ubuntu
@@ -112,24 +108,44 @@ install_nodejs() {
     elif command -v pacman &> /dev/null; then
         # Arch
         sudo pacman -S nodejs npm
+    elif command -v apk &> /dev/null; then
+        # Alpine
+        sudo apk add nodejs npm
     else
-        echo -e "${RED}Could not install Node.js. Please install Node.js 18+ manually.${NC}"
+        log_error "Could not install Node.js. Please install Node.js 18+ manually."
         exit 1
     fi
 }
 
-# Check for Docker
-check_docker() {
+# Check for Docker/Podman
+check_container_runtime() {
     if command -v docker &> /dev/null; then
-        echo -e "${GREEN}✓ Docker found${NC}"
+        # Check if rootless
+        if docker info 2>/dev/null | grep -q "rootless"; then
+            log_info "Docker found (rootless)"
+            CONTAINER_RUNTIME="docker"
+            CONTAINER_ROOTLESS=true
+            return 0
+        else
+            log_info "Docker found"
+            CONTAINER_RUNTIME="docker"
+            CONTAINER_ROOTLESS=false
+            return 0
+        fi
+    elif command -v podman &> /dev/null; then
+        log_info "Podman found (rootless)"
+        CONTAINER_RUNTIME="podman"
+        CONTAINER_ROOTLESS=true
         return 0
     fi
+    CONTAINER_RUNTIME="external"
+    CONTAINER_ROOTLESS=true
     return 1
 }
 
 # Install Docker if needed
 install_docker() {
-    echo -e "${YELLOW}Installing Docker...${NC}"
+    log_step "Installing Docker..."
 
     if command -v apt-get &> /dev/null; then
         # Debian/Ubuntu
@@ -147,18 +163,418 @@ install_docker() {
         sudo apt-get update
         sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 
-        # Add user to docker group
-        sudo usermod -aG docker $USER
-        echo -e "${YELLOW}Note: Log out and back in for Docker group membership to take effect${NC}"
+        # Add user to docker group (allows rootless-like access)
+        if [[ "$INSTALL_MODE" == "user" ]]; then
+            sudo usermod -aG docker "$USER"
+            log_warn "Log out and back in for Docker group membership to take effect"
+        fi
+    elif command -v dnf &> /dev/null; then
+        # Fedora
+        sudo dnf install -y podman podman-compose
+        CONTAINER_RUNTIME="podman"
+        CONTAINER_ROOTLESS=true
+        log_info "Installed Podman (rootless preferred on Fedora)"
     else
-        echo -e "${RED}Please install Docker manually: https://docs.docker.com/engine/install/${NC}"
-        exit 1
+        log_warn "Please install Docker/Podman manually"
+        log_warn "Docker: https://docs.docker.com/engine/install/"
+        log_warn "CV-Git will use external database connections instead"
+        CONTAINER_RUNTIME="external"
     fi
+}
+
+# Install native modules using npm
+install_native_modules() {
+    log_step "Installing native modules..."
+
+    # Create a minimal package.json for the native modules
+    local pkg_json="$INSTALL_DIR/package.json"
+
+    if [[ "$INSTALL_MODE" == "user" ]]; then
+        mkdir -p "$INSTALL_DIR"
+        cat > "$pkg_json" << 'PKGJSON'
+{
+  "name": "cv-git-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "keytar": "7.9.0",
+    "tree-sitter": "npm:@keqingmoe/tree-sitter@0.26.2",
+    "tree-sitter-go": "0.21.2",
+    "tree-sitter-java": "0.21.0",
+    "tree-sitter-javascript": "0.21.4",
+    "tree-sitter-python": "0.21.0",
+    "tree-sitter-rust": "0.21.0",
+    "tree-sitter-typescript": "0.21.2"
+  }
+}
+PKGJSON
+        cd "$INSTALL_DIR"
+        if npm install --production 2>/dev/null; then
+            log_info "Native modules installed successfully"
+        else
+            log_warn "Some native modules may not have installed"
+            log_warn "CV-Git will use simple regex parsing as fallback"
+        fi
+    else
+        # System mode - use sudo
+        sudo mkdir -p "$INSTALL_DIR"
+        sudo tee "$pkg_json" > /dev/null << 'PKGJSON'
+{
+  "name": "cv-git-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "keytar": "7.9.0",
+    "tree-sitter": "npm:@keqingmoe/tree-sitter@0.26.2",
+    "tree-sitter-go": "0.21.2",
+    "tree-sitter-java": "0.21.0",
+    "tree-sitter-javascript": "0.21.4",
+    "tree-sitter-python": "0.21.0",
+    "tree-sitter-rust": "0.21.0",
+    "tree-sitter-typescript": "0.21.2"
+  }
+}
+PKGJSON
+        cd "$INSTALL_DIR"
+        if sudo npm install --production 2>/dev/null; then
+            log_info "Native modules installed successfully"
+        else
+            log_warn "Some native modules may not have installed"
+            log_warn "CV-Git will use simple regex parsing as fallback"
+        fi
+    fi
+}
+
+# Create default global configuration
+create_global_config() {
+    log_step "Creating global configuration..."
+
+    local config_file="$CONFIG_DIR/config.json"
+
+    if [[ -f "$config_file" ]]; then
+        log_info "Configuration already exists at $config_file"
+        return
+    fi
+
+    if [[ "$INSTALL_MODE" == "user" ]]; then
+        mkdir -p "$CONFIG_DIR"
+        cat > "$config_file" << EOF
+{
+  "version": "1",
+  "privilege": {
+    "mode": "user",
+    "allowSudo": false,
+    "warnOnRoot": true
+  },
+  "containers": {
+    "runtime": "$CONTAINER_RUNTIME",
+    "rootless": $CONTAINER_ROOTLESS
+  },
+  "databases": {
+    "falkordb": {
+      "host": "localhost",
+      "port": 6379,
+      "external": false
+    },
+    "qdrant": {
+      "host": "localhost",
+      "port": 6333,
+      "external": false
+    }
+  },
+  "credentials": {
+    "storage": "file",
+    "keyringService": "cv-git"
+  },
+  "ai": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-20250514"
+  }
+}
+EOF
+    else
+        sudo mkdir -p "$CONFIG_DIR"
+        sudo tee "$config_file" > /dev/null << EOF
+{
+  "version": "1",
+  "privilege": {
+    "mode": "root",
+    "allowSudo": true,
+    "warnOnRoot": false
+  },
+  "containers": {
+    "runtime": "$CONTAINER_RUNTIME",
+    "rootless": $CONTAINER_ROOTLESS
+  },
+  "databases": {
+    "falkordb": {
+      "host": "localhost",
+      "port": 6379,
+      "external": false
+    },
+    "qdrant": {
+      "host": "localhost",
+      "port": 6333,
+      "external": false
+    }
+  },
+  "credentials": {
+    "storage": "keychain",
+    "keyringService": "cv-git"
+  },
+  "ai": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-20250514"
+  }
+}
+EOF
+    fi
+
+    log_info "Global configuration created at $config_file"
+}
+
+# Create Docker Compose override for user mode volumes
+create_docker_compose_override() {
+    if [[ "$INSTALL_MODE" != "user" ]] || [[ "$CONTAINER_RUNTIME" == "external" ]]; then
+        return
+    fi
+
+    mkdir -p "$DATA_DIR"
+    cat > "$DATA_DIR/docker-compose.override.yml" << EOF
+# CV-Git User Mode Docker Override
+version: '3.8'
+services:
+  falkordb:
+    volumes:
+      - ${DATA_DIR}/falkordb:/data
+  qdrant:
+    volumes:
+      - ${DATA_DIR}/qdrant:/qdrant/storage
+EOF
+    log_info "Docker Compose override created for user-mode volumes"
+}
+
+# Install CV-Git
+install_cv_git() {
+    log_step "Installing CV-Git..."
+
+    # Create directories
+    if [[ "$INSTALL_MODE" == "user" ]]; then
+        mkdir -p "$BIN_DIR" "$DATA_DIR" "$CONFIG_DIR" "$CACHE_DIR" "$LOG_DIR" "$INSTALL_DIR"
+    else
+        sudo mkdir -p "$BIN_DIR" "$DATA_DIR" "$CONFIG_DIR" "$CACHE_DIR" "$LOG_DIR" "$INSTALL_DIR"
+    fi
+
+    # Check for local build first
+    if [ -f "packages/cli/dist/bundle.cjs" ]; then
+        log_info "Installing from local build..."
+        if [[ "$INSTALL_MODE" == "user" ]]; then
+            cp packages/cli/dist/bundle.cjs "$INSTALL_DIR/cv.cjs"
+        else
+            sudo cp packages/cli/dist/bundle.cjs "$INSTALL_DIR/cv.cjs"
+        fi
+    else
+        # Download release or clone
+        RELEASE_URL="https://github.com/controlVector/cv-git/releases/download/v${VERSION}/cv-git-${VERSION}.tar.gz"
+        log_info "Downloading cv-git v${VERSION}..."
+
+        TEMP_DIR=$(mktemp -d)
+
+        if curl -fsSL "$RELEASE_URL" -o "$TEMP_DIR/cv-git.tar.gz" 2>/dev/null; then
+            # Extract release
+            if [[ "$INSTALL_MODE" == "user" ]]; then
+                tar -xzf "$TEMP_DIR/cv-git.tar.gz" -C "$INSTALL_DIR"
+            else
+                sudo tar -xzf "$TEMP_DIR/cv-git.tar.gz" -C "$INSTALL_DIR"
+            fi
+        else
+            log_warn "Release not found. Cloning repository..."
+            git clone --depth 1 https://github.com/controlVector/cv-git.git "$TEMP_DIR/cv-git"
+            cd "$TEMP_DIR/cv-git"
+
+            # Install pnpm if needed
+            if ! command -v pnpm &> /dev/null; then
+                npm install -g pnpm
+            fi
+
+            pnpm install
+            pnpm build
+
+            # Rebuild native modules
+            log_info "Rebuilding native modules..."
+            pnpm rebuild keytar tree-sitter 2>/dev/null || log_warn "Native module rebuild warning (may be OK)"
+
+            # Copy bundle
+            if [[ "$INSTALL_MODE" == "user" ]]; then
+                cp packages/cli/dist/bundle.cjs "$INSTALL_DIR/cv.cjs"
+            else
+                sudo cp packages/cli/dist/bundle.cjs "$INSTALL_DIR/cv.cjs"
+            fi
+
+            cd - > /dev/null
+        fi
+
+        rm -rf "$TEMP_DIR"
+    fi
+
+    # Install native modules
+    install_native_modules
+
+    # Create wrapper script
+    local wrapper_script="$BIN_DIR/cv"
+    if [[ "$INSTALL_MODE" == "user" ]]; then
+        cat > "$wrapper_script" << WRAPPER
+#!/bin/bash
+export CV_GIT_CONFIG="${CONFIG_DIR}/config.json"
+exec node "${INSTALL_DIR}/cv.cjs" "\$@"
+WRAPPER
+        chmod +x "$wrapper_script"
+    else
+        sudo tee "$wrapper_script" > /dev/null << WRAPPER
+#!/bin/bash
+exec node "${INSTALL_DIR}/cv.cjs" "\$@"
+WRAPPER
+        sudo chmod +x "$wrapper_script"
+    fi
+
+    log_info "CV-Git binary installed at $wrapper_script"
+}
+
+# Update PATH for user mode
+update_path() {
+    if [[ "$INSTALL_MODE" != "user" ]]; then
+        return
+    fi
+
+    local shell_rc=""
+
+    # Detect shell config file
+    if [[ -n "$BASH_VERSION" ]] && [[ -f "$HOME/.bashrc" ]]; then
+        shell_rc="$HOME/.bashrc"
+    elif [[ -n "$ZSH_VERSION" ]] && [[ -f "$HOME/.zshrc" ]]; then
+        shell_rc="$HOME/.zshrc"
+    elif [[ -f "$HOME/.profile" ]]; then
+        shell_rc="$HOME/.profile"
+    fi
+
+    if [[ -n "$shell_rc" ]]; then
+        if ! grep -q "\.local/bin" "$shell_rc" 2>/dev/null; then
+            echo "" >> "$shell_rc"
+            echo "# CV-Git" >> "$shell_rc"
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$shell_rc"
+            log_info "Added $BIN_DIR to PATH in $shell_rc"
+            log_warn "Run 'source $shell_rc' or restart your terminal to update PATH"
+        else
+            log_info "PATH already includes $BIN_DIR"
+        fi
+    else
+        log_warn "Could not detect shell config file. Add manually:"
+        log_warn "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+    fi
+}
+
+# Print summary
+print_summary() {
+    echo ""
+    echo -e "${GREEN}╔═══════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║     CV-Git v${VERSION} Installed!          ║${NC}"
+    echo -e "${GREEN}╚═══════════════════════════════════════╝${NC}"
+    echo ""
+    echo "Install mode:  $INSTALL_MODE"
+    echo "Binary:        $BIN_DIR/cv"
+    echo "Config:        $CONFIG_DIR/config.json"
+    echo "Data:          $DATA_DIR"
+    echo "Runtime:       $CONTAINER_RUNTIME (rootless: $CONTAINER_ROOTLESS)"
+    echo ""
+    echo "Next steps:"
+    echo "  1. $([ "$INSTALL_MODE" == "user" ] && echo "source ~/.bashrc           # Reload shell config")"
+    echo "  2. cv doctor                  # Check system status"
+    echo "  3. cv services start          # Start FalkorDB & Qdrant"
+    echo "  4. cd your-project && cv init # Initialize a project"
+    echo "  5. cv sync                    # Sync codebase"
+    echo ""
+
+    # Check for API keys
+    if [[ -z "$ANTHROPIC_API_KEY" ]] && [[ -z "$CV_ANTHROPIC_KEY" ]]; then
+        log_warn "No Anthropic API key detected."
+        log_warn "Set ANTHROPIC_API_KEY environment variable for AI features."
+    fi
+}
+
+# Uninstall function
+uninstall() {
+    log_step "Uninstalling CV-Git..."
+
+    # Remove binary
+    if [[ -f "$BIN_DIR/cv" ]]; then
+        if [[ "$INSTALL_MODE" == "user" ]]; then
+            rm -f "$BIN_DIR/cv"
+        else
+            sudo rm -f "$BIN_DIR/cv"
+        fi
+        log_info "Removed $BIN_DIR/cv"
+    fi
+
+    # Remove install directory
+    if [[ -d "$INSTALL_DIR" ]]; then
+        if [[ "$INSTALL_MODE" == "user" ]]; then
+            rm -rf "$INSTALL_DIR"
+        else
+            sudo rm -rf "$INSTALL_DIR"
+        fi
+        log_info "Removed $INSTALL_DIR"
+    fi
+
+    # Ask about data
+    read -p "Remove CV-Git data directory ($DATA_DIR)? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        if [[ "$INSTALL_MODE" == "user" ]]; then
+            rm -rf "$DATA_DIR"
+        else
+            sudo rm -rf "$DATA_DIR"
+        fi
+        log_info "Removed $DATA_DIR"
+    fi
+
+    read -p "Remove CV-Git config ($CONFIG_DIR)? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        if [[ "$INSTALL_MODE" == "user" ]]; then
+            rm -rf "$CONFIG_DIR"
+        else
+            sudo rm -rf "$CONFIG_DIR"
+        fi
+        log_info "Removed $CONFIG_DIR"
+    fi
+
+    log_info "CV-Git uninstalled."
 }
 
 # Main installation
 main() {
-    echo "Checking dependencies..."
+    # Get version
+    get_version
+
+    echo ""
+    echo -e "${BLUE}╔═══════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║        CV-Git Installer v${VERSION}        ║${NC}"
+    echo -e "${BLUE}║   AI-Native Version Control Layer     ║${NC}"
+    echo -e "${BLUE}╚═══════════════════════════════════════╝${NC}"
+    echo ""
+
+    # Handle uninstall
+    if [[ "$1" == "uninstall" ]] || [[ "$1" == "--uninstall" ]]; then
+        detect_install_mode
+        set_paths
+        uninstall
+        exit 0
+    fi
+
+    detect_install_mode
+    set_paths
+
+    log_step "Checking dependencies..."
     echo
 
     # Check/install Node.js
@@ -168,102 +584,37 @@ main() {
         if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
             install_nodejs
         else
-            echo -e "${RED}Node.js 18+ is required. Exiting.${NC}"
+            log_error "Node.js 18+ is required. Exiting."
             exit 1
         fi
     fi
 
-    # Check/install Docker
-    if ! check_docker; then
-        read -p "Docker not found. Install it? [Y/n] " -n 1 -r
+    # Check/install container runtime
+    if ! check_container_runtime; then
+        read -p "Docker/Podman not found. Install Docker? [Y/n] " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
             install_docker
         else
-            echo -e "${YELLOW}Warning: Docker is required for FalkorDB and Qdrant${NC}"
+            log_warn "No container runtime. CV-Git will use external databases."
+            CONTAINER_RUNTIME="external"
+            CONTAINER_ROOTLESS=true
         fi
     fi
 
     echo
-    echo "Installing cv-git..."
+    install_cv_git
+    create_global_config
+    create_docker_compose_override
+    update_path
 
-    # Create install directory
-    sudo mkdir -p "$INSTALL_DIR"
-
-    # Download and extract release (or clone for development)
-    if [ -f "packages/cli/dist/bundle.cjs" ]; then
-        # Local development install
-        echo "Installing from local build..."
-        sudo cp packages/cli/dist/bundle.cjs "$INSTALL_DIR/cv.cjs"
-
-        # Install native modules via npm
-        install_native_modules
-    else
-        # Download release
-        RELEASE_URL="https://github.com/controlVector/cv-git/releases/download/v${VERSION}/cv-git-${VERSION}.tar.gz"
-        echo "Downloading cv-git v${VERSION}..."
-
-        TEMP_DIR=$(mktemp -d)
-        curl -fsSL "$RELEASE_URL" -o "$TEMP_DIR/cv-git.tar.gz" || {
-            echo -e "${YELLOW}Release not found. Cloning repository...${NC}"
-            git clone --depth 1 https://github.com/controlVector/cv-git.git "$TEMP_DIR/cv-git"
-            cd "$TEMP_DIR/cv-git"
-            npm install -g pnpm
-            pnpm install
-            pnpm build
-
-            # Rebuild native modules for the target system
-            echo "Rebuilding native modules..."
-            pnpm rebuild keytar tree-sitter 2>/dev/null || echo -e "${YELLOW}Native module rebuild warning (may be OK)${NC}"
-
-            # Copy bundle and install native modules
-            sudo cp packages/cli/dist/bundle.cjs "$INSTALL_DIR/cv.cjs"
-            install_native_modules
-
-            cd -
-            rm -rf "$TEMP_DIR"
-        }
-
-        if [ -f "$TEMP_DIR/cv-git.tar.gz" ]; then
-            tar -xzf "$TEMP_DIR/cv-git.tar.gz" -C "$INSTALL_DIR"
-            rm -rf "$TEMP_DIR"
-        fi
-    fi
-
-    # Create wrapper script with correct install path
-    sudo tee "$BIN_DIR/cv" > /dev/null << WRAPPER
-#!/bin/bash
-exec node "${INSTALL_DIR}/cv.cjs" "\$@"
-WRAPPER
-
-    sudo chmod +x "$BIN_DIR/cv"
-
-    # Verify installation (use full path since shell may not have updated PATH)
-    echo
+    # Verify installation
     if "$BIN_DIR/cv" --version &> /dev/null; then
-        echo -e "${GREEN}╔═══════════════════════════════════════╗${NC}"
-        echo -e "${GREEN}║     CV-Git installed successfully!    ║${NC}"
-        echo -e "${GREEN}╚═══════════════════════════════════════╝${NC}"
-        echo
-        echo "Next steps:"
-        echo "  1. Initialize a repository:  cv init"
-        echo "  2. Check system status:      cv doctor"
-        echo "  3. Sync your codebase:       cv sync"
-        echo "  4. Search code:              cv find \"authentication\""
-        echo
+        print_summary
     else
-        echo -e "${RED}Installation failed. Please check the errors above.${NC}"
+        log_error "Installation failed. Please check the errors above."
         exit 1
     fi
 }
 
-# Run uninstall if requested
-if [ "$1" = "uninstall" ]; then
-    echo "Uninstalling cv-git..."
-    sudo rm -rf "$INSTALL_DIR"
-    sudo rm -f "$BIN_DIR/cv"
-    echo -e "${GREEN}CV-Git uninstalled successfully${NC}"
-    exit 0
-fi
-
-main
+main "$@"

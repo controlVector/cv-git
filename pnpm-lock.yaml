@@ -146,6 +146,9 @@ importers:
       '@qdrant/js-client-rest':
         specifier: ^1.9.0
         version: 1.16.2(typescript@5.9.3)
+      lru-cache:
+        specifier: ^11.2.4
+        version: 11.2.4
       minimatch:
         specifier: ^10.1.1
         version: 10.1.1

@@ -1,0 +1,287 @@
+{
+  "version": "1.0.0",
+  "updatedAt": "2026-01-20T00:00:00Z",
+  "issues": [
+    {
+      "id": "grpc-bazel-header-inclusion",
+      "buildSystem": "bazel",
+      "package": "grpc",
+      "affectedVersions": ">=1.50.0",
+      "errorPatterns": [
+        "undeclared inclusion.*in rule '@@grpc~",
+        "undeclared inclusion.*grpc.*:status_helper",
+        "grpc.*upb-gen.*\\.upb\\.h",
+        "grpc.*ext/upb-gen.*\\.upb_minitable\\.h",
+        "this rule is missing dependency declarations.*grpc"
+      ],
+      "severity": "error",
+      "description": "grpc bazel rules have missing header declarations for upb-generated protobuf files. This is a known issue with grpc's bzlmod integration where the generated upb headers are not properly declared as dependencies.",
+      "upstreamIssue": "https://github.com/grpc/grpc/issues/35271",
+      "tags": ["bazel", "grpc", "protobuf", "upb", "header"],
+      "status": "active",
+      "workarounds": [
+        {
+          "id": "spawn-local",
+          "description": "Use local spawn strategy to bypass sandbox restrictions",
+          "type": "flag",
+          "automatic": true,
+          "priority": 1,
+          "action": {
+            "type": "add_build_flag",
+            "flag": "--spawn_strategy=local"
+          },
+          "risks": "Builds may be less hermetic and reproducible"
+        },
+        {
+          "id": "bazelrc-spawn-local",
+          "description": "Add spawn_strategy=local to .bazelrc for persistent fix",
+          "type": "config",
+          "automatic": true,
+          "priority": 2,
+          "action": {
+            "type": "add_to_config",
+            "file": ".bazelrc.user",
+            "content": "# Workaround for grpc header inclusion issue (cv-git)\nbuild --spawn_strategy=local\n",
+            "position": "append"
+          }
+        },
+        {
+          "id": "pin-grpc-version",
+          "description": "Pin grpc to an older version without this issue",
+          "type": "pin_version",
+          "automatic": false,
+          "priority": 3,
+          "action": {
+            "type": "pin_version",
+            "package": "grpc",
+            "version": "1.49.1",
+            "file": "MODULE.bazel"
+          },
+          "risks": "May introduce compatibility issues with other dependencies"
+        }
+      ]
+    },
+    {
+      "id": "protobuf-abseil-mismatch",
+      "buildSystem": "bazel",
+      "package": "protobuf",
+      "errorPatterns": [
+        "undefined reference to.*absl::",
+        "abseil.*protobuf.*version mismatch",
+        "cannot find.*absl.*proto",
+        "protobuf.*requires.*abseil"
+      ],
+      "severity": "error",
+      "description": "Protobuf and Abseil version mismatch. Newer versions of protobuf require specific Abseil versions for ABI compatibility.",
+      "upstreamIssue": "https://github.com/protocolbuffers/protobuf/issues/12292",
+      "tags": ["bazel", "protobuf", "abseil", "version"],
+      "status": "active",
+      "workarounds": [
+        {
+          "id": "align-versions",
+          "description": "Align protobuf and abseil versions in MODULE.bazel",
+          "type": "config",
+          "automatic": false,
+          "action": {
+            "type": "patch_file",
+            "file": "MODULE.bazel",
+            "search": "bazel_dep\\(name = \"abseil-cpp\".*\\)",
+            "replace": "bazel_dep(name = \"abseil-cpp\", version = \"20230802.0\")",
+            "regex": true
+          },
+          "risks": "May require updating other dependencies"
+        }
+      ]
+    },
+    {
+      "id": "bazel-sandbox-permission",
+      "buildSystem": "bazel",
+      "package": "*",
+      "errorPatterns": [
+        "sandbox.*permission denied",
+        "operation not permitted.*sandbox",
+        "failed.*sandbox.*mount",
+        "linux-sandbox.*EPERM"
+      ],
+      "severity": "error",
+      "description": "Bazel sandbox operations failing due to permission issues. Common on systems with restricted mount namespaces or in containers.",
+      "tags": ["bazel", "sandbox", "permission", "container"],
+      "status": "active",
+      "workarounds": [
+        {
+          "id": "disable-sandbox",
+          "description": "Disable sandboxing entirely",
+          "type": "flag",
+          "automatic": true,
+          "priority": 1,
+          "action": {
+            "type": "add_build_flag",
+            "flag": "--spawn_strategy=local"
+          },
+          "risks": "Builds are less isolated and reproducible"
+        },
+        {
+          "id": "use-processwrapper",
+          "description": "Use processwrapper sandbox instead of linux-sandbox",
+          "type": "flag",
+          "automatic": true,
+          "priority": 2,
+          "action": {
+            "type": "add_build_flag",
+            "flag": "--sandbox_implementation=processwrapper-sandbox"
+          }
+        }
+      ]
+    },
+    {
+      "id": "bazel-memory-oom",
+      "buildSystem": "bazel",
+      "package": "*",
+      "errorPatterns": [
+        "java\\.lang\\.OutOfMemoryError",
+        "Cannot allocate memory",
+        "ENOMEM",
+        "Killed.*memory",
+        "exit code 137"
+      ],
+      "severity": "error",
+      "description": "Bazel or its subprocesses ran out of memory. Common with large builds or limited system resources.",
+      "tags": ["bazel", "memory", "oom"],
+      "status": "active",
+      "workarounds": [
+        {
+          "id": "limit-jobs",
+          "description": "Reduce parallel job count",
+          "type": "flag",
+          "automatic": true,
+          "priority": 1,
+          "action": {
+            "type": "add_build_flag",
+            "flag": "--jobs=4"
+          }
+        },
+        {
+          "id": "increase-heap",
+          "description": "Increase Bazel JVM heap size",
+          "type": "env_var",
+          "automatic": true,
+          "priority": 2,
+          "action": {
+            "type": "set_env",
+            "key": "JAVA_OPTS",
+            "value": "-Xmx8g"
+          }
+        },
+        {
+          "id": "disk-cache",
+          "description": "Enable disk cache to reduce memory pressure",
+          "type": "flag",
+          "automatic": true,
+          "priority": 3,
+          "action": {
+            "type": "add_build_flag",
+            "flag": "--disk_cache=~/.cache/bazel-disk"
+          }
+        }
+      ]
+    },
+    {
+      "id": "bazel-toolchain-not-found",
+      "buildSystem": "bazel",
+      "package": "*",
+      "errorPatterns": [
+        "no matching toolchains found",
+        "no toolchain found for",
+        "toolchain resolution failed",
+        "Unable to find a CC toolchain"
+      ],
+      "severity": "error",
+      "description": "Bazel couldn't find a suitable toolchain for the target platform. This often happens with cross-compilation or missing system dependencies.",
+      "tags": ["bazel", "toolchain", "cc"],
+      "status": "active",
+      "workarounds": [
+        {
+          "id": "register-local-toolchain",
+          "description": "Use locally detected toolchains",
+          "type": "flag",
+          "automatic": true,
+          "priority": 1,
+          "action": {
+            "type": "add_build_flag",
+            "flag": "--incompatible_enable_cc_toolchain_resolution=false"
+          },
+          "risks": "May not work with all targets"
+        }
+      ]
+    },
+    {
+      "id": "npm-peer-dependency",
+      "buildSystem": "npm",
+      "package": "*",
+      "errorPatterns": [
+        "ERESOLVE.*peer dep",
+        "peer dependency.*not installed",
+        "Could not resolve dependency.*peer",
+        "npm ERR! peer dep missing"
+      ],
+      "severity": "error",
+      "description": "NPM peer dependency conflict. Packages have incompatible peer dependency requirements.",
+      "tags": ["npm", "peer", "dependency"],
+      "status": "active",
+      "workarounds": [
+        {
+          "id": "legacy-peer-deps",
+          "description": "Use legacy peer dependency resolution",
+          "type": "flag",
+          "automatic": true,
+          "priority": 1,
+          "action": {
+            "type": "add_build_flag",
+            "flag": "--legacy-peer-deps",
+            "command": "npm install"
+          }
+        },
+        {
+          "id": "force-install",
+          "description": "Force installation despite conflicts",
+          "type": "flag",
+          "automatic": false,
+          "priority": 2,
+          "action": {
+            "type": "add_build_flag",
+            "flag": "--force",
+            "command": "npm install"
+          },
+          "risks": "May result in runtime errors"
+        }
+      ]
+    },
+    {
+      "id": "cargo-feature-conflict",
+      "buildSystem": "cargo",
+      "package": "*",
+      "errorPatterns": [
+        "feature.*was not specified",
+        "features.*are not compatible",
+        "error\\[E0433\\].*failed to resolve"
+      ],
+      "severity": "error",
+      "description": "Cargo feature flags conflict between dependencies.",
+      "tags": ["cargo", "rust", "feature"],
+      "status": "active",
+      "workarounds": [
+        {
+          "id": "all-features",
+          "description": "Build with all features enabled",
+          "type": "flag",
+          "automatic": true,
+          "priority": 1,
+          "action": {
+            "type": "add_build_flag",
+            "flag": "--all-features"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -2,6 +2,124 @@
 
 All notable changes to CV-Git will be documented in this file.
 
+## [0.5.0] - 2026-01-21
+
+### Added
+
+#### Privilege Configuration System
+- **User/Root Mode Support** - CV-Git can now run in either root mode or user mode
+  - `user` mode: Everything runs in user scope (rootless Docker, local installs, user services)
+  - `root` mode: Full system access (Docker, global installs, system services)
+  - `auto` mode: Automatically detects the appropriate mode based on environment
+  - XDG Base Directory spec compliance on Linux for user mode paths
+
+- **Global Configuration** - New `~/.config/cv-git/config.json` for system-wide settings
+  - Configure privilege mode, container runtime, database connections
+  - AI provider settings, credential storage preferences
+  - `cv config global-init` - Interactive setup wizard
+
+- **Credential Service** - Secure credential management with fallbacks
+  - Keychain/keyring integration (via keytar)
+  - Encrypted file storage fallback (AES-256-CBC)
+  - Environment variable support
+  - Priority: env vars > keychain > encrypted file
+
+- **Container Service** - Docker/Podman container management
+  - `getContainerService()` - Manage CV-Git containers (FalkorDB, Qdrant)
+  - Rootless container support detection
+  - Docker Compose v1/v2 compatibility
+  - Auto-generate docker-compose.yml for user mode
+
+#### Enhanced CLI Commands
+- **`cv config privilege`** - Show privilege mode configuration
+  - Displays configured vs detected mode
+  - Shows data paths and container runtime status
+  - Rootless detection and recommendations
+
+- **`cv config global-init`** - Interactive global setup
+  - Configure privilege mode
+  - Select container runtime (Docker, Podman, external)
+  - Choose credential storage method
+  - Rootless container preferences
+
+- **`cv doctor`** - New diagnostic checks
+  - Privilege Mode check (configured vs detected, running as root warning)
+  - Container Runtime check (status, rootless, recommendations)
+
+#### Installation Improvements
+- **Linux Install Script** - Updated `install.sh` with privilege mode support
+  - Auto-detect user vs system mode
+  - XDG Base Directory compliant paths for user mode
+  - Docker/Podman detection with rootless preference
+  - Global configuration creation
+
+- **Mac Install Script** - New `scripts/install-mac.sh`
+  - macOS-specific paths (Library/Application Support, Library/Caches)
+  - LaunchAgent support for optional auto-start
+  - Docker Desktop detection and setup
+
+### Changed
+- Version bump to 0.5.0 (major feature release)
+- Install scripts now create global CV-Git configuration
+- Doctor command includes privilege and container runtime checks
+
+---
+
+## [0.4.25] - 2026-01-21
+
+### Added
+
+#### Performance Enhancements
+- **GraphService Caching** - All graph query methods now use LRU caching for improved performance
+  - `findPath()`, `findAllPaths()`, `getNeighborhood()`, `getImpactAnalysis()`, `findBridge()` all cached
+  - Cache uses the global CacheService with graph namespace
+  - Significant speedup for repeated queries
+
+- **In-Memory Cache Statistics** - New `cv cache memory` command
+  - View hit/miss statistics for graph, vector, and AI caches
+  - `--json` flag for programmatic access
+  - `--clear` flag to reset all in-memory caches
+
+#### New MCP Tools
+- **`cv_graph_neighborhood`** - Explore the neighborhood of a symbol
+  - Shows callers, callees, and related code within a configurable radius
+  - Groups results by distance from the center symbol
+  - Supports direction filtering (incoming, outgoing, both)
+
+- **`cv_graph_impact`** - Analyze the impact of changing a symbol
+  - Risk assessment (low/medium/high/critical) based on caller count
+  - Lists direct and indirect callers, implementors, and extenders
+  - Shows affected files and total impact count
+
+- **`cv_graph_bridge`** - Find connections between two symbols
+  - Discovers paths connecting distant parts of the codebase
+  - Shows multiple connection paths with relationship types
+  - Useful for understanding code dependencies
+
+- **`cv_summary_view`** - Get high-level codebase summary
+  - Multiple aspects: overview, architecture, patterns, statistics
+  - Displays architecture patterns, conventions, and key abstractions
+  - Requires `cv summary --regenerate` to generate initial summary
+
+#### Enhanced Diff Command
+- **`cv diff --explain`** - AI-powered explanation of changes
+  - Generates human-readable explanation of what the changes do
+  - Works with `--impact` to include change impact analysis
+
+- **`cv diff --review`** - AI-powered code review
+  - Analyzes changes for bugs, security issues, and code quality
+  - `--strict` flag for more thorough review
+
+- **`cv diff --conventional`** - Generate conventional commit message
+  - Creates commit message in conventional format (feat/fix/refactor/etc.)
+  - Scopes automatically detected from changed files
+
+### Changed
+- `cv cache stats` now focuses on embedding cache (use `cv cache memory` for in-memory stats)
+- `cv diff --analyze` is now basic analysis (no AI required)
+
+---
+
 ## [0.4.23] - 2026-01-14
 
 ### Added
@@ -302,6 +420,7 @@ All notable changes to CV-Git will be documented in this file.
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 0.4.25 | 2026-01-21 | Performance caching, new MCP tools, enhanced diff |
 | 0.4.23 | 2026-01-14 | Repository isolation, cv deps, tree-sitter improvements |
 | 0.4.20 | 2026-01-10 | Ollama local embeddings, sync error reporting |
 | 0.4.14 | 2026-01-08 | Modern VCS features, npm auth, bug reporting |

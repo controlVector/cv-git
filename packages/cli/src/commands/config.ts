@@ -8,6 +8,14 @@ import chalk from 'chalk';
 import { getConfig } from '../config.js';
 import { spawn } from 'child_process';
 import Table from 'cli-table3';
+import {
+  loadCVGitConfig,
+  saveCVGitConfig,
+  detectPrivilegeMode,
+  getDefaultPaths,
+  getRecommendedRuntime,
+  getContainerService
+} from '@cv-git/core';
 
 export function configCommand(): Command {
   const cmd = new Command('config');
@@ -205,6 +213,133 @@ export function configCommand(): Command {
       const config = getConfig();
       const configPath = (config as any).configPath;
       console.log(configPath);
+    });
+
+  // cv config privilege
+  cmd
+    .command('privilege')
+    .description('Show privilege mode configuration')
+    .action(async () => {
+      try {
+        const globalConfig = await loadCVGitConfig();
+        const detectedMode = detectPrivilegeMode();
+        const paths = getDefaultPaths(globalConfig.privilege.mode);
+        const containerService = getContainerService();
+        const status = await containerService.getStatus();
+
+        console.log(chalk.bold('\n🔐 Privilege Configuration\n'));
+
+        console.log(chalk.cyan('Configured Mode:'), formatValue(globalConfig.privilege.mode));
+        console.log(chalk.cyan('Detected Mode:'), formatValue(detectedMode));
+        console.log(chalk.cyan('Running as Root:'), process.getuid?.() === 0 ? chalk.yellow('Yes') : chalk.green('No'));
+        console.log(chalk.cyan('Allow Sudo:'), formatValue(globalConfig.privilege.allowSudo));
+        console.log(chalk.cyan('Warn on Root:'), formatValue(globalConfig.privilege.warnOnRoot));
+
+        console.log(chalk.bold('\n📂 Paths\n'));
+        console.log(chalk.cyan('Data:'), paths.data);
+        console.log(chalk.cyan('Config:'), paths.config);
+        console.log(chalk.cyan('Cache:'), paths.cache);
+        console.log(chalk.cyan('Logs:'), paths.logs);
+        console.log(chalk.cyan('Bin:'), paths.bin);
+
+        console.log(chalk.bold('\n🐳 Container Runtime\n'));
+        console.log(chalk.cyan('Runtime:'), status.runtime);
+        console.log(chalk.cyan('Rootless:'), status.rootless ? chalk.green('Yes') : chalk.yellow('No'));
+        console.log(chalk.cyan('Recommended:'), getRecommendedRuntime());
+
+        console.log();
+      } catch (error: any) {
+        console.error(chalk.red('✗ Error:'), error.message);
+        process.exit(1);
+      }
+    });
+
+  // cv config global-init
+  cmd
+    .command('global-init')
+    .description('Initialize global CV-Git configuration interactively')
+    .action(async () => {
+      try {
+        // Dynamic import inquirer
+        const inquirerModule = await import('inquirer');
+        const inquirer = inquirerModule.default;
+
+        console.log(chalk.bold('\n🔧 CV-Git Global Configuration Setup\n'));
+        console.log(chalk.gray('This wizard will help you configure CV-Git for your system.\n'));
+
+        interface GlobalConfigAnswers {
+          mode: 'auto' | 'user' | 'root';
+          runtime: 'docker' | 'podman' | 'external';
+          rootless?: boolean;
+          credentials: 'keychain' | 'file' | 'env';
+          warnOnRoot: boolean;
+        }
+
+        const answers: GlobalConfigAnswers = await inquirer.prompt([
+          {
+            type: 'list',
+            name: 'mode',
+            message: 'Privilege mode:',
+            choices: [
+              { name: 'Auto-detect (recommended)', value: 'auto' },
+              { name: 'User mode (no root required)', value: 'user' },
+              { name: 'Root/System mode', value: 'root' },
+            ],
+            default: 'auto',
+          },
+          {
+            type: 'list',
+            name: 'runtime',
+            message: 'Container runtime:',
+            choices: [
+              { name: 'Docker', value: 'docker' },
+              { name: 'Podman', value: 'podman' },
+              { name: 'External (use existing databases)', value: 'external' },
+            ],
+            default: getRecommendedRuntime(),
+          },
+          {
+            type: 'confirm',
+            name: 'rootless',
+            message: 'Use rootless containers?',
+            default: true,
+            when: (ans: GlobalConfigAnswers) => ans.runtime !== 'external',
+          },
+          {
+            type: 'list',
+            name: 'credentials',
+            message: 'Credential storage:',
+            choices: [
+              { name: 'System keychain (secure, recommended)', value: 'keychain' },
+              { name: 'Encrypted file', value: 'file' },
+              { name: 'Environment variables only', value: 'env' },
+            ],
+            default: 'keychain',
+          },
+          {
+            type: 'confirm',
+            name: 'warnOnRoot',
+            message: 'Warn when running as root?',
+            default: true,
+          },
+        ]);
+
+        const globalConfig = await loadCVGitConfig();
+        globalConfig.privilege.mode = answers.mode;
+        globalConfig.privilege.warnOnRoot = answers.warnOnRoot;
+        globalConfig.containers.runtime = answers.runtime;
+        globalConfig.containers.rootless = answers.rootless ?? true;
+        globalConfig.credentials.storage = answers.credentials;
+
+        await saveCVGitConfig(globalConfig);
+
+        console.log(chalk.green('\n✓ Global configuration saved!'));
+        console.log(chalk.gray('Run `cv config privilege` to view current settings.'));
+        console.log(chalk.gray('Run `cv doctor` to verify your setup.\n'));
+      } catch (error: any) {
+        console.error(chalk.red('✗ Error:'), error.message);
+        process.exit(1);
+      }
     });
 
   return cmd;

@@ -178,3 +178,12 @@ export interface CommitGenerateArgs {
   type?: string;   // Override commit type (feat, fix, refactor, etc.)
   scope?: string;  // Override commit scope
 }
+
+/**
+ * Tool arguments for cv_reason
+ */
+export interface ReasonArgs {
+  query: string;       // The query to reason about
+  maxDepth?: number;   // Maximum recursion depth (default: 5)
+  showTrace?: boolean; // Include reasoning trace in output
+}

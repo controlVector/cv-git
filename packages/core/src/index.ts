@@ -19,6 +19,7 @@ export * from './code/index.js';
 export * from './storage/index.js';
 export * from './context/index.js';
 export * from './deps/index.js';
+export * from './services/index.js';
 
 // Stub modules (not yet implemented)
 export * from './gateway/index.js';

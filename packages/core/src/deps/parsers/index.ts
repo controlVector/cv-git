@@ -9,12 +9,14 @@ export { CMakeParser } from './cmake.js';
 export { MesonParser } from './meson.js';
 export { SConsParser } from './scons.js';
 export { AutotoolsParser } from './autotools.js';
+export { BazelParser } from './bazel.js';
 
 import { IBuildSystemParser } from './base.js';
 import { CMakeParser } from './cmake.js';
 import { MesonParser } from './meson.js';
 import { SConsParser } from './scons.js';
 import { AutotoolsParser } from './autotools.js';
+import { BazelParser } from './bazel.js';
 
 /**
  * Get all available build system parsers
@@ -24,6 +26,7 @@ export function getAllParsers(): IBuildSystemParser[] {
     new CMakeParser(),
     new MesonParser(),
     new SConsParser(),
-    new AutotoolsParser()
+    new AutotoolsParser(),
+    new BazelParser()
   ];
 }

@@ -1,11 +1,11 @@
 /**
  * Graph Tool Handlers
- * Implements cv_graph_query, cv_graph_stats, cv_graph_inspect
+ * Implements cv_graph_query, cv_graph_stats, cv_graph_inspect, and advanced graph analysis tools
  */
 
 import { GraphQueryArgs, ToolResult, GraphResult } from '../types.js';
 import { successResult, errorResult, formatGraphResults } from '../utils.js';
-import { configManager, createGraphManager } from '@cv-git/core';
+import { configManager, createGraphManager, createGraphService, loadCodebaseSummary } from '@cv-git/core';
 import { findRepoRoot } from '@cv-git/shared';
 
 /**
@@ -507,5 +507,392 @@ Hot spots are frequently called functions that may benefit from optimization.`;
     return successResult(text);
   } catch (error: any) {
     return errorResult('Hot spot analysis failed', error);
+  }
+}
+
+/**
+ * Handle cv_graph_neighborhood tool call
+ * Explore the neighborhood of a symbol
+ */
+export async function handleGraphNeighborhood(args: { symbol: string; depth?: number; direction?: string }): Promise<ToolResult> {
+  try {
+    const { symbol, depth = 2, direction = 'both' } = args;
+
+    // Find repository root
+    const repoRoot = await findRepoRoot();
+    if (!repoRoot) {
+      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
+    }
+
+    // Load configuration
+    const config = await configManager.load(repoRoot);
+
+    // Initialize graph manager and service
+    const graph = createGraphManager(config.graph.url, config.graph.database);
+    await graph.connect();
+
+    const graphService = createGraphService(graph);
+    const neighborhood = await graphService.getNeighborhood(symbol, {
+      depth,
+      direction: direction as 'incoming' | 'outgoing' | 'both'
+    });
+
+    await graph.close();
+
+    if (neighborhood.nodes.length === 0) {
+      return successResult(`Symbol "${symbol}" has no neighbors within depth ${depth}.`);
+    }
+
+    // Format the result
+    const lines: string[] = [];
+    lines.push(`Neighborhood of "${neighborhood.center.name}" (${neighborhood.center.type}):`);
+    lines.push(`  Location: ${neighborhood.center.file}:${neighborhood.center.line || '?'}`);
+    if (neighborhood.center.docstring) {
+      lines.push(`  Description: ${neighborhood.center.docstring.split('\n')[0]}`);
+    }
+    lines.push('');
+
+    // Group by distance
+    const byDistance: Record<number, typeof neighborhood.nodes> = {};
+    for (const node of neighborhood.nodes) {
+      if (!byDistance[node.distance]) byDistance[node.distance] = [];
+      byDistance[node.distance].push(node);
+    }
+
+    for (const dist of Object.keys(byDistance).sort((a, b) => Number(a) - Number(b))) {
+      const nodes = byDistance[Number(dist)];
+      lines.push(`Distance ${dist} (${nodes.length} symbols):`);
+      for (const node of nodes.slice(0, 15)) {
+        const arrow = node.direction === 'incoming' ? '←' : node.direction === 'outgoing' ? '→' : '↔';
+        lines.push(`  ${arrow} ${node.name} (${node.type}) via ${node.relationship}`);
+        lines.push(`    ${node.file}:${node.line || '?'}`);
+      }
+      if (nodes.length > 15) {
+        lines.push(`  ... and ${nodes.length - 15} more`);
+      }
+      lines.push('');
+    }
+
+    // Summary
+    lines.push(`Summary: ${neighborhood.summary.totalNodes} symbols in neighborhood`);
+    lines.push(`  By type: ${Object.entries(neighborhood.summary.byType).map(([t, c]) => `${t}(${c})`).join(', ')}`);
+    lines.push(`  By relationship: ${Object.entries(neighborhood.summary.byRelationship).map(([r, c]) => `${r}(${c})`).join(', ')}`);
+
+    return successResult(lines.join('\n'));
+  } catch (error: any) {
+    return errorResult('Neighborhood exploration failed', error);
+  }
+}
+
+/**
+ * Handle cv_graph_impact tool call
+ * Analyze the impact of changing a symbol
+ */
+export async function handleGraphImpact(args: { symbol: string; depth?: number }): Promise<ToolResult> {
+  try {
+    const { symbol, depth = 3 } = args;
+
+    // Find repository root
+    const repoRoot = await findRepoRoot();
+    if (!repoRoot) {
+      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
+    }
+
+    // Load configuration
+    const config = await configManager.load(repoRoot);
+
+    // Initialize graph manager and service
+    const graph = createGraphManager(config.graph.url, config.graph.database);
+    await graph.connect();
+
+    const graphService = createGraphService(graph);
+    const impact = await graphService.getImpactAnalysis(symbol, { maxDepth: depth });
+
+    await graph.close();
+
+    // Format the result
+    const lines: string[] = [];
+    lines.push(`Impact Analysis for "${impact.target.name}" (${impact.target.type}):`);
+    lines.push(`  Location: ${impact.target.file}`);
+    lines.push('');
+
+    // Risk assessment
+    const riskColors: Record<string, string> = {
+      low: '🟢',
+      medium: '🟡',
+      high: '🟠',
+      critical: '🔴'
+    };
+    lines.push(`Risk Level: ${riskColors[impact.riskLevel] || ''} ${impact.riskLevel.toUpperCase()}`);
+    lines.push(`  ${impact.riskExplanation}`);
+    lines.push('');
+
+    // Direct callers
+    if (impact.directCallers.length > 0) {
+      lines.push(`Direct Callers (${impact.directCallers.length}):`);
+      for (const caller of impact.directCallers.slice(0, 10)) {
+        lines.push(`  - ${caller.name} (${caller.kind}) in ${caller.file}`);
+      }
+      if (impact.directCallers.length > 10) {
+        lines.push(`  ... and ${impact.directCallers.length - 10} more`);
+      }
+      lines.push('');
+    }
+
+    // Indirect callers
+    if (impact.indirectCallers.length > 0) {
+      lines.push(`Indirect Callers (${impact.indirectCallers.length}):`);
+      for (const caller of impact.indirectCallers.slice(0, 10)) {
+        lines.push(`  - ${caller.name} (depth ${caller.depth}) in ${caller.file}`);
+      }
+      if (impact.indirectCallers.length > 10) {
+        lines.push(`  ... and ${impact.indirectCallers.length - 10} more`);
+      }
+      lines.push('');
+    }
+
+    // Implementors and extenders
+    if (impact.implementors.length > 0) {
+      lines.push(`Implementors: ${impact.implementors.join(', ')}`);
+    }
+    if (impact.extenders.length > 0) {
+      lines.push(`Extenders: ${impact.extenders.join(', ')}`);
+    }
+
+    // Affected files
+    if (impact.affectedFiles.length > 0) {
+      lines.push('');
+      lines.push(`Affected Files (${impact.affectedFiles.length}):`);
+      for (const file of impact.affectedFiles.slice(0, 10)) {
+        lines.push(`  - ${file}`);
+      }
+      if (impact.affectedFiles.length > 10) {
+        lines.push(`  ... and ${impact.affectedFiles.length - 10} more`);
+      }
+    }
+
+    lines.push('');
+    lines.push(`Total Impact: ${impact.totalImpact} symbols may be affected`);
+
+    return successResult(lines.join('\n'));
+  } catch (error: any) {
+    return errorResult('Impact analysis failed', error);
+  }
+}
+
+/**
+ * Handle cv_graph_bridge tool call
+ * Find how two symbols are connected
+ */
+export async function handleGraphBridge(args: { source: string; target: string; maxDepth?: number }): Promise<ToolResult> {
+  try {
+    const { source, target, maxDepth = 5 } = args;
+
+    // Find repository root
+    const repoRoot = await findRepoRoot();
+    if (!repoRoot) {
+      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
+    }
+
+    // Load configuration
+    const config = await configManager.load(repoRoot);
+
+    // Initialize graph manager and service
+    const graph = createGraphManager(config.graph.url, config.graph.database);
+    await graph.connect();
+
+    const graphService = createGraphService(graph);
+    const bridge = await graphService.findBridge(source, target, { maxDepth });
+
+    await graph.close();
+
+    // Format the result
+    const lines: string[] = [];
+    lines.push(`Bridge Analysis: "${bridge.source.name}" ↔ "${bridge.target.name}"`);
+    lines.push('');
+    lines.push(`Source: ${bridge.source.name} (${bridge.source.kind}) in ${bridge.source.file}`);
+    lines.push(`Target: ${bridge.target.name} (${bridge.target.kind}) in ${bridge.target.file}`);
+    lines.push('');
+
+    if (bridge.directConnection) {
+      lines.push('✓ Direct connection exists');
+    } else {
+      lines.push('✗ No direct connection');
+    }
+
+    if (bridge.connections.length === 0) {
+      lines.push('');
+      lines.push(`No paths found between "${source}" and "${target}" within depth ${maxDepth}.`);
+    } else {
+      lines.push('');
+      lines.push(`Found ${bridge.connections.length} connection path(s):`);
+      lines.push('');
+
+      for (let i = 0; i < Math.min(bridge.connections.length, 5); i++) {
+        const conn = bridge.connections[i];
+        lines.push(`Path ${i + 1} (${conn.length} steps):`);
+        lines.push(`  ${conn.path.join(' → ')}`);
+        lines.push(`  Relationships: ${conn.relationshipTypes.join(' → ')}`);
+        lines.push('');
+      }
+
+      if (bridge.connections.length > 5) {
+        lines.push(`... and ${bridge.connections.length - 5} more paths`);
+      }
+    }
+
+    lines.push('');
+    lines.push(bridge.explanation);
+
+    return successResult(lines.join('\n'));
+  } catch (error: any) {
+    return errorResult('Bridge detection failed', error);
+  }
+}
+
+/**
+ * Handle cv_summary_view tool call
+ * Get a high-level summary of the codebase
+ */
+export async function handleSummaryView(args: { aspect?: string }): Promise<ToolResult> {
+  try {
+    const { aspect = 'overview' } = args;
+
+    // Find repository root
+    const repoRoot = await findRepoRoot();
+    if (!repoRoot) {
+      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
+    }
+
+    // Try to load existing summary
+    const summary = await loadCodebaseSummary(repoRoot);
+
+    if (!summary) {
+      return errorResult('No codebase summary found. Run `cv summary --regenerate` to generate one.');
+    }
+
+    // Format based on aspect
+    const lines: string[] = [];
+
+    switch (aspect) {
+      case 'overview':
+        lines.push('📊 Codebase Overview');
+        lines.push('═'.repeat(50));
+        lines.push('');
+        lines.push(summary.naturalLanguageSummary);
+        lines.push('');
+        lines.push(`Files: ${summary.stats.totalFiles} | Symbols: ${summary.stats.totalSymbols} | Functions: ${summary.stats.totalFunctions} | Classes: ${summary.stats.totalClasses}`);
+        if (summary.architecture.patterns.length > 0) {
+          lines.push(`Patterns: ${summary.architecture.patterns.join(', ')}`);
+        }
+        break;
+
+      case 'architecture':
+        lines.push('🏗️ Architecture');
+        lines.push('═'.repeat(50));
+        lines.push('');
+        if (summary.architecture.patterns.length > 0) {
+          lines.push(`Patterns: ${summary.architecture.patterns.join(', ')}`);
+        }
+        if (summary.architecture.layers && summary.architecture.layers.length > 0) {
+          lines.push(`Layers: ${summary.architecture.layers.join(' → ')}`);
+        }
+        lines.push('');
+        lines.push('Entry Points:');
+        for (const entry of summary.architecture.entryPoints.slice(0, 5)) {
+          lines.push(`  - ${entry}`);
+        }
+        lines.push('');
+        lines.push('Core Modules:');
+        for (const mod of summary.architecture.coreModules.slice(0, 8)) {
+          lines.push(`  - ${mod.name} (${mod.path})`);
+          lines.push(`    ${mod.fileCount} files, ${mod.symbolCount} symbols`);
+          if (mod.keyExports.length > 0) {
+            lines.push(`    Exports: ${mod.keyExports.slice(0, 5).join(', ')}`);
+          }
+        }
+        break;
+
+      case 'patterns':
+        lines.push('📝 Patterns & Conventions');
+        lines.push('═'.repeat(50));
+        lines.push('');
+        lines.push('Architecture Patterns:');
+        for (const pattern of summary.architecture.patterns) {
+          lines.push(`  - ${pattern}`);
+        }
+        lines.push('');
+        if (summary.conventions.naming.length > 0) {
+          lines.push('Naming Conventions:');
+          for (const conv of summary.conventions.naming) {
+            lines.push(`  - ${conv}`);
+          }
+        }
+        if (summary.conventions.fileStructure.length > 0) {
+          lines.push('');
+          lines.push('File Structure:');
+          for (const conv of summary.conventions.fileStructure) {
+            lines.push(`  - ${conv}`);
+          }
+        }
+        if (summary.conventions.testing.length > 0) {
+          lines.push('');
+          lines.push('Testing Patterns:');
+          for (const conv of summary.conventions.testing) {
+            lines.push(`  - ${conv}`);
+          }
+        }
+        lines.push('');
+        lines.push('Key Abstractions:');
+        if (summary.abstractions.interfaces.length > 0) {
+          lines.push(`  Interfaces: ${summary.abstractions.interfaces.slice(0, 5).map(i => i.name).join(', ')}`);
+        }
+        if (summary.abstractions.baseClasses.length > 0) {
+          lines.push(`  Base Classes: ${summary.abstractions.baseClasses.slice(0, 5).map(c => c.name).join(', ')}`);
+        }
+        break;
+
+      case 'statistics':
+        lines.push('📈 Statistics');
+        lines.push('═'.repeat(50));
+        lines.push('');
+        lines.push(`Total Files: ${summary.stats.totalFiles}`);
+        lines.push(`Total Symbols: ${summary.stats.totalSymbols}`);
+        lines.push(`Total Functions: ${summary.stats.totalFunctions}`);
+        lines.push(`Total Classes: ${summary.stats.totalClasses}`);
+        if (summary.stats.linesOfCode) {
+          lines.push(`Lines of Code: ${summary.stats.linesOfCode.toLocaleString()}`);
+        }
+        lines.push('');
+        lines.push('Languages:');
+        const sortedLangs = Object.entries(summary.stats.languages)
+          .sort((a, b) => (b[1] as number) - (a[1] as number));
+        for (const [lang, count] of sortedLangs) {
+          lines.push(`  - ${lang}: ${count} files`);
+        }
+        lines.push('');
+        lines.push('Hotspots (most called):');
+        for (const hs of summary.dependencies.hotspots.slice(0, 10)) {
+          lines.push(`  - ${hs}`);
+        }
+        if (summary.dependencies.potentialIssues.length > 0) {
+          lines.push('');
+          lines.push('Potential Issues:');
+          for (const issue of summary.dependencies.potentialIssues) {
+            lines.push(`  ⚠ ${issue}`);
+          }
+        }
+        break;
+
+      default:
+        return errorResult(`Unknown aspect: ${aspect}. Valid options: overview, architecture, patterns, statistics`);
+    }
+
+    lines.push('');
+    lines.push(`Generated: ${new Date(summary.generatedAt).toLocaleString()}`);
+
+    return successResult(lines.join('\n'));
+  } catch (error: any) {
+    return errorResult('Summary view failed', error);
   }
 }

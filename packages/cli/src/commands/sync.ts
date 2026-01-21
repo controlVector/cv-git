@@ -16,7 +16,8 @@ import {
   createSyncEngine,
   exportToStorage,
   generateRepoId,
-  readManifest
+  readManifest,
+  createCodebaseSummaryService
 } from '@cv-git/core';
 import {
   findRepoRoot,
@@ -32,6 +33,7 @@ import * as path from 'path';
 import { CredentialManager } from '@cv-git/credentials';
 import { addGlobalOptions, createOutput } from '../utils/output.js';
 import { checkCredentials, displayCompactStatus } from '../utils/config-check.js';
+import { getAnthropicApiKey } from '../utils/credentials.js';
 import { ensureFalkorDB, ensureQdrant, ensureOllama, isDockerAvailable } from '../utils/infrastructure.js';
 import { getPreferences } from '../config.js';
 
@@ -142,6 +144,7 @@ export function syncCommand(): Command {
         output.debug(`Embedding provider preference: ${embeddingProvider}`);
 
         // Try to get cloud API keys from credential manager if not in config/env
+        let anthropicApiKey: string | undefined;
         try {
           const credentials = new CredentialManager();
           await credentials.init();
@@ -157,6 +160,9 @@ export function syncCommand(): Command {
             output.debug(`OpenRouter credential lookup: ${routerKey ? 'found' : 'not found'}`);
             openrouterApiKey = routerKey || undefined;
           }
+
+          // Get Anthropic key for codebase summary generation
+          anthropicApiKey = config.ai?.apiKey || await getAnthropicApiKey() || undefined;
         } catch (credError: any) {
           output.debug(`Credential manager error: ${credError.message}`);
         }
@@ -433,6 +439,9 @@ export function syncCommand(): Command {
               spinner.warn(`Export to .cv/ failed: ${exportError.message}`);
               output.debug(exportError.stack);
             }
+
+            // Generate codebase summary after delta sync with changes
+            await generateCodebaseSummary(repoRoot, config, graph, vector, anthropicApiKey, output);
           }
 
           await graph.close();
@@ -481,6 +490,9 @@ export function syncCommand(): Command {
           spinner.warn(`Export to .cv/ failed: ${exportError.message}`);
           output.debug(exportError.stack);
         }
+
+        // Generate codebase summary
+        await generateCodebaseSummary(repoRoot, config, graph, vector, anthropicApiKey, output);
 
         // Auto-import cv-prd exports if found
         spinner = output.spinner('Checking for PRD exports...').start();
@@ -1008,5 +1020,65 @@ async function readJsonl(filepath: string): Promise<any[]> {
     return lines.map(line => JSON.parse(line));
   } catch {
     return [];
+  }
+}
+
+/**
+ * Generate codebase summary after sync
+ */
+async function generateCodebaseSummary(
+  repoRoot: string,
+  config: any,
+  graph: any,
+  vector: any,
+  anthropicApiKey: string | undefined,
+  output: any
+): Promise<void> {
+  if (!anthropicApiKey) {
+    output.debug('Skipping codebase summary - no Anthropic API key');
+    return;
+  }
+
+  const spinner = output.spinner('📊 Generating codebase summary...').start();
+
+  try {
+    const summaryService = createCodebaseSummaryService(
+      {
+        apiKey: anthropicApiKey,
+        model: config.ai?.model,
+        maxTokens: config.ai?.maxTokens,
+        repoRoot
+      },
+      graph,
+      vector
+    );
+
+    const summary = await summaryService.generateSummary();
+    await summaryService.saveSummary(summary);
+
+    // Display brief summary info
+    const langStr = Object.entries(summary.stats.languages)
+      .sort((a: any, b: any) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([lang, count]) => `${lang}(${count})`)
+      .join(', ');
+
+    spinner.succeed(chalk.green('Codebase summary generated'));
+    console.log(chalk.cyan(`   📁 ${summary.stats.totalFiles} files, ${summary.stats.totalSymbols} symbols`));
+
+    if (summary.architecture.patterns.length > 0) {
+      console.log(chalk.cyan(`   🏗️  Patterns: ${summary.architecture.patterns.join(', ')}`));
+    }
+
+    if (summary.dependencies.hotspots.length > 0) {
+      const hotspotPreview = summary.dependencies.hotspots.slice(0, 3).join(', ');
+      console.log(chalk.cyan(`   🔥 Hotspots: ${hotspotPreview}`));
+    }
+
+    console.log(chalk.gray(`   Run 'cv summary' for full details`));
+
+  } catch (error: any) {
+    spinner.warn(chalk.yellow(`Summary generation failed: ${error.message}`));
+    output.debug(error.stack);
   }
 }

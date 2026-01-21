@@ -12,6 +12,13 @@ import { getConfig } from '../config.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { addGlobalOptions } from '../utils/output.js';
+import {
+  loadCVGitConfig,
+  detectPrivilegeMode,
+  getDefaultPaths,
+  getRecommendedRuntime,
+  getContainerService
+} from '@cv-git/core';
 
 const execAsync = promisify(exec);
 
@@ -40,6 +47,8 @@ export function doctorCommand(): Command {
       results.push(await checkPnpmInstalled());
       results.push(await checkCVGitInitialized());
       results.push(await checkConfiguration());
+      results.push(await checkPrivilegeMode());
+      results.push(await checkContainerRuntime());
       results.push(await checkCredentials());
       results.push(await checkFalkorDB());
       results.push(await checkQdrant());
@@ -256,6 +265,141 @@ async function checkConfiguration(): Promise<DiagnosticResult> {
       status: 'fail',
       message: `Configuration error: ${error.message}`,
       fix: 'Run "cv config reset" to reset configuration',
+    };
+  }
+}
+
+/**
+ * Check privilege mode configuration
+ */
+async function checkPrivilegeMode(): Promise<DiagnosticResult> {
+  try {
+    const globalConfig = await loadCVGitConfig();
+    const detectedMode = detectPrivilegeMode();
+    const configuredMode = globalConfig.privilege.mode;
+    const paths = getDefaultPaths(configuredMode);
+    const isRoot = process.getuid?.() === 0;
+
+    // Build status message
+    let message = `Mode: ${configuredMode}`;
+    if (configuredMode === 'auto') {
+      message += ` (detected: ${detectedMode})`;
+    }
+    message += `, Data: ${paths.data}`;
+
+    // Check for warnings
+    if (isRoot && globalConfig.privilege.warnOnRoot) {
+      return {
+        name: 'Privilege Mode',
+        status: 'warn',
+        message: `${message} - Running as root`,
+        fix: 'Consider running as non-root user or set privilege.warnOnRoot to false',
+      };
+    }
+
+    // Check if configured mode matches environment
+    if (configuredMode !== 'auto' && configuredMode !== detectedMode) {
+      return {
+        name: 'Privilege Mode',
+        status: 'warn',
+        message: `${message} - Mode mismatch (configured: ${configuredMode}, detected: ${detectedMode})`,
+        fix: 'Run "cv config global-init" to reconfigure',
+      };
+    }
+
+    return {
+      name: 'Privilege Mode',
+      status: 'pass',
+      message,
+    };
+  } catch (error: any) {
+    return {
+      name: 'Privilege Mode',
+      status: 'warn',
+      message: `Could not check privilege mode: ${error.message}`,
+      fix: 'Run "cv config global-init" to initialize global configuration',
+    };
+  }
+}
+
+/**
+ * Check container runtime status
+ */
+async function checkContainerRuntime(): Promise<DiagnosticResult> {
+  try {
+    const containerService = getContainerService();
+    const status = await containerService.getStatus();
+    const recommendedRuntime = getRecommendedRuntime();
+
+    // Build status message
+    const parts: string[] = [];
+    parts.push(`Runtime: ${status.runtime}`);
+    parts.push(status.rootless ? 'rootless' : 'rootful');
+
+    // Check container states
+    const falkorStatus = status.falkordb;
+    const qdrantStatus = status.qdrant;
+
+    if (falkorStatus === 'external' && qdrantStatus === 'external') {
+      parts.push('using external databases');
+    } else {
+      parts.push(`FalkorDB: ${falkorStatus}`);
+      parts.push(`Qdrant: ${qdrantStatus}`);
+    }
+
+    const message = parts.join(', ');
+
+    // Check if runtime is available
+    const isAvailable = await containerService.isRuntimeAvailable();
+    if (!isAvailable && status.runtime !== 'external') {
+      return {
+        name: 'Container Runtime',
+        status: 'warn',
+        message: `${status.runtime} not available`,
+        fix: `Install ${status.runtime} or use external databases: cv config set containers.runtime external`,
+      };
+    }
+
+    // Recommend rootless if not using it
+    if (!status.rootless && status.runtime !== 'external') {
+      return {
+        name: 'Container Runtime',
+        status: 'warn',
+        message: `${message} - Consider using rootless mode`,
+        fix: `Use rootless ${recommendedRuntime} for better security`,
+      };
+    }
+
+    // Check if containers are running
+    if (falkorStatus === 'stopped' || qdrantStatus === 'stopped') {
+      return {
+        name: 'Container Runtime',
+        status: 'warn',
+        message,
+        fix: 'Start containers with: cv services start',
+      };
+    }
+
+    if (falkorStatus === 'not-found' || qdrantStatus === 'not-found') {
+      return {
+        name: 'Container Runtime',
+        status: 'warn',
+        message,
+        fix: 'Initialize containers with: cv services start',
+      };
+    }
+
+    return {
+      name: 'Container Runtime',
+      status: 'pass',
+      message,
+    };
+  } catch (error: any) {
+    return {
+      name: 'Container Runtime',
+      status: 'warn',
+      message: `Could not check container runtime: ${error.message}`,
+      fix: 'Run "cv config global-init" to configure container runtime',
     };
   }
 }

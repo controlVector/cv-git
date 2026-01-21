@@ -58,6 +58,7 @@ import { stackCommand } from './commands/stack.js';
 import { splitCommand } from './commands/split.js';
 import { bugreportCommand } from './commands/bugreport.js';
 import { depsCommand } from './commands/deps.js';
+import { summaryCommand } from './commands/summary.js';
 
 const program = new Command();
 
@@ -70,6 +71,7 @@ program
 program.addCommand(configCommand());        // Configuration management
 program.addCommand(preferencesCommand());   // User preferences
 program.addCommand(statusCommand());        // Status and information
+program.addCommand(summaryCommand());       // Codebase summary
 program.addCommand(doctorCommand());        // Health diagnostics
 program.addCommand(authCommand());          // Credential management
 program.addCommand(prCommand());            // Pull request management

@@ -1,6 +1,6 @@
 /**
  * CV Cache Command
- * Manage the content-addressed embedding cache
+ * Manage the content-addressed embedding cache and in-memory caches
  */
 
 import { Command } from 'commander';
@@ -11,7 +11,8 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import {
   configManager,
-  createVectorManager
+  createVectorManager,
+  getGlobalCache
 } from '@cv-git/core';
 import { findRepoRoot } from '@cv-git/shared';
 import { getEmbeddingCredentials } from '../utils/credentials.js';
@@ -314,6 +315,102 @@ export function createCacheCommand(): Command {
           console.log(chalk.gray(`  ${index.stats.totalEntries} embeddings, ${formatBytes(index.stats.totalSizeBytes)}`));
         } catch {
           console.log(chalk.gray('  (not initialized)'));
+        }
+
+      } catch (error: any) {
+        console.error(chalk.red(`Error: ${error.message}`));
+        process.exit(1);
+      }
+    });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // cv cache memory - Show in-memory cache statistics
+  // ═══════════════════════════════════════════════════════════════════════════
+  cache
+    .command('memory')
+    .description('Show in-memory cache statistics (graph, vector, AI query caches)')
+    .option('--json', 'Output as JSON')
+    .option('--clear', 'Clear in-memory caches')
+    .action(async (options) => {
+      try {
+        const cache = getGlobalCache();
+        const allStats = cache.getAllStats();
+
+        if (options.clear) {
+          cache.clearAll();
+          console.log(chalk.green('In-memory caches cleared.'));
+          return;
+        }
+
+        if (options.json) {
+          console.log(JSON.stringify(allStats, null, 2));
+        } else {
+          console.log(chalk.bold.cyan('\nIn-Memory Cache Statistics\n'));
+          console.log(chalk.gray('─'.repeat(50)));
+
+          const table = new Table({
+            head: [
+              chalk.white('Namespace'),
+              chalk.white('Hits'),
+              chalk.white('Misses'),
+              chalk.white('Size'),
+              chalk.white('Max'),
+              chalk.white('Hit Rate')
+            ],
+            chars: { 'mid': '', 'left-mid': '', 'mid-mid': '', 'right-mid': '' }
+          });
+
+          // Add rows for each namespace
+          table.push(
+            [
+              chalk.cyan('Graph'),
+              allStats.graph.hits.toLocaleString(),
+              allStats.graph.misses.toLocaleString(),
+              allStats.graph.size.toLocaleString(),
+              allStats.graph.maxSize.toLocaleString(),
+              `${allStats.graph.hitRate}%`
+            ],
+            [
+              chalk.magenta('Vector'),
+              allStats.vector.hits.toLocaleString(),
+              allStats.vector.misses.toLocaleString(),
+              allStats.vector.size.toLocaleString(),
+              allStats.vector.maxSize.toLocaleString(),
+              `${allStats.vector.hitRate}%`
+            ],
+            [
+              chalk.yellow('AI'),
+              allStats.ai.hits.toLocaleString(),
+              allStats.ai.misses.toLocaleString(),
+              allStats.ai.size.toLocaleString(),
+              allStats.ai.maxSize.toLocaleString(),
+              `${allStats.ai.hitRate}%`
+            ],
+            [
+              chalk.bold('Total'),
+              chalk.bold(allStats.total.hits.toLocaleString()),
+              chalk.bold(allStats.total.misses.toLocaleString()),
+              chalk.bold(allStats.total.size.toLocaleString()),
+              chalk.bold(allStats.total.maxSize.toLocaleString()),
+              chalk.bold(`${allStats.total.hitRate}%`)
+            ]
+          );
+
+          console.log(table.toString());
+          console.log();
+
+          // Add usage tips
+          if (allStats.total.hits + allStats.total.misses === 0) {
+            console.log(chalk.gray('No cache activity yet. Caches are populated during graph queries.'));
+          } else if (allStats.total.hitRate > 50) {
+            console.log(chalk.green('✓ Good cache performance'));
+          } else if (allStats.total.hitRate > 0) {
+            console.log(chalk.yellow('Cache is warming up...'));
+          }
+
+          console.log();
+          console.log(chalk.gray('Tip: Run `cv cache memory --clear` to reset in-memory caches'));
+          console.log('');
         }
 
       } catch (error: any) {

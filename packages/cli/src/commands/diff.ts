@@ -7,10 +7,20 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
+import ora from 'ora';
 import { spawn, execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import {
+  configManager,
+  createAIManager,
+  createGraphManager,
+  createGraphService,
+  createGitManager
+} from '@cv-git/core';
+import { findRepoRoot as findCVRepoRoot } from '@cv-git/shared';
 import { addGlobalOptions, createOutput } from '../utils/output.js';
+import { getAnthropicApiKey } from '../utils/credentials.js';
 
 /**
  * Find git repository root
@@ -39,6 +49,11 @@ interface DiffOptions {
   nameOnly?: boolean;
   nameStatus?: boolean;
   analyze?: boolean;
+  explain?: boolean;
+  review?: boolean;
+  conventional?: boolean;
+  impact?: boolean;
+  strict?: boolean;
   verbose?: boolean;
   quiet?: boolean;
   json?: boolean;
@@ -57,7 +72,12 @@ export function diffCommand(): Command {
     .option('--summary', 'Show condensed summary')
     .option('--name-only', 'Show only file names')
     .option('--name-status', 'Show file names with status')
-    .option('--analyze', 'AI-powered analysis of changes (requires AI credentials)')
+    .option('--analyze', 'Basic analysis of changes (no AI required)')
+    .option('--explain', 'AI-powered explanation of what the changes do')
+    .option('--review', 'AI-powered code review of the changes')
+    .option('--conventional', 'Generate a conventional commit message for the changes')
+    .option('--impact', 'Include impact analysis of changed symbols')
+    .option('--strict', 'Use stricter review criteria (with --review)')
     .allowUnknownOption(true);
 
   addGlobalOptions(cmd);
@@ -71,6 +91,9 @@ export function diffCommand(): Command {
         console.error(chalk.red('Not in a git repository'));
         process.exit(1);
       }
+
+      // Check if any AI feature is requested
+      const needsAI = options.explain || options.review || options.conventional;
 
       // Build git diff arguments
       const args = ['diff'];
@@ -90,7 +113,8 @@ export function diffCommand(): Command {
       // Add extra passthrough arguments
       const extraArgs = command.args.filter(arg =>
         !['--staged', '--cached', '--stat', '--shortstat', '--summary',
-         '--name-only', '--name-status', '--analyze',
+         '--name-only', '--name-status', '--analyze', '--explain', '--review',
+         '--conventional', '--impact', '--strict',
          '--verbose', '--quiet', '--json', '--options'].includes(arg)
       );
       args.push(...extraArgs);
@@ -113,25 +137,39 @@ export function diffCommand(): Command {
           result.analysis = await analyzeDiff(diffOutput, repoRoot);
         }
 
+        if (needsAI) {
+          const aiResult = await runAIAnalysis(diffOutput, repoRoot, options);
+          if (aiResult) {
+            result.aiAnalysis = aiResult;
+          }
+        }
+
         output.json(result);
       } else {
         // Normal output - passthrough to git
-        if (options.analyze) {
+        if (options.analyze || needsAI) {
           // Get diff for analysis
           const diffOutput = execSync(`git ${args.slice(1).join(' ')}`, {
             cwd: repoRoot,
             encoding: 'utf-8',
           });
 
-          // Show the diff
-          if (diffOutput.trim()) {
+          // Show the diff (unless only requesting conventional commit message)
+          if (!options.conventional && diffOutput.trim()) {
             console.log(diffOutput);
           }
 
-          // Show AI analysis
-          console.log(chalk.bold('\n📊 AI Analysis:\n'));
-          const analysis = await analyzeDiff(diffOutput, repoRoot);
-          console.log(analysis);
+          // Show basic analysis
+          if (options.analyze) {
+            console.log(chalk.bold('\n📊 Analysis:\n'));
+            const analysis = await analyzeDiff(diffOutput, repoRoot);
+            console.log(analysis);
+          }
+
+          // Run AI analysis if requested
+          if (needsAI) {
+            await runAIAnalysis(diffOutput, repoRoot, options);
+          }
         } else {
           // Direct passthrough
           await runGitDiff(args, repoRoot);
@@ -274,7 +312,172 @@ async function analyzeDiff(diff: string, repoRoot: string): Promise<string> {
 
   analysis.push(chalk.bold('Suggested commit type: ') + chalk.yellow(suggestedType));
   analysis.push('');
-  analysis.push(chalk.gray('Tip: Run `cv commit --generate` for AI-generated commit message'));
+  analysis.push(chalk.gray('Tip: Run `cv diff --explain` for AI-powered explanation'));
+  analysis.push(chalk.gray('     Run `cv diff --review` for AI-powered code review'));
+  analysis.push(chalk.gray('     Run `cv diff --conventional` for commit message generation'));
 
   return analysis.join('\n');
+}
+
+/**
+ * Run AI-powered analysis of diff
+ */
+async function runAIAnalysis(
+  diff: string,
+  repoRoot: string,
+  options: DiffOptions
+): Promise<any> {
+  if (!diff.trim()) {
+    console.log(chalk.yellow('\nNo changes to analyze.'));
+    return null;
+  }
+
+  // Check for CV-Git repository
+  const cvRepoRoot = await findCVRepoRoot();
+  if (!cvRepoRoot) {
+    console.error(chalk.red('\nNot in a CV-Git repository. Run `cv init` first.'));
+    return null;
+  }
+
+  // Load configuration
+  const config = await configManager.load(cvRepoRoot);
+
+  // Get API key
+  const anthropicApiKey = await getAnthropicApiKey(config.ai?.apiKey);
+  if (!anthropicApiKey) {
+    console.error(chalk.red('\nAnthropic API key not found.'));
+    console.error(chalk.gray('Run `cv auth setup anthropic` to configure.'));
+    return null;
+  }
+
+  const results: any = {};
+  const spinner = ora();
+
+  // Initialize AI manager
+  const git = createGitManager(repoRoot);
+  const ai = createAIManager(
+    {
+      provider: 'anthropic',
+      model: config.ai?.model || 'claude-sonnet-4-5-20250514',
+      apiKey: anthropicApiKey
+    },
+    undefined,
+    undefined,
+    git
+  );
+
+  // Extract changed symbols for impact analysis
+  let impactInfo = '';
+  if (options.impact) {
+    try {
+      spinner.start('Analyzing impact...');
+      const graph = createGraphManager(config.graph.url, config.graph.database);
+      await graph.connect();
+      const graphService = createGraphService(graph);
+
+      // Extract function names from diff
+      const functionMatches = diff.match(/^[\+\-]\s*(async\s+)?(function|const|let|var|export\s+(?:async\s+)?function)\s+(\w+)/gm);
+      const changedSymbols = new Set<string>();
+      if (functionMatches) {
+        for (const match of functionMatches) {
+          const nameMatch = match.match(/(\w+)\s*[=\(]/);
+          if (nameMatch) {
+            changedSymbols.add(nameMatch[1]);
+          }
+        }
+      }
+
+      // Get impact for each changed symbol
+      const impactLines: string[] = [];
+      for (const symbol of Array.from(changedSymbols).slice(0, 5)) {
+        const impact = await graphService.getImpactAnalysis(symbol, { maxDepth: 2 });
+        if (impact.totalImpact > 0) {
+          impactLines.push(`  - ${symbol}: ${impact.riskLevel} risk, ${impact.directCallers.length} direct callers`);
+        }
+      }
+
+      await graph.close();
+
+      if (impactLines.length > 0) {
+        impactInfo = '\n\nImpact of changed symbols:\n' + impactLines.join('\n');
+      }
+      spinner.stop();
+    } catch {
+      spinner.stop();
+      // Continue without impact analysis
+    }
+  }
+
+  // Handle --explain
+  if (options.explain) {
+    spinner.start('Generating AI explanation...');
+    try {
+      const explanation = await ai.explain(`Explain what these code changes do. Be concise:\n\n${diff}${impactInfo}`);
+      spinner.succeed('Explanation generated');
+      console.log(chalk.bold.cyan('\n📖 AI Explanation:\n'));
+      console.log(chalk.gray('─'.repeat(60)));
+      console.log(explanation);
+      console.log('');
+      results.explanation = explanation;
+    } catch (error: any) {
+      spinner.fail('Explanation failed');
+      console.error(chalk.red(`Error: ${error.message}`));
+    }
+  }
+
+  // Handle --review
+  if (options.review) {
+    spinner.start('Generating AI code review...');
+    try {
+      const strictness = options.strict
+        ? 'Be very thorough and strict. Look for potential bugs, security issues, performance problems, and code style issues.'
+        : 'Focus on important issues like bugs, security vulnerabilities, and significant code quality concerns.';
+
+      const reviewPrompt = `Review these code changes. ${strictness}\n\n${diff}${impactInfo}`;
+      const review = await ai.reviewCode(reviewPrompt);
+      spinner.succeed('Code review generated');
+      console.log(chalk.bold.cyan('\n🔍 AI Code Review:\n'));
+      console.log(chalk.gray('─'.repeat(60)));
+      console.log(review);
+      console.log('');
+      results.review = review;
+    } catch (error: any) {
+      spinner.fail('Review failed');
+      console.error(chalk.red(`Error: ${error.message}`));
+    }
+  }
+
+  // Handle --conventional
+  if (options.conventional) {
+    spinner.start('Generating conventional commit message...');
+    try {
+      const commitPrompt = `Generate a conventional commit message for these changes.
+Use the format: type(scope): description
+
+Types: feat, fix, refactor, docs, test, chore, style, perf, build, ci
+Keep the description under 72 characters.
+Add a body if needed to explain WHY the change was made.
+Only output the commit message, nothing else.
+
+Changes:
+${diff}`;
+
+      const commitMessage = await ai.explain(commitPrompt);
+      spinner.succeed('Commit message generated');
+      console.log(chalk.bold.cyan('\n📝 Suggested Commit Message:\n'));
+      console.log(chalk.gray('─'.repeat(60)));
+      console.log(chalk.yellow(commitMessage.trim()));
+      console.log(chalk.gray('─'.repeat(60)));
+      console.log('');
+      console.log(chalk.gray('To use this message:'));
+      console.log(chalk.gray('  git commit -m "$(cv diff --conventional --staged 2>/dev/null | tail -n +4)"'));
+      console.log('');
+      results.commitMessage = commitMessage.trim();
+    } catch (error: any) {
+      spinner.fail('Commit message generation failed');
+      console.error(chalk.red(`Error: ${error.message}`));
+    }
+  }
+
+  return Object.keys(results).length > 0 ? results : null;
 }
