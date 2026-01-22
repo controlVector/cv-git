@@ -4,15 +4,12 @@
  */
 
 import { DoArgs, ReviewArgs, ToolResult } from '../types.js';
-import { successResult, errorResult, formatTaskResult, formatReview } from '../utils.js';
+import { successResult, errorResult, formatTaskResult, formatReview, createIsolatedGraphManager } from '../utils.js';
 import {
   configManager,
   createAIManager,
-  createVectorManager,
-  createGraphManager,
   createGitManager,
 } from '@cv-git/core';
-import { findRepoRoot } from '@cv-git/shared';
 import { getAnthropicApiKey } from '../credentials.js';
 
 /**
@@ -22,11 +19,9 @@ export async function handleDo(args: DoArgs): Promise<ToolResult> {
   try {
     const { task, planOnly = false, autoApprove = false } = args;
 
-    // Find repository root
-    const repoRoot = await findRepoRoot();
-    if (!repoRoot) {
-      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
-    }
+    // Initialize graph manager with repo isolation
+    const { graph, repoRoot } = await createIsolatedGraphManager();
+    await graph.connect();
 
     // Load configuration
     const config = await configManager.load(repoRoot);
@@ -41,9 +36,6 @@ export async function handleDo(args: DoArgs): Promise<ToolResult> {
 
     // Initialize managers
     const git = createGitManager(repoRoot);
-    const graph = createGraphManager(config.graph.url, config.graph.database);
-
-    await graph.connect();
 
     // Initialize AI manager with all dependencies
     const ai = createAIManager(
@@ -104,11 +96,9 @@ export async function handleReview(args: ReviewArgs): Promise<ToolResult> {
   try {
     const { ref = 'HEAD', staged = false, context: includeContext = false } = args;
 
-    // Find repository root
-    const repoRoot = await findRepoRoot();
-    if (!repoRoot) {
-      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
-    }
+    // Initialize graph manager with repo isolation
+    const { graph, repoRoot } = await createIsolatedGraphManager();
+    await graph.connect();
 
     // Load configuration
     const config = await configManager.load(repoRoot);
@@ -123,9 +113,6 @@ export async function handleReview(args: ReviewArgs): Promise<ToolResult> {
 
     // Initialize managers
     const git = createGitManager(repoRoot);
-    const graph = createGraphManager(config.graph.url, config.graph.database);
-
-    await graph.connect();
 
     // Initialize AI manager with all dependencies
     const ai = createAIManager(

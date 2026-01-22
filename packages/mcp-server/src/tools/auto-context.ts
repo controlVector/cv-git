@@ -7,13 +7,12 @@
  */
 
 import { ToolResult } from '../types.js';
-import { successResult, errorResult } from '../utils.js';
+import { successResult, errorResult, createIsolatedGraphManager } from '../utils.js';
 import {
   configManager,
   createVectorManager,
-  createGraphManager,
 } from '@cv-git/core';
-import { findRepoRoot, VectorSearchResult, CodeChunkPayload, SymbolNode } from '@cv-git/shared';
+import { VectorSearchResult, CodeChunkPayload, SymbolNode } from '@cv-git/shared';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { getOpenAIApiKey, getOpenRouterApiKey } from '../credentials.js';
@@ -53,10 +52,22 @@ export async function handleAutoContext(args: AutoContextArgs): Promise<ToolResu
       includeDocs = true,
     } = args;
 
-    // Find repository root
-    const repoRoot = await findRepoRoot();
-    if (!repoRoot) {
-      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
+    // Initialize graph manager with repo isolation
+    let graph = null;
+    let repoRoot: string;
+    try {
+      const isolated = await createIsolatedGraphManager();
+      graph = isolated.graph;
+      repoRoot = isolated.repoRoot;
+      await graph.connect();
+    } catch (e: any) {
+      // Graph is optional, but we still need repoRoot
+      const { findRepoRoot } = await import('@cv-git/shared');
+      const root = await findRepoRoot();
+      if (!root) {
+        return errorResult('Not in a CV-Git repository. Run `cv init` first.');
+      }
+      repoRoot = root;
     }
 
     // Load configuration
@@ -87,14 +98,6 @@ export async function handleAutoContext(args: AutoContextArgs): Promise<ToolResu
       collections: config.vector.collections,
     });
     await vector.connect();
-
-    let graph = null;
-    try {
-      graph = createGraphManager(config.graph.url, config.graph.database);
-      await graph.connect();
-    } catch {
-      // Graph is optional
-    }
 
     // 1. Get semantic matches for the query
     const semanticChunks = await vector.searchCode(query, 10, { minScore: 0.5 });

@@ -6,10 +6,10 @@
 import {
   configManager,
   createVectorManager,
-  createGraphManager,
 } from '@cv-git/core';
 import { findRepoRoot } from '@cv-git/shared';
 import { getOpenAIApiKey, getOpenRouterApiKey } from './credentials.js';
+import { createIsolatedGraphManager } from './utils.js';
 
 /**
  * Resource definitions available from this server
@@ -104,10 +104,10 @@ async function readAutoContext(): Promise<ResourceContent> {
       };
     }
 
-    // Get graph stats for context
+    // Get graph stats for context with repo isolation
     let graphStats: any = null;
     try {
-      const graph = createGraphManager(config.graph.url, config.graph.database);
+      const { graph } = await createIsolatedGraphManager(repoRoot);
       await graph.connect();
 
       const statsQuery = `
@@ -179,8 +179,8 @@ async function readGraphSummary(): Promise<ResourceContent> {
       };
     }
 
-    const config = await configManager.load(repoRoot);
-    const graph = createGraphManager(config.graph.url, config.graph.database);
+    // Initialize graph with repo isolation
+    const { graph } = await createIsolatedGraphManager(repoRoot);
     await graph.connect();
 
     // Get comprehensive stats
@@ -260,9 +260,9 @@ async function readStatus(): Promise<ResourceContent> {
     // Check services
     const services: Record<string, 'available' | 'unavailable'> = {};
 
-    // Check FalkorDB
+    // Check FalkorDB with repo isolation
     try {
-      const graph = createGraphManager(config.graph.url, config.graph.database);
+      const { graph } = await createIsolatedGraphManager(repoRoot);
       await graph.connect();
       await graph.close();
       services.falkordb = 'available';

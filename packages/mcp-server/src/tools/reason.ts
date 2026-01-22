@@ -4,16 +4,14 @@
  */
 
 import { ToolResult } from '../types.js';
-import { successResult, errorResult } from '../utils.js';
+import { successResult, errorResult, createIsolatedGraphManager } from '../utils.js';
 import {
   configManager,
   createVectorManager,
-  createGraphManager,
   createGitManager,
   createRLMRouter,
   RLMResult
 } from '@cv-git/core';
-import { findRepoRoot } from '@cv-git/shared';
 import { getAnthropicApiKey, getEmbeddingCredentials } from '../credentials.js';
 
 /**
@@ -96,11 +94,9 @@ export async function handleReason(args: ReasonArgs): Promise<ToolResult> {
   try {
     const { query, maxDepth = 5, showTrace = false } = args;
 
-    // Find repository root
-    const repoRoot = await findRepoRoot();
-    if (!repoRoot) {
-      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
-    }
+    // Initialize graph manager with repo isolation
+    const { graph, repoRoot } = await createIsolatedGraphManager();
+    await graph.connect();
 
     // Load configuration
     const config = await configManager.load(repoRoot);
@@ -118,9 +114,6 @@ export async function handleReason(args: ReasonArgs): Promise<ToolResult> {
 
     // Initialize managers
     const git = createGitManager(repoRoot);
-    const graph = createGraphManager(config.graph.url, config.graph.database);
-
-    await graph.connect();
 
     // Initialize vector manager (optional but recommended)
     let vector = undefined;

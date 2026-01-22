@@ -4,6 +4,46 @@
  */
 
 import { ToolResult, SearchResult, GraphResult } from './types.js';
+import { configManager, createGraphManager, readManifest, generateRepoId, GraphManager } from '@cv-git/core';
+import { findRepoRoot, getCVDir } from '@cv-git/shared';
+
+/**
+ * Create a graph manager with proper repo isolation.
+ * Uses the manifest's repoId to ensure each repository has its own database.
+ *
+ * @param repoRoot - Optional repo root path (will be detected if not provided)
+ * @returns Object with graph manager and repoRoot
+ */
+export async function createIsolatedGraphManager(repoRoot?: string): Promise<{
+  graph: GraphManager;
+  repoRoot: string;
+  repoId: string;
+  databaseName: string;
+}> {
+  // Find repository root if not provided
+  const root = repoRoot || await findRepoRoot();
+  if (!root) {
+    throw new Error('Not in a CV-Git repository. Run `cv init` first.');
+  }
+
+  // Load configuration for URL
+  const config = await configManager.load(root);
+
+  // Get repoId from manifest (like the CLI does)
+  const cvDir = getCVDir(root);
+  const manifest = await readManifest(cvDir);
+  const repoId = manifest?.repository?.id || generateRepoId(root);
+
+  // Create graph manager with repo-specific database
+  const graph = createGraphManager({ url: config.graph.url, repoId });
+
+  return {
+    graph,
+    repoRoot: root,
+    repoId,
+    databaseName: graph.getDatabaseName(),
+  };
+}
 
 /**
  * Format search results as text

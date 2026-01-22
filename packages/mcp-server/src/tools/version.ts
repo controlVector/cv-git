@@ -4,9 +4,8 @@
  */
 
 import { CommitsArgs, FileHistoryArgs, BlameArgs, ToolResult } from '../types.js';
-import { successResult, errorResult } from '../utils.js';
-import { configManager, createGraphManager, createGitManager } from '@cv-git/core';
-import { findRepoRoot } from '@cv-git/shared';
+import { successResult, errorResult, createIsolatedGraphManager } from '../utils.js';
+import { createGitManager } from '@cv-git/core';
 
 /**
  * Handle cv_commits tool call
@@ -16,13 +15,8 @@ export async function handleCommits(args: CommitsArgs): Promise<ToolResult> {
   try {
     const { limit = 20, file, author } = args;
 
-    const repoRoot = await findRepoRoot();
-    if (!repoRoot) {
-      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
-    }
-
-    const config = await configManager.load(repoRoot);
-    const graph = createGraphManager(config.graph.url, config.graph.database);
+    // Initialize graph manager with repo isolation
+    const { graph } = await createIsolatedGraphManager();
     await graph.connect();
 
     // Build query based on filters - use explicit property extraction
@@ -76,13 +70,8 @@ export async function handleFileHistory(args: FileHistoryArgs): Promise<ToolResu
   try {
     const { file, limit = 10, showDiff = false } = args;
 
-    const repoRoot = await findRepoRoot();
-    if (!repoRoot) {
-      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
-    }
-
-    const config = await configManager.load(repoRoot);
-    const graph = createGraphManager(config.graph.url, config.graph.database);
+    // Initialize graph manager with repo isolation
+    const { graph } = await createIsolatedGraphManager();
     await graph.connect();
 
     // Query commits that modified this file with modification details
@@ -125,13 +114,8 @@ export async function handleBlame(args: BlameArgs): Promise<ToolResult> {
   try {
     const { target } = args;
 
-    const repoRoot = await findRepoRoot();
-    if (!repoRoot) {
-      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
-    }
-
-    const config = await configManager.load(repoRoot);
-    const graph = createGraphManager(config.graph.url, config.graph.database);
+    // Initialize graph manager with repo isolation
+    const { graph } = await createIsolatedGraphManager();
     await graph.connect();
 
     // Check if target is a file or symbol

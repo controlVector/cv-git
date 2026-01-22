@@ -4,8 +4,8 @@
  */
 
 import { GraphQueryArgs, ToolResult, GraphResult } from '../types.js';
-import { successResult, errorResult, formatGraphResults } from '../utils.js';
-import { configManager, createGraphManager, createGraphService, loadCodebaseSummary } from '@cv-git/core';
+import { successResult, errorResult, formatGraphResults, createIsolatedGraphManager } from '../utils.js';
+import { createGraphService, loadCodebaseSummary } from '@cv-git/core';
 import { findRepoRoot } from '@cv-git/shared';
 
 /**
@@ -15,17 +15,8 @@ export async function handleGraphQuery(args: GraphQueryArgs): Promise<ToolResult
   try {
     const { queryType, target, language, file } = args;
 
-    // Find repository root
-    const repoRoot = await findRepoRoot();
-    if (!repoRoot) {
-      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
-    }
-
-    // Load configuration
-    const config = await configManager.load(repoRoot);
-
-    // Initialize graph manager
-    const graph = createGraphManager(config.graph.url, config.graph.database);
+    // Initialize graph manager with repo isolation
+    const { graph } = await createIsolatedGraphManager();
     await graph.connect();
 
     let result: GraphResult;
@@ -181,17 +172,8 @@ export async function handleGraphQuery(args: GraphQueryArgs): Promise<ToolResult
  */
 export async function handleGraphStats(): Promise<ToolResult> {
   try {
-    // Find repository root
-    const repoRoot = await findRepoRoot();
-    if (!repoRoot) {
-      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
-    }
-
-    // Load configuration
-    const config = await configManager.load(repoRoot);
-
-    // Initialize graph manager
-    const graph = createGraphManager(config.graph.url, config.graph.database);
+    // Initialize graph manager with repo isolation
+    const { graph, databaseName } = await createIsolatedGraphManager();
     await graph.connect();
 
     // Get statistics
@@ -220,17 +202,8 @@ export async function handleGraphInspect(args: { target: string }): Promise<Tool
   try {
     const { target } = args;
 
-    // Find repository root
-    const repoRoot = await findRepoRoot();
-    if (!repoRoot) {
-      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
-    }
-
-    // Load configuration
-    const config = await configManager.load(repoRoot);
-
-    // Initialize graph manager
-    const graph = createGraphManager(config.graph.url, config.graph.database);
+    // Initialize graph manager with repo isolation
+    const { graph } = await createIsolatedGraphManager();
     await graph.connect();
 
     // Try to find as a symbol first
@@ -303,17 +276,8 @@ export async function handleGraphPath(args: { from: string; to: string; maxDepth
   try {
     const { from, to, maxDepth = 10 } = args;
 
-    // Find repository root
-    const repoRoot = await findRepoRoot();
-    if (!repoRoot) {
-      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
-    }
-
-    // Load configuration
-    const config = await configManager.load(repoRoot);
-
-    // Initialize graph manager
-    const graph = createGraphManager(config.graph.url, config.graph.database);
+    // Initialize graph manager with repo isolation
+    const { graph } = await createIsolatedGraphManager();
     await graph.connect();
 
     // Find call paths
@@ -341,17 +305,8 @@ ${paths.map((path, i) => `Path ${i + 1} (${path.length} steps):\n  ${path.join('
  */
 export async function handleGraphDeadCode(): Promise<ToolResult> {
   try {
-    // Find repository root
-    const repoRoot = await findRepoRoot();
-    if (!repoRoot) {
-      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
-    }
-
-    // Load configuration
-    const config = await configManager.load(repoRoot);
-
-    // Initialize graph manager
-    const graph = createGraphManager(config.graph.url, config.graph.database);
+    // Initialize graph manager with repo isolation
+    const { graph } = await createIsolatedGraphManager();
     await graph.connect();
 
     // Find dead code
@@ -385,17 +340,8 @@ export async function handleGraphComplexity(args: { threshold?: number; limit?: 
   try {
     const { threshold = 10, limit = 20 } = args;
 
-    // Find repository root
-    const repoRoot = await findRepoRoot();
-    if (!repoRoot) {
-      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
-    }
-
-    // Load configuration
-    const config = await configManager.load(repoRoot);
-
-    // Initialize graph manager
-    const graph = createGraphManager(config.graph.url, config.graph.database);
+    // Initialize graph manager with repo isolation
+    const { graph } = await createIsolatedGraphManager();
     await graph.connect();
 
     // Find complex functions
@@ -430,17 +376,8 @@ export async function handleGraphCycles(args: { maxDepth?: number }): Promise<To
   try {
     const { maxDepth = 5 } = args;
 
-    // Find repository root
-    const repoRoot = await findRepoRoot();
-    if (!repoRoot) {
-      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
-    }
-
-    // Load configuration
-    const config = await configManager.load(repoRoot);
-
-    // Initialize graph manager
-    const graph = createGraphManager(config.graph.url, config.graph.database);
+    // Initialize graph manager with repo isolation
+    const { graph } = await createIsolatedGraphManager();
     await graph.connect();
 
     // Find circular dependencies
@@ -474,17 +411,8 @@ export async function handleGraphHotspots(args: { limit?: number }): Promise<Too
   try {
     const { limit = 20 } = args;
 
-    // Find repository root
-    const repoRoot = await findRepoRoot();
-    if (!repoRoot) {
-      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
-    }
-
-    // Load configuration
-    const config = await configManager.load(repoRoot);
-
-    // Initialize graph manager
-    const graph = createGraphManager(config.graph.url, config.graph.database);
+    // Initialize graph manager with repo isolation
+    const { graph } = await createIsolatedGraphManager();
     await graph.connect();
 
     // Find hot spots
@@ -518,17 +446,8 @@ export async function handleGraphNeighborhood(args: { symbol: string; depth?: nu
   try {
     const { symbol, depth = 2, direction = 'both' } = args;
 
-    // Find repository root
-    const repoRoot = await findRepoRoot();
-    if (!repoRoot) {
-      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
-    }
-
-    // Load configuration
-    const config = await configManager.load(repoRoot);
-
-    // Initialize graph manager and service
-    const graph = createGraphManager(config.graph.url, config.graph.database);
+    // Initialize graph manager with repo isolation
+    const { graph } = await createIsolatedGraphManager();
     await graph.connect();
 
     const graphService = createGraphService(graph);
@@ -592,17 +511,8 @@ export async function handleGraphImpact(args: { symbol: string; depth?: number }
   try {
     const { symbol, depth = 3 } = args;
 
-    // Find repository root
-    const repoRoot = await findRepoRoot();
-    if (!repoRoot) {
-      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
-    }
-
-    // Load configuration
-    const config = await configManager.load(repoRoot);
-
-    // Initialize graph manager and service
-    const graph = createGraphManager(config.graph.url, config.graph.database);
+    // Initialize graph manager with repo isolation
+    const { graph } = await createIsolatedGraphManager();
     await graph.connect();
 
     const graphService = createGraphService(graph);
@@ -688,17 +598,8 @@ export async function handleGraphBridge(args: { source: string; target: string; 
   try {
     const { source, target, maxDepth = 5 } = args;
 
-    // Find repository root
-    const repoRoot = await findRepoRoot();
-    if (!repoRoot) {
-      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
-    }
-
-    // Load configuration
-    const config = await configManager.load(repoRoot);
-
-    // Initialize graph manager and service
-    const graph = createGraphManager(config.graph.url, config.graph.database);
+    // Initialize graph manager with repo isolation
+    const { graph } = await createIsolatedGraphManager();
     await graph.connect();
 
     const graphService = createGraphService(graph);

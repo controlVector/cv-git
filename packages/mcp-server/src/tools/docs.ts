@@ -5,13 +5,12 @@
  */
 
 import { ToolResult } from '../types.js';
-import { successResult, errorResult } from '../utils.js';
+import { successResult, errorResult, createIsolatedGraphManager } from '../utils.js';
 import {
   configManager,
   createVectorManager,
   createIngestManager,
   createParser,
-  createGraphManager,
 } from '@cv-git/core';
 import { findRepoRoot } from '@cv-git/shared';
 import { promises as fs } from 'fs';
@@ -213,7 +212,7 @@ export async function handleDocsIngest(args: DocsIngestArgs): Promise<ToolResult
     let vectorIndexed = 0;
 
     try {
-      const graph = createGraphManager(config.graph.url, config.graph.database);
+      const { graph } = await createIsolatedGraphManager(repoRoot);
       await graph.connect();
 
       // Create document node
@@ -358,10 +357,8 @@ export async function handleDocsList(args: DocsListArgs): Promise<ToolResult> {
       return errorResult('Not in a CV-Git repository. Run `cv init` first.');
     }
 
-    const config = await configManager.load(repoRoot);
-
-    // Get documents from graph
-    const graph = createGraphManager(config.graph.url, config.graph.database);
+    // Get documents from graph with repo isolation
+    const { graph } = await createIsolatedGraphManager(repoRoot);
     await graph.connect();
 
     let query = 'MATCH (d:Document) ';

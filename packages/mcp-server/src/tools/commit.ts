@@ -11,11 +11,9 @@
  */
 
 import { ToolResult } from '../types.js';
-import { successResult, errorResult } from '../utils.js';
+import { successResult, errorResult, createIsolatedGraphManager } from '../utils.js';
 import {
-  configManager,
   createGitManager,
-  createGraphManager,
   createCommitAnalyzer,
   CommitAnalysis
 } from '@cv-git/core';
@@ -53,11 +51,11 @@ export async function handleCommitAnalyze(_args: CommitAnalyzeArgs): Promise<Too
     // Create managers
     const git = createGitManager(repoRoot);
 
-    // Try to connect to graph for enhanced analysis
+    // Try to connect to graph for enhanced analysis with repo isolation
     let graph: any = undefined;
     try {
-      const config = await configManager.load(repoRoot);
-      graph = createGraphManager(config.graph.url, config.graph.database);
+      const isolated = await createIsolatedGraphManager(repoRoot);
+      graph = isolated.graph;
       await graph.connect();
     } catch {
       // Graph not available, continue without it
@@ -97,11 +95,11 @@ export async function handleCommitGenerate(args: CommitGenerateArgs): Promise<To
     // Create managers
     const git = createGitManager(repoRoot);
 
-    // Try to connect to graph for enhanced analysis
+    // Try to connect to graph for enhanced analysis with repo isolation
     let graph: any = undefined;
     try {
-      const config = await configManager.load(repoRoot);
-      graph = createGraphManager(config.graph.url, config.graph.database);
+      const isolated = await createIsolatedGraphManager(repoRoot);
+      graph = isolated.graph;
       await graph.connect();
     } catch {
       // Graph not available, continue without it

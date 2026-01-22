@@ -4,16 +4,14 @@
  */
 
 import { SyncArgs, ToolResult } from '../types.js';
-import { successResult, errorResult, formatSyncResult } from '../utils.js';
+import { successResult, errorResult, formatSyncResult, createIsolatedGraphManager } from '../utils.js';
 import {
   configManager,
   createGitManager,
   createParser,
-  createGraphManager,
   createVectorManager,
   createSyncEngine,
 } from '@cv-git/core';
-import { findRepoRoot } from '@cv-git/shared';
 import { getOpenAIApiKey, getOpenRouterApiKey } from '../credentials.js';
 
 /**
@@ -23,11 +21,9 @@ export async function handleSync(args: SyncArgs): Promise<ToolResult> {
   try {
     const { incremental = false, force = false } = args;
 
-    // Find repository root
-    const repoRoot = await findRepoRoot();
-    if (!repoRoot) {
-      return errorResult('Not in a CV-Git repository. Run `cv init` first.');
-    }
+    // Initialize graph manager with repo isolation
+    const { graph, repoRoot } = await createIsolatedGraphManager();
+    await graph.connect();
 
     // Load configuration
     const config = await configManager.load(repoRoot);
@@ -40,9 +36,6 @@ export async function handleSync(args: SyncArgs): Promise<ToolResult> {
     }
 
     const parser = createParser();
-    const graph = createGraphManager(config.graph.url, config.graph.database);
-
-    await graph.connect();
 
     // Vector manager (optional)
     let vector = undefined;

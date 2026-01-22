@@ -8,11 +8,10 @@
  */
 
 import { ToolResult } from '../types.js';
-import { successResult, errorResult } from '../utils.js';
+import { successResult, errorResult, createIsolatedGraphManager } from '../utils.js';
 import {
   configManager,
   createVectorManager,
-  createGraphManager,
   hasLocalVectors,
   searchLocalVectors,
   createEmbedding,
@@ -123,11 +122,12 @@ export async function handleContext(args: ContextArgs): Promise<ToolResult> {
       usedFallback = true;
     }
 
-    // Initialize graph manager (optional)
+    // Initialize graph manager (optional) with repo isolation
     let graph = null;
     if (includeGraph) {
       try {
-        graph = createGraphManager(config.graph.url, config.graph.database);
+        const isolated = await createIsolatedGraphManager(repoRoot);
+        graph = isolated.graph;
         await graph.connect();
       } catch {
         // Graph is optional
