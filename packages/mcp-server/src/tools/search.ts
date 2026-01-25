@@ -8,7 +8,7 @@
  */
 
 import { FindArgs, ToolResult, SearchResult } from '../types.js';
-import { successResult, errorResult, formatSearchResults } from '../utils.js';
+import { successResult, errorResult, formatSearchResults, getServiceUrls } from '../utils.js';
 import {
   configManager,
   createVectorManager,
@@ -50,9 +50,12 @@ export async function handleFind(args: FindArgs): Promise<ToolResult> {
     let usedFallback = false;
 
     try {
+      // Get service URLs (checks services.json for dynamic ports first)
+      const serviceUrls = await getServiceUrls(config);
+
       // Initialize vector manager with proper options
       const vector = createVectorManager({
-        url: config.vector.url,
+        url: serviceUrls.qdrant,
         openrouterApiKey,
         openaiApiKey,
         collections: config.vector.collections,

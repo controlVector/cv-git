@@ -5,7 +5,7 @@
  */
 
 import { ToolResult } from '../types.js';
-import { successResult, errorResult, createIsolatedGraphManager } from '../utils.js';
+import { successResult, errorResult, createIsolatedGraphManager, getServiceUrls } from '../utils.js';
 import {
   configManager,
   createVectorManager,
@@ -69,9 +69,12 @@ export async function handleDocsSearch(args: DocsSearchArgs): Promise<ToolResult
       );
     }
 
+    // Get service URLs (checks services.json for dynamic ports first)
+    const serviceUrls = await getServiceUrls(config);
+
     // Initialize vector manager
     const vector = createVectorManager({
-      url: config.vector.url,
+      url: serviceUrls.qdrant,
       openrouterApiKey: creds.openrouterApiKey,
       openaiApiKey: creds.openaiApiKey,
       collections: config.vector.collections,
@@ -269,8 +272,11 @@ export async function handleDocsIngest(args: DocsIngestArgs): Promise<ToolResult
     // Generate embeddings if possible
     if (creds.openaiApiKey || creds.openrouterApiKey) {
       try {
+        // Get service URLs (checks services.json for dynamic ports first)
+        const serviceUrls = await getServiceUrls(config);
+
         const vector = createVectorManager({
-          url: config.vector.url,
+          url: serviceUrls.qdrant,
           openrouterApiKey: creds.openrouterApiKey,
           openaiApiKey: creds.openaiApiKey,
           collections: config.vector.collections,

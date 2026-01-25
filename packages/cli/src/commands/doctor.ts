@@ -17,8 +17,12 @@ import {
   detectPrivilegeMode,
   getDefaultPaths,
   getRecommendedRuntime,
-  getContainerService
+  getContainerService,
+  getFalkorDbUrl,
+  getQdrantUrl,
+  getOllamaUrl,
 } from '@cv-git/core';
+import { loadServicesFile } from '../utils/services.js';
 
 const execAsync = promisify(exec);
 
@@ -44,7 +48,7 @@ export function doctorCommand(): Command {
       results.push(await checkGitInstalled());
       results.push(await checkGitRepository());
       results.push(await checkNodeVersion());
-      results.push(await checkPnpmInstalled());
+      // Note: pnpm check removed - only needed for cv-git development, not end users
       results.push(await checkCVGitInitialized());
       results.push(await checkConfiguration());
       results.push(await checkPrivilegeMode());
@@ -195,27 +199,6 @@ async function checkNodeVersion(): Promise<DiagnosticResult> {
 }
 
 /**
- * Check if pnpm is installed
- */
-async function checkPnpmInstalled(): Promise<DiagnosticResult> {
-  try {
-    const { stdout } = await execAsync('pnpm --version');
-    return {
-      name: 'pnpm Installation',
-      status: 'pass',
-      message: `v${stdout.trim()}`,
-    };
-  } catch {
-    return {
-      name: 'pnpm Installation',
-      status: 'warn',
-      message: 'pnpm not installed',
-      fix: 'Install pnpm: npm install -g pnpm',
-    };
-  }
-}
-
-/**
  * Check if CV-Git is initialized
  */
 async function checkCVGitInitialized(): Promise<DiagnosticResult> {
@@ -252,11 +235,11 @@ async function checkConfiguration(): Promise<DiagnosticResult> {
         message: `Configured for ${cvConfig.platform.type} (v${cvConfig.version})`,
       };
     } else {
+      // Using defaults is fine - not a warning
       return {
         name: 'Configuration',
-        status: 'warn',
-        message: 'No configuration file found (using defaults)',
-        fix: 'Run "cv config list" to create configuration',
+        status: 'pass',
+        message: 'Using default configuration',
       };
     }
   } catch (error: any) {
@@ -441,11 +424,13 @@ async function checkCredentials(): Promise<DiagnosticResult> {
  * Check FalkorDB
  */
 async function checkFalkorDB(): Promise<DiagnosticResult> {
+  // Check services.json first (for dynamically allocated ports), then env vars/defaults
+  const servicesFile = await loadServicesFile();
+  const falkorUrl = servicesFile?.services?.falkordb || getFalkorDbUrl();
+
   try {
-    const config = getConfig();
-    const cvConfig = await config.load();
     const { createClient } = await import('redis');
-    const client = createClient({ url: cvConfig.graph.url });
+    const client = createClient({ url: falkorUrl });
 
     await client.connect();
     await client.ping();
@@ -454,14 +439,18 @@ async function checkFalkorDB(): Promise<DiagnosticResult> {
     return {
       name: 'FalkorDB (Knowledge Graph)',
       status: 'pass',
-      message: `Connected to ${cvConfig.graph.url}`,
+      message: `Connected to ${falkorUrl}`,
     };
   } catch (error: any) {
+    // Extract port from URL for the fix suggestion
+    const urlMatch = falkorUrl.match(/:(\d+)$/);
+    const port = urlMatch ? urlMatch[1] : '6379';
+
     return {
       name: 'FalkorDB (Knowledge Graph)',
       status: 'warn',
-      message: 'Not available',
-      fix: 'Start FalkorDB: docker run -d --name falkordb -p 6379:6379 falkordb/falkordb',
+      message: `Not available at ${falkorUrl}`,
+      fix: `Start FalkorDB: docker run -d --name falkordb -p ${port}:6379 falkordb/falkordb`,
     };
   }
 }
@@ -470,26 +459,34 @@ async function checkFalkorDB(): Promise<DiagnosticResult> {
  * Check Qdrant
  */
 async function checkQdrant(): Promise<DiagnosticResult> {
+  // Check services.json first (for dynamically allocated ports), then env vars/defaults
+  const servicesFile = await loadServicesFile();
+  const qdrantUrl = servicesFile?.services?.qdrant || getQdrantUrl();
+
   try {
-    const config = getConfig();
-    const cvConfig = await config.load();
-    const response = await fetch(`${cvConfig.vector.url}/collections`);
+    const response = await fetch(`${qdrantUrl}/collections`, {
+      signal: AbortSignal.timeout(5000)
+    });
 
     if (response.ok) {
       return {
         name: 'Qdrant (Vector Search)',
         status: 'pass',
-        message: `Connected to ${cvConfig.vector.url}`,
+        message: `Connected to ${qdrantUrl}`,
       };
     } else {
       throw new Error(`HTTP ${response.status}`);
     }
   } catch (error: any) {
+    // Extract port from URL for the fix suggestion
+    const urlMatch = qdrantUrl.match(/:(\d+)$/);
+    const port = urlMatch ? urlMatch[1] : '6333';
+
     return {
       name: 'Qdrant (Vector Search)',
       status: 'warn',
-      message: 'Not available',
-      fix: 'Start Qdrant: docker run -d --name qdrant -p 6333:6333 qdrant/qdrant',
+      message: `Not available at ${qdrantUrl}`,
+      fix: `Start Qdrant: docker run -d --name qdrant -p ${port}:6333 qdrant/qdrant`,
     };
   }
 }
@@ -499,9 +496,13 @@ async function checkQdrant(): Promise<DiagnosticResult> {
  */
 async function checkOllama(): Promise<DiagnosticResult> {
   try {
+    // Check services.json first (for dynamically allocated ports), then env vars/defaults
+    const servicesFile = await loadServicesFile();
+    const ollamaUrl = servicesFile?.services?.ollama || getOllamaUrl();
+
     // First check if any Ollama (system or container) is responding
     try {
-      const response = await fetch('http://127.0.0.1:11434/api/tags', {
+      const response = await fetch(`${ollamaUrl}/api/tags`, {
         signal: AbortSignal.timeout(5000)
       });
       if (response.ok) {
@@ -627,18 +628,32 @@ async function checkDiskSpace(): Promise<DiagnosticResult> {
  * Check network connectivity
  */
 async function checkNetworkConnectivity(): Promise<DiagnosticResult> {
-  try {
-    await fetch('https://www.google.com', { method: 'HEAD' });
-    return {
-      name: 'Network Connectivity',
-      status: 'pass',
-      message: 'Internet connection available',
-    };
-  } catch {
-    return {
-      name: 'Network Connectivity',
-      status: 'warn',
-      message: 'No internet connection (some features may not work)',
-    };
+  // Try multiple endpoints for reliability
+  const endpoints = [
+    'https://api.anthropic.com',
+    'https://api.github.com',
+    'https://1.1.1.1',
+  ];
+
+  for (const endpoint of endpoints) {
+    try {
+      await fetch(endpoint, {
+        method: 'HEAD',
+        signal: AbortSignal.timeout(5000)
+      });
+      return {
+        name: 'Network Connectivity',
+        status: 'pass',
+        message: 'Internet connection available',
+      };
+    } catch {
+      // Try next endpoint
+    }
   }
+
+  return {
+    name: 'Network Connectivity',
+    status: 'warn',
+    message: 'Limited connectivity (API calls may fail)',
+  };
 }

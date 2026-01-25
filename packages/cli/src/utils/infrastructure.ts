@@ -8,6 +8,21 @@ import { createClient } from 'redis';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { getCVDir } from '@cv-git/shared';
+import { saveServices, loadServicesFile } from './services.js';
+
+/**
+ * Helper to persist a service URL after dynamic port allocation
+ */
+async function persistServiceUrl(service: 'falkordb' | 'qdrant' | 'ollama', url: string): Promise<void> {
+  try {
+    const existing = await loadServicesFile();
+    const services = existing?.services || {};
+    services[service] = url;
+    await saveServices(services);
+  } catch {
+    // Non-fatal - service discovery will still work via Docker inspection
+  }
+}
 
 export interface InfraStatus {
   falkordb: {
@@ -156,6 +171,7 @@ export async function ensureFalkorDB(options?: {
   if (containerInfo.running && containerInfo.port) {
     const url = `redis://localhost:${containerInfo.port}`;
     if (await isFalkorDBInstance(url)) {
+      await persistServiceUrl('falkordb', url);
       return { url, started: false };
     }
   }
@@ -166,7 +182,9 @@ export async function ensureFalkorDB(options?: {
       execSync('docker start cv-git-falkordb', { stdio: 'ignore' });
 
       if (await waitForFalkorDB(containerInfo.port)) {
-        return { url: `redis://localhost:${containerInfo.port}`, started: true };
+        const url = `redis://localhost:${containerInfo.port}`;
+        await persistServiceUrl('falkordb', url);
+        return { url, started: true };
       }
     } catch {
       // Failed to start
@@ -206,7 +224,9 @@ export async function ensureFalkorDB(options?: {
   }
 
   if (await waitForFalkorDB(port)) {
-    return { url: `redis://localhost:${port}`, started: true };
+    const url = `redis://localhost:${port}`;
+    await persistServiceUrl('falkordb', url);
+    return { url, started: true };
   }
 
   return null;
@@ -283,6 +303,7 @@ export async function ensureQdrant(options?: {
     try {
       const response = await fetch(`${url}/collections`);
       if (response.ok) {
+        await persistServiceUrl('qdrant', url);
         return { url, started: false };
       }
     } catch {
@@ -296,7 +317,9 @@ export async function ensureQdrant(options?: {
       execSync('docker start cv-git-qdrant', { stdio: 'ignore' });
 
       if (await waitForQdrant(containerInfo.port)) {
-        return { url: `http://localhost:${containerInfo.port}`, started: true };
+        const url = `http://localhost:${containerInfo.port}`;
+        await persistServiceUrl('qdrant', url);
+        return { url, started: true };
       }
     } catch {
       // Failed to start
@@ -326,7 +349,9 @@ export async function ensureQdrant(options?: {
   }
 
   if (await waitForQdrant(port)) {
-    return { url: `http://localhost:${port}`, started: true };
+    const url = `http://localhost:${port}`;
+    await persistServiceUrl('qdrant', url);
+    return { url, started: true };
   }
 
   return null;
@@ -553,6 +578,7 @@ export async function ensureOllama(options?: {
   // First check if a system-level Ollama is already running
   if (await isSystemOllamaRunning(defaultPort)) {
     const url = `http://127.0.0.1:${defaultPort}`;
+    await persistServiceUrl('ollama', url);
     let modelReady = false;
     if (options?.pullModel !== false) {
       modelReady = await ensureOllamaModel(defaultPort, model, { silent: options?.silent });
@@ -577,6 +603,7 @@ export async function ensureOllama(options?: {
       const response = await fetch(`${url}/api/tags`);
       if (response.ok) {
         // Container running and responding
+        await persistServiceUrl('ollama', url);
         let modelReady = false;
         if (options?.pullModel !== false) {
           modelReady = await ensureOllamaModel(port, model, { silent: options?.silent });
@@ -596,11 +623,13 @@ export async function ensureOllama(options?: {
       started = true;
 
       if (await waitForOllama(port)) {
+        const url = `http://127.0.0.1:${port}`;
+        await persistServiceUrl('ollama', url);
         let modelReady = false;
         if (options?.pullModel !== false) {
           modelReady = await ensureOllamaModel(port, model, { silent: options?.silent });
         }
-        return { url: `http://127.0.0.1:${port}`, started: true, modelReady };
+        return { url, started: true, modelReady };
       }
     } catch {
       // Failed to start
@@ -647,11 +676,13 @@ export async function ensureOllama(options?: {
   }
 
   if (await waitForOllama(port)) {
+    const url = `http://127.0.0.1:${port}`;
+    await persistServiceUrl('ollama', url);
     let modelReady = false;
     if (options?.pullModel !== false) {
       modelReady = await ensureOllamaModel(port, model, { silent: options?.silent });
     }
-    return { url: `http://127.0.0.1:${port}`, started, modelReady };
+    return { url, started, modelReady };
   }
 
   return null;

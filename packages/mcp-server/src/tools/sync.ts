@@ -4,7 +4,7 @@
  */
 
 import { SyncArgs, ToolResult } from '../types.js';
-import { successResult, errorResult, formatSyncResult, createIsolatedGraphManager } from '../utils.js';
+import { successResult, errorResult, formatSyncResult, createIsolatedGraphManager, getServiceUrls } from '../utils.js';
 import {
   configManager,
   createGitManager,
@@ -45,11 +45,15 @@ export async function handleSync(args: SyncArgs): Promise<ToolResult> {
 
     if (apiKey && config.vector) {
       try {
-        vector = createVectorManager(
-          config.vector.url,
-          apiKey,
-          config.vector.collections
-        );
+        // Get service URLs (checks services.json for dynamic ports first)
+        const serviceUrls = await getServiceUrls(config);
+
+        vector = createVectorManager({
+          url: serviceUrls.qdrant,
+          openaiApiKey,
+          openrouterApiKey,
+          collections: config.vector.collections,
+        });
         await vector.connect();
       } catch (error: any) {
         // Continue without vector search if it fails

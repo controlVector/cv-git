@@ -55,7 +55,7 @@ function getServicesPath(): string {
 /**
  * Load services from config file
  */
-async function loadServicesFile(): Promise<ServicesFile | null> {
+export async function loadServicesFile(): Promise<ServicesFile | null> {
   try {
     const content = await fs.readFile(getServicesPath(), 'utf-8');
     return JSON.parse(content);

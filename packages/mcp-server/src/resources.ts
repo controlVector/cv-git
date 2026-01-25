@@ -9,7 +9,7 @@ import {
 } from '@cv-git/core';
 import { findRepoRoot } from '@cv-git/shared';
 import { getOpenAIApiKey, getOpenRouterApiKey } from './credentials.js';
-import { createIsolatedGraphManager } from './utils.js';
+import { createIsolatedGraphManager, getServiceUrls } from './utils.js';
 
 /**
  * Resource definitions available from this server
@@ -270,12 +270,15 @@ async function readStatus(): Promise<ResourceContent> {
       services.falkordb = 'unavailable';
     }
 
+    // Get service URLs (checks services.json for dynamic ports first)
+    const serviceUrls = await getServiceUrls(config);
+
     // Check Qdrant
     try {
       const openaiApiKey = await getOpenAIApiKey();
       const openrouterApiKey = await getOpenRouterApiKey();
       const vector = createVectorManager({
-        url: config.vector.url,
+        url: serviceUrls.qdrant,
         openrouterApiKey,
         openaiApiKey,
         collections: config.vector.collections,
@@ -295,8 +298,8 @@ async function readStatus(): Promise<ResourceContent> {
         generated: new Date().toISOString(),
         services,
         config: {
-          graphUrl: config.graph.url,
-          vectorUrl: config.vector.url,
+          graphUrl: serviceUrls.falkordb,
+          vectorUrl: serviceUrls.qdrant,
         },
       }, null, 2),
     };

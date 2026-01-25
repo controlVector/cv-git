@@ -8,7 +8,7 @@
  */
 
 import { ToolResult } from '../types.js';
-import { successResult, errorResult, createIsolatedGraphManager } from '../utils.js';
+import { successResult, errorResult, createIsolatedGraphManager, getServiceUrls } from '../utils.js';
 import {
   configManager,
   createVectorManager,
@@ -71,9 +71,12 @@ export async function handleContext(args: ContextArgs): Promise<ToolResult> {
     let usedFallback = false;
 
     try {
+      // Get service URLs (checks services.json for dynamic ports first)
+      const serviceUrls = await getServiceUrls(config);
+
       // Initialize vector manager with proper options
       vector = createVectorManager({
-        url: config.vector.url,
+        url: serviceUrls.qdrant,
         openrouterApiKey,
         openaiApiKey,
         collections: config.vector.collections,

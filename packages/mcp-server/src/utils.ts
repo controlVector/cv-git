@@ -3,9 +3,31 @@
  * Helper functions for formatting and error handling
  */
 
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import * as os from 'os';
 import { ToolResult, SearchResult, GraphResult } from './types.js';
 import { configManager, createGraphManager, readManifest, generateRepoId, GraphManager } from '@cv-git/core';
 import { findRepoRoot, getCVDir } from '@cv-git/shared';
+
+/**
+ * Load service URLs from ~/.cv/services.json if it exists
+ * This allows dynamic port allocation to be respected across tools
+ */
+async function loadServicesFile(): Promise<{
+  falkordb?: string;
+  qdrant?: string;
+  ollama?: string;
+} | null> {
+  try {
+    const servicesPath = path.join(os.homedir(), '.cv', 'services.json');
+    const content = await fs.readFile(servicesPath, 'utf-8');
+    const data = JSON.parse(content);
+    return data.services || null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Create a graph manager with proper repo isolation.
@@ -29,19 +51,41 @@ export async function createIsolatedGraphManager(repoRoot?: string): Promise<{
   // Load configuration for URL
   const config = await configManager.load(root);
 
+  // Check services.json for dynamically allocated ports first
+  const services = await loadServicesFile();
+  const graphUrl = services?.falkordb || config.graph.url;
+
   // Get repoId from manifest (like the CLI does)
   const cvDir = getCVDir(root);
   const manifest = await readManifest(cvDir);
   const repoId = manifest?.repository?.id || generateRepoId(root);
 
   // Create graph manager with repo-specific database
-  const graph = createGraphManager({ url: config.graph.url, repoId });
+  const graph = createGraphManager({ url: graphUrl, repoId });
 
   return {
     graph,
     repoRoot: root,
     repoId,
     databaseName: graph.getDatabaseName(),
+  };
+}
+
+/**
+ * Get service URLs with services.json override
+ * Priority: services.json > env vars > config > defaults
+ */
+export async function getServiceUrls(config: any): Promise<{
+  falkordb: string;
+  qdrant: string;
+  ollama: string;
+}> {
+  const services = await loadServicesFile();
+
+  return {
+    falkordb: services?.falkordb || process.env.CV_FALKORDB_URL || config.graph?.url || 'redis://localhost:6379',
+    qdrant: services?.qdrant || process.env.CV_QDRANT_URL || config.vector?.url || 'http://localhost:6333',
+    ollama: services?.ollama || process.env.CV_OLLAMA_URL || config.embedding?.url || 'http://localhost:11434',
   };
 }
 
