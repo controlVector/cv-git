@@ -9,7 +9,7 @@ import { simpleGit } from 'simple-git';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { getConfig } from '../config.js';
-import { exec } from 'child_process';
+import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 import { addGlobalOptions } from '../utils/output.js';
 import {
@@ -23,6 +23,75 @@ import {
   getOllamaUrl,
 } from '@cv-git/core';
 import { loadServicesFile } from '../utils/services.js';
+
+/**
+ * Discover FalkorDB port from running cv-git-falkordb container
+ */
+function discoverFalkorDBPort(): number | null {
+  try {
+    const result = execSync('docker ps --filter name=^cv-git-falkordb$ --format "{{.Ports}}"', {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'ignore']
+    }).trim();
+
+    if (result) {
+      // Parse port from "0.0.0.0:6380->6379/tcp" format
+      const portMatch = result.match(/:(\d+)->/);
+      if (portMatch) {
+        return parseInt(portMatch[1], 10);
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Discover Qdrant port from running cv-git-qdrant container
+ */
+function discoverQdrantPort(): number | null {
+  try {
+    const result = execSync('docker ps --filter name=cv-git-qdrant --format "{{.Ports}}"', {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'ignore']
+    }).trim();
+
+    if (result) {
+      // Parse port from "0.0.0.0:6334->6333/tcp" format
+      const portMatch = result.match(/:(\d+)->/);
+      if (portMatch) {
+        return parseInt(portMatch[1], 10);
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Discover Ollama port from running cv-git-ollama container
+ */
+function discoverOllamaPort(): number | null {
+  try {
+    const result = execSync('docker ps --filter name=^cv-git-ollama$ --format "{{.Ports}}"', {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'ignore']
+    }).trim();
+
+    if (result) {
+      // Parse port from "0.0.0.0:11434->11434/tcp" format
+      const portMatch = result.match(/:(\d+)->/);
+      if (portMatch) {
+        return parseInt(portMatch[1], 10);
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 const execAsync = promisify(exec);
 
@@ -424,9 +493,19 @@ async function checkCredentials(): Promise<DiagnosticResult> {
  * Check FalkorDB
  */
 async function checkFalkorDB(): Promise<DiagnosticResult> {
-  // Check services.json first (for dynamically allocated ports), then env vars/defaults
+  // Priority: services.json > running container > env vars > defaults
   const servicesFile = await loadServicesFile();
-  const falkorUrl = servicesFile?.services?.falkordb || getFalkorDbUrl();
+  let falkorUrl = servicesFile?.services?.falkordb;
+
+  if (!falkorUrl) {
+    // Try to discover from running container
+    const containerPort = discoverFalkorDBPort();
+    if (containerPort) {
+      falkorUrl = `redis://localhost:${containerPort}`;
+    } else {
+      falkorUrl = getFalkorDbUrl();
+    }
+  }
 
   try {
     const { createClient } = await import('redis');
@@ -459,9 +538,19 @@ async function checkFalkorDB(): Promise<DiagnosticResult> {
  * Check Qdrant
  */
 async function checkQdrant(): Promise<DiagnosticResult> {
-  // Check services.json first (for dynamically allocated ports), then env vars/defaults
+  // Priority: services.json > running container > env vars > defaults
   const servicesFile = await loadServicesFile();
-  const qdrantUrl = servicesFile?.services?.qdrant || getQdrantUrl();
+  let qdrantUrl = servicesFile?.services?.qdrant;
+
+  if (!qdrantUrl) {
+    // Try to discover from running container
+    const containerPort = discoverQdrantPort();
+    if (containerPort) {
+      qdrantUrl = `http://localhost:${containerPort}`;
+    } else {
+      qdrantUrl = getQdrantUrl();
+    }
+  }
 
   try {
     const response = await fetch(`${qdrantUrl}/collections`, {
@@ -496,9 +585,19 @@ async function checkQdrant(): Promise<DiagnosticResult> {
  */
 async function checkOllama(): Promise<DiagnosticResult> {
   try {
-    // Check services.json first (for dynamically allocated ports), then env vars/defaults
+    // Priority: services.json > running container > env vars > defaults
     const servicesFile = await loadServicesFile();
-    const ollamaUrl = servicesFile?.services?.ollama || getOllamaUrl();
+    let ollamaUrl = servicesFile?.services?.ollama;
+
+    if (!ollamaUrl) {
+      // Try to discover from running container
+      const containerPort = discoverOllamaPort();
+      if (containerPort) {
+        ollamaUrl = `http://127.0.0.1:${containerPort}`;
+      } else {
+        ollamaUrl = getOllamaUrl();
+      }
+    }
 
     // First check if any Ollama (system or container) is responding
     try {
