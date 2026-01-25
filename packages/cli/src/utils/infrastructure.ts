@@ -24,6 +24,279 @@ async function persistServiceUrl(service: 'falkordb' | 'qdrant' | 'ollama', url:
   }
 }
 
+/**
+ * System requirements for running local AI (Ollama)
+ */
+export interface SystemRequirements {
+  totalMemoryGB: number;
+  availableMemoryGB: number;
+  freeDiskGB: number;
+  meetsMinimum: boolean;
+  meetsRecommended: boolean;
+  recommendation: 'local' | 'cloud' | 'either';
+  issues: string[];
+}
+
+// Minimum: 4GB RAM, 3GB disk (can run but may be slow)
+// Recommended: 8GB RAM, 5GB disk (good performance)
+const MIN_RAM_GB = 4;
+const RECOMMENDED_RAM_GB = 8;
+const MIN_DISK_GB = 3;
+const RECOMMENDED_DISK_GB = 5;
+
+/**
+ * Check system requirements for running local AI
+ */
+export function checkSystemRequirements(): SystemRequirements {
+  const issues: string[] = [];
+  let totalMemoryGB = 0;
+  let availableMemoryGB = 0;
+  let freeDiskGB = 0;
+
+  // Check memory
+  try {
+    const platform = process.platform;
+    if (platform === 'linux') {
+      // Linux: parse /proc/meminfo
+      const meminfo = execSync('cat /proc/meminfo', { encoding: 'utf-8' });
+      const totalMatch = meminfo.match(/MemTotal:\s+(\d+)/);
+      const availMatch = meminfo.match(/MemAvailable:\s+(\d+)/);
+      if (totalMatch) totalMemoryGB = parseInt(totalMatch[1]) / 1024 / 1024;
+      if (availMatch) availableMemoryGB = parseInt(availMatch[1]) / 1024 / 1024;
+    } else if (platform === 'darwin') {
+      // macOS: use sysctl
+      const total = execSync('sysctl -n hw.memsize', { encoding: 'utf-8' });
+      totalMemoryGB = parseInt(total) / 1024 / 1024 / 1024;
+      // For available, use vm_stat (approximate)
+      const vmstat = execSync('vm_stat', { encoding: 'utf-8' });
+      const freeMatch = vmstat.match(/Pages free:\s+(\d+)/);
+      const pageSize = 4096; // typical page size
+      if (freeMatch) availableMemoryGB = parseInt(freeMatch[1]) * pageSize / 1024 / 1024 / 1024;
+      else availableMemoryGB = totalMemoryGB * 0.3; // estimate 30% available
+    } else {
+      // Windows or unknown - estimate
+      totalMemoryGB = 8; // assume reasonable default
+      availableMemoryGB = 4;
+    }
+  } catch {
+    totalMemoryGB = 8;
+    availableMemoryGB = 4;
+  }
+
+  // Check disk space
+  try {
+    const platform = process.platform;
+    if (platform === 'linux' || platform === 'darwin') {
+      const df = execSync('df -BG ~ 2>/dev/null || df -g ~', { encoding: 'utf-8' });
+      const lines = df.trim().split('\n');
+      if (lines.length >= 2) {
+        const parts = lines[1].split(/\s+/);
+        // Available is typically 4th column
+        const availStr = parts[3]?.replace('G', '') || '10';
+        freeDiskGB = parseFloat(availStr);
+      }
+    } else {
+      freeDiskGB = 10; // assume reasonable default
+    }
+  } catch {
+    freeDiskGB = 10;
+  }
+
+  // Evaluate requirements
+  if (totalMemoryGB < MIN_RAM_GB) {
+    issues.push(`Low RAM: ${totalMemoryGB.toFixed(1)}GB (minimum ${MIN_RAM_GB}GB)`);
+  } else if (totalMemoryGB < RECOMMENDED_RAM_GB) {
+    issues.push(`RAM below recommended: ${totalMemoryGB.toFixed(1)}GB (recommended ${RECOMMENDED_RAM_GB}GB)`);
+  }
+
+  if (freeDiskGB < MIN_DISK_GB) {
+    issues.push(`Low disk space: ${freeDiskGB.toFixed(1)}GB free (minimum ${MIN_DISK_GB}GB)`);
+  }
+
+  const meetsMinimum = totalMemoryGB >= MIN_RAM_GB && freeDiskGB >= MIN_DISK_GB;
+  const meetsRecommended = totalMemoryGB >= RECOMMENDED_RAM_GB && freeDiskGB >= RECOMMENDED_DISK_GB;
+
+  let recommendation: 'local' | 'cloud' | 'either';
+  if (meetsRecommended) {
+    recommendation = 'local';
+  } else if (meetsMinimum) {
+    recommendation = 'either';
+  } else {
+    recommendation = 'cloud';
+  }
+
+  return {
+    totalMemoryGB,
+    availableMemoryGB,
+    freeDiskGB,
+    meetsMinimum,
+    meetsRecommended,
+    recommendation,
+    issues,
+  };
+}
+
+/**
+ * Ollama installation status
+ */
+export interface OllamaStatus {
+  installed: boolean;
+  running: boolean;
+  installedVia: 'native' | 'docker' | 'none';
+  version?: string;
+  models: string[];
+  canInstallNative: boolean;
+  url?: string;
+}
+
+/**
+ * Check if Ollama is installed (native binary)
+ */
+function isOllamaInstalledNative(): { installed: boolean; version?: string } {
+  try {
+    const version = execSync('ollama --version 2>/dev/null', {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'ignore']
+    }).trim();
+    return { installed: true, version };
+  } catch {
+    return { installed: false };
+  }
+}
+
+/**
+ * Check what models are available in Ollama
+ */
+async function getOllamaModels(port: number = 11434): Promise<string[]> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/tags`, {
+      signal: AbortSignal.timeout(3000)
+    });
+    if (response.ok) {
+      const data = await response.json() as { models?: Array<{ name: string }> };
+      return (data.models || []).map(m => m.name);
+    }
+  } catch {
+    // Not running or not responding
+  }
+  return [];
+}
+
+/**
+ * Start native Ollama service
+ */
+export async function startNativeOllama(): Promise<boolean> {
+  try {
+    // Try to start ollama serve in background
+    const platform = process.platform;
+    if (platform === 'darwin') {
+      // macOS: ollama might be a launchd service
+      try {
+        execSync('brew services start ollama 2>/dev/null', { stdio: 'ignore' });
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        return await isSystemOllamaRunning(11434);
+      } catch {
+        // Try direct start
+      }
+    }
+
+    // Linux/other: start in background
+    execSync('nohup ollama serve > /dev/null 2>&1 &', {
+      shell: '/bin/bash',
+      stdio: 'ignore'
+    });
+
+    // Wait for it to start
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    return await isSystemOllamaRunning(11434);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Install Ollama natively
+ */
+export async function installOllamaNative(options?: {
+  silent?: boolean;
+  onProgress?: (msg: string) => void;
+}): Promise<boolean> {
+  const log = options?.onProgress || (options?.silent ? () => {} : console.log);
+  const platform = process.platform;
+
+  try {
+    if (platform === 'linux') {
+      log('Installing Ollama via official script...');
+      execSync('curl -fsSL https://ollama.com/install.sh | sh', {
+        shell: '/bin/bash',
+        stdio: options?.silent ? 'ignore' : 'inherit'
+      });
+      return true;
+    } else if (platform === 'darwin') {
+      // macOS: check for Homebrew first
+      try {
+        execSync('which brew', { stdio: 'ignore' });
+        log('Installing Ollama via Homebrew...');
+        execSync('brew install ollama', {
+          stdio: options?.silent ? 'ignore' : 'inherit'
+        });
+        return true;
+      } catch {
+        // No Homebrew, use official script
+        log('Installing Ollama via official script...');
+        execSync('curl -fsSL https://ollama.com/install.sh | sh', {
+          shell: '/bin/bash',
+          stdio: options?.silent ? 'ignore' : 'inherit'
+        });
+        return true;
+      }
+    } else {
+      log('Native Ollama installation not supported on this platform.');
+      log('Please install manually from https://ollama.com/download');
+      return false;
+    }
+  } catch (error: any) {
+    log(`Installation failed: ${error.message}`);
+    return false;
+  }
+}
+
+/**
+ * Get comprehensive Ollama status
+ */
+export async function getOllamaStatus(): Promise<OllamaStatus> {
+  const nativeCheck = isOllamaInstalledNative();
+  const containerInfo = getCVOllamaInfo();
+  const isRunning = await isSystemOllamaRunning(11434);
+  const models = isRunning ? await getOllamaModels(11434) : [];
+
+  let installedVia: 'native' | 'docker' | 'none' = 'none';
+  let url: string | undefined;
+
+  if (nativeCheck.installed) {
+    installedVia = 'native';
+    if (isRunning) url = 'http://127.0.0.1:11434';
+  } else if (containerInfo.exists) {
+    installedVia = 'docker';
+    if (containerInfo.running && containerInfo.port) {
+      url = `http://127.0.0.1:${containerInfo.port}`;
+    }
+  }
+
+  // Can install native on Linux and macOS
+  const canInstallNative = process.platform === 'linux' || process.platform === 'darwin';
+
+  return {
+    installed: nativeCheck.installed || containerInfo.exists,
+    running: isRunning || (containerInfo.running ?? false),
+    installedVia,
+    version: nativeCheck.version,
+    models,
+    canInstallNative,
+    url,
+  };
+}
+
 export interface InfraStatus {
   falkordb: {
     available: boolean;

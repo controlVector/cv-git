@@ -29,7 +29,15 @@ import {
   displayRequiredKeys,
   PreferenceChoices,
 } from '../utils/preference-picker.js';
-import { ensureOllama, isDockerAvailable } from '../utils/infrastructure.js';
+import {
+  ensureOllama,
+  isDockerAvailable,
+  checkSystemRequirements,
+  getOllamaStatus,
+  startNativeOllama,
+  installOllamaNative,
+  ensureOllamaModel,
+} from '../utils/infrastructure.js';
 
 export function initCommand(): Command {
   const cmd = new Command('init');
@@ -109,7 +117,25 @@ export function initCommand(): Command {
 
           // If using Ollama for embeddings, set it up
           if (preferences.embeddingProvider === 'ollama') {
-            await setupOllamaEmbeddings();
+            const ollamaResult = await setupOllamaEmbeddings();
+
+            // If system can't handle local AI, offer to switch
+            if (ollamaResult === 'cloud-recommended') {
+              const { switchToCloud } = await inquirer.prompt([{
+                type: 'confirm',
+                name: 'switchToCloud',
+                message: 'Would you like to switch to cloud embeddings (OpenRouter)?',
+                default: true,
+              }]);
+
+              if (switchToCloud) {
+                preferences.embeddingProvider = 'openrouter';
+                await savePreferences(preferences);
+                console.log(chalk.green('Switched to OpenRouter for embeddings.'));
+                console.log(chalk.gray('Run: cv auth setup openrouter'));
+                console.log();
+              }
+            }
           }
         } else {
           // Load existing preferences
@@ -427,22 +453,174 @@ async function checkGlobalCredentials(services: string[]): Promise<{
 }
 
 /**
- * Set up Ollama for local embeddings
+ * Set up Ollama for local embeddings with smart detection
  */
-async function setupOllamaEmbeddings(): Promise<void> {
-  console.log(chalk.bold('Setting up Ollama for local embeddings...'));
+async function setupOllamaEmbeddings(): Promise<'success' | 'skipped' | 'cloud-recommended'> {
+  console.log(chalk.bold('\n🔍 Checking system for local AI capabilities...\n'));
+
+  // Step 1: Check system requirements
+  const sysReqs = checkSystemRequirements();
+
+  console.log(chalk.gray('System Resources:'));
+  console.log(chalk.gray(`  RAM: ${sysReqs.totalMemoryGB.toFixed(1)}GB total, ${sysReqs.availableMemoryGB.toFixed(1)}GB available`));
+  console.log(chalk.gray(`  Disk: ${sysReqs.freeDiskGB.toFixed(1)}GB free`));
   console.log();
 
-  // Check if Docker is available
-  if (!isDockerAvailable()) {
-    console.log(chalk.yellow('Docker is not available.'));
-    console.log(chalk.gray('Ollama requires Docker to run. Please install Docker and try again.'));
-    console.log(chalk.gray('Or switch to a cloud provider: cv config set embedding.provider openrouter'));
+  // If system doesn't meet minimum requirements, recommend cloud
+  if (!sysReqs.meetsMinimum) {
+    console.log(chalk.yellow('⚠ Your system may struggle with local AI:'));
+    sysReqs.issues.forEach(issue => console.log(chalk.yellow(`  - ${issue}`)));
     console.log();
-    return;
+    console.log(chalk.cyan('💡 Recommendation: Use a cloud embedding provider (OpenRouter or OpenAI)'));
+    console.log(chalk.gray('   These provide faster embeddings without local resource usage.'));
+    console.log(chalk.gray('   Run: cv config set embedding.provider openrouter'));
+    console.log();
+    return 'cloud-recommended';
   }
 
-  console.log(chalk.gray('Starting Ollama container...'));
+  if (!sysReqs.meetsRecommended) {
+    console.log(chalk.yellow('⚠ Note: Your system meets minimum requirements but may be slow:'));
+    sysReqs.issues.forEach(issue => console.log(chalk.yellow(`  - ${issue}`)));
+    console.log();
+  }
+
+  // Step 2: Check current Ollama status
+  console.log(chalk.gray('Checking Ollama installation...'));
+  const ollamaStatus = await getOllamaStatus();
+
+  // Case A: Ollama is already running
+  if (ollamaStatus.running && ollamaStatus.url) {
+    console.log(chalk.green(`✓ Ollama is already running (${ollamaStatus.installedVia})`));
+    console.log(chalk.gray(`  URL: ${ollamaStatus.url}`));
+
+    // Check for embedding model
+    const hasEmbeddingModel = ollamaStatus.models.some(m => m.includes('nomic-embed'));
+    if (hasEmbeddingModel) {
+      console.log(chalk.green('✓ nomic-embed-text model ready'));
+    } else {
+      console.log(chalk.gray('  Pulling nomic-embed-text model...'));
+      const port = parseInt(ollamaStatus.url.match(/:(\d+)/)?.[1] || '11434');
+      const modelReady = await ensureOllamaModel(port, 'nomic-embed-text');
+      if (modelReady) {
+        console.log(chalk.green('✓ nomic-embed-text model ready'));
+      } else {
+        console.log(chalk.yellow('⚠ Model will be downloaded on first sync'));
+      }
+    }
+    console.log();
+    return 'success';
+  }
+
+  // Case B: Ollama is installed but not running
+  if (ollamaStatus.installed && !ollamaStatus.running) {
+    console.log(chalk.yellow(`⚠ Ollama is installed (${ollamaStatus.installedVia}) but not running`));
+
+    if (ollamaStatus.installedVia === 'native') {
+      console.log(chalk.gray('  Attempting to start Ollama...'));
+      const started = await startNativeOllama();
+      if (started) {
+        console.log(chalk.green('✓ Ollama started successfully'));
+        console.log(chalk.gray('  Pulling nomic-embed-text model...'));
+        const modelReady = await ensureOllamaModel(11434, 'nomic-embed-text');
+        if (modelReady) {
+          console.log(chalk.green('✓ nomic-embed-text model ready'));
+        }
+        console.log();
+        return 'success';
+      } else {
+        console.log(chalk.yellow('⚠ Could not start Ollama automatically'));
+        console.log(chalk.gray('  Please start Ollama manually: ollama serve'));
+      }
+    } else {
+      // Docker container exists but stopped
+      console.log(chalk.gray('  Starting Ollama container...'));
+      const result = await ensureOllama({ pullModel: true, model: 'nomic-embed-text' });
+      if (result) {
+        console.log(chalk.green('✓ Ollama container started'));
+        if (result.modelReady) {
+          console.log(chalk.green('✓ nomic-embed-text model ready'));
+        }
+        console.log(chalk.gray(`  URL: ${result.url}`));
+        console.log();
+        return 'success';
+      }
+    }
+  }
+
+  // Case C: Ollama not installed - offer to install
+  console.log(chalk.gray('Ollama is not installed.'));
+  console.log();
+
+  // Check if we can install natively
+  if (ollamaStatus.canInstallNative) {
+    const { installChoice } = await inquirer.prompt([{
+      type: 'list',
+      name: 'installChoice',
+      message: 'How would you like to set up Ollama?',
+      choices: [
+        { name: '🚀 Install Ollama natively (recommended)', value: 'native' },
+        { name: '🐳 Use Docker container', value: 'docker' },
+        { name: '☁️  Skip - use cloud embeddings instead', value: 'skip' },
+      ],
+    }]);
+
+    if (installChoice === 'native') {
+      console.log();
+      console.log(chalk.gray('Installing Ollama...'));
+      const installed = await installOllamaNative({
+        onProgress: (msg) => console.log(chalk.gray(`  ${msg}`)),
+      });
+
+      if (installed) {
+        console.log(chalk.green('✓ Ollama installed successfully'));
+
+        // Start Ollama
+        console.log(chalk.gray('  Starting Ollama...'));
+        const started = await startNativeOllama();
+        if (started) {
+          console.log(chalk.green('✓ Ollama started'));
+          console.log(chalk.gray('  Pulling nomic-embed-text model...'));
+          const modelReady = await ensureOllamaModel(11434, 'nomic-embed-text');
+          if (modelReady) {
+            console.log(chalk.green('✓ nomic-embed-text model ready'));
+          }
+          console.log();
+          return 'success';
+        } else {
+          console.log(chalk.yellow('⚠ Please start Ollama manually: ollama serve'));
+        }
+      } else {
+        console.log(chalk.yellow('⚠ Installation failed. Falling back to Docker...'));
+      }
+    }
+
+    if (installChoice === 'docker' || (installChoice === 'native' && !ollamaStatus.installed)) {
+      // Fall through to Docker setup
+    }
+
+    if (installChoice === 'skip') {
+      console.log();
+      console.log(chalk.cyan('💡 To use cloud embeddings, run:'));
+      console.log(chalk.gray('   cv auth setup openrouter'));
+      console.log(chalk.gray('   cv config set embedding.provider openrouter'));
+      console.log();
+      return 'skipped';
+    }
+  }
+
+  // Case D: Try Docker as fallback
+  if (!isDockerAvailable()) {
+    console.log(chalk.yellow('⚠ Docker is not available.'));
+    console.log();
+    console.log(chalk.cyan('💡 Options:'));
+    console.log(chalk.gray('   1. Install Ollama: https://ollama.com/download'));
+    console.log(chalk.gray('   2. Install Docker: https://docs.docker.com/get-docker/'));
+    console.log(chalk.gray('   3. Use cloud embeddings: cv auth setup openrouter'));
+    console.log();
+    return 'skipped';
+  }
+
+  console.log(chalk.gray('Starting Ollama via Docker...'));
 
   try {
     const result = await ensureOllama({
@@ -452,27 +630,30 @@ async function setupOllamaEmbeddings(): Promise<void> {
 
     if (result) {
       if (result.started) {
-        console.log(chalk.green('  ✓ Ollama container started'));
+        console.log(chalk.green('✓ Ollama container started'));
       } else {
-        console.log(chalk.green('  ✓ Ollama container already running'));
+        console.log(chalk.green('✓ Ollama container already running'));
       }
 
       if (result.modelReady) {
-        console.log(chalk.green('  ✓ nomic-embed-text model ready'));
+        console.log(chalk.green('✓ nomic-embed-text model ready'));
       } else {
-        console.log(chalk.yellow('  ⚠ Model not yet available (will download on first sync)'));
+        console.log(chalk.yellow('⚠ Model will be downloaded on first sync'));
       }
 
       console.log(chalk.gray(`  URL: ${result.url}`));
       console.log();
+      return 'success';
     } else {
-      console.log(chalk.yellow('  ⚠ Could not start Ollama container'));
+      console.log(chalk.yellow('⚠ Could not start Ollama container'));
       console.log(chalk.gray('  Embeddings will be set up during first sync'));
       console.log();
+      return 'skipped';
     }
   } catch (error: any) {
-    console.log(chalk.yellow(`  ⚠ Ollama setup warning: ${error.message}`));
+    console.log(chalk.yellow(`⚠ Ollama setup warning: ${error.message}`));
     console.log(chalk.gray('  Embeddings will be set up during first sync'));
     console.log();
+    return 'skipped';
   }
 }
