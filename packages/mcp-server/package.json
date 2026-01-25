@@ -1,6 +1,6 @@
 {
   "name": "@cv-git/mcp-server",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Model Context Protocol server for CV-Git",
   "type": "module",
   "main": "./dist/index.js",
