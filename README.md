@@ -114,6 +114,12 @@ cv auth set openai sk-...
 - **`cv review`** - AI code review with multi-aspect analysis
 - **`cv find`** - Semantic code search across all languages
 
+### Traversal-Aware Context (for AI Agents)
+- **`cv_traverse_context`** - MCP tool for dynamic context based on codebase position
+- **Hierarchical summaries** - Multi-level (symbol → file → directory → repo)
+- **Stateful navigation** - Session tracking across tool calls
+- **Smart context scaling** - Automatically adjusts detail level based on depth
+
 ### Graph Analysis
 - **`cv graph stats`** - View knowledge graph statistics
 - **`cv graph calls <function>`** - What does this function call?
@@ -260,7 +266,38 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 }
 ```
 
-See [packages/mcp-server/README.md](packages/mcp-server/README.md) for available tools.
+### Available MCP Tools
+
+| Tool | Purpose |
+|------|---------|
+| `cv_find` | Semantic code search |
+| `cv_explain` | Get code explanations |
+| `cv_graph_path` | Find paths between symbols |
+| `cv_graph_neighborhood` | Explore symbol relationships |
+| `cv_graph_impact` | Analyze change impact |
+| `cv_traverse_context` | **Traversal-aware dynamic context** |
+
+### Traversal-Aware Context for Claude Code
+
+The `cv_traverse_context` tool enables intelligent context management:
+
+```
+# Navigate to a file
+cv_traverse_context(file="src/auth/oauth.ts", direction="jump")
+→ Returns: File summary + symbol list
+
+# Drill into a symbol
+cv_traverse_context(symbol="validateToken", direction="in", sessionId="...")
+→ Returns: Function code + callers + callees
+
+# Zoom out to module
+cv_traverse_context(direction="out", sessionId="...")
+→ Returns: Module overview + sibling files
+```
+
+Context automatically scales based on your position in the codebase.
+
+See [packages/mcp-server/README.md](packages/mcp-server/README.md) for full documentation.
 
 ---
 

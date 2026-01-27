@@ -71,7 +71,8 @@ export interface SymbolNode {
   isAsync: boolean;
   isStatic: boolean;
   complexity: number;
-  vectorId?: string;
+  vectorId?: string;       // Primary chunk ID (backwards compat)
+  vectorIds?: string[];    // All chunk IDs for this symbol
   calls?: CallInfo[];      // Functions/methods this symbol calls
   createdAt: number;
   updatedAt: number;
@@ -371,6 +372,172 @@ export interface CommitPayload extends VectorPayload {
   timestamp: number;
   filesChanged: string[];
   symbolsChanged: string[];
+}
+
+// ========== Hierarchical Summary Types ==========
+
+/**
+ * Hierarchy level for summaries
+ * 0: Code chunks (raw code, existing)
+ * 1: Symbol summary (function/class summary)
+ * 2: File summary (aggregated symbol summaries)
+ * 3: Directory summary (aggregated file summaries)
+ * 4: Repo summary (codebase overview)
+ */
+export type HierarchyLevel = 0 | 1 | 2 | 3 | 4;
+
+/**
+ * Payload for hierarchical summaries stored in vector DB
+ */
+export interface HierarchicalSummaryPayload extends VectorPayload {
+  /** Unique ID: chunk:{file}:{line}, symbol:{qn}, file:{path}, dir:{path}, repo:{id} */
+  id: string;
+  /** Hierarchy level (0-4) */
+  level: HierarchyLevel;
+  /** Path or qualified name depending on level */
+  path: string;
+  /** Parent summary ID (e.g., file summary for a symbol) */
+  parent?: string;
+  /** Child summary IDs (e.g., symbols in a file) */
+  children?: string[];
+  /** LLM-generated or aggregated summary text */
+  summary: string;
+  /** Keywords extracted from the summary */
+  keywords: string[];
+  /** Content hash for cache invalidation */
+  contentHash: string;
+  /** Symbol kind (for level 1) */
+  symbolKind?: SymbolKind;
+  /** Number of symbols (for level 2+) */
+  symbolCount?: number;
+  /** Number of files (for level 3+) */
+  fileCount?: number;
+  /** Languages present (for level 2+) */
+  languages?: string[];
+  /** Last modification timestamp */
+  lastModified: number;
+}
+
+/**
+ * Options for hierarchical summary generation
+ */
+export interface HierarchicalSummaryOptions {
+  /** Maximum symbols per file to summarize (default: 50) */
+  maxSymbolsPerFile?: number;
+  /** Maximum files per directory to summarize (default: 100) */
+  maxFilesPerDirectory?: number;
+  /** Whether to skip unchanged content (default: true) */
+  skipUnchanged?: boolean;
+  /** LLM model to use for summarization */
+  model?: string;
+  /** Maximum tokens for summaries */
+  maxTokens?: number;
+}
+
+/**
+ * Result of summary generation
+ */
+export interface SummaryGenerationResult {
+  /** Number of summaries generated */
+  count: number;
+  /** Summaries by level */
+  byLevel: Record<HierarchyLevel, number>;
+  /** Number skipped (unchanged) */
+  skipped: number;
+  /** Errors encountered */
+  errors: string[];
+}
+
+// ========== Traversal Types ==========
+
+/**
+ * Position in the codebase during traversal
+ */
+export interface TraversalPosition {
+  /** Current file path */
+  file?: string;
+  /** Current symbol qualified name */
+  symbol?: string;
+  /** Current module/directory path */
+  module?: string;
+  /** Depth in hierarchy (0 = repo level) */
+  depth: number;
+  /** Last updated timestamp */
+  timestamp: number;
+}
+
+/**
+ * Direction for traversal navigation
+ */
+export type TraversalDirection = 'in' | 'out' | 'lateral' | 'jump' | 'stay';
+
+/**
+ * Arguments for the traverse_context tool
+ */
+export interface TraverseContextArgs {
+  /** Target file path */
+  file?: string;
+  /** Target symbol name */
+  symbol?: string;
+  /** Target module/directory */
+  module?: string;
+  /** Navigation direction */
+  direction: TraversalDirection;
+  /** Session ID for stateful navigation */
+  sessionId?: string;
+  /** Include callers in context */
+  includeCallers?: boolean;
+  /** Include callees in context */
+  includeCallees?: boolean;
+  /** Output format */
+  format?: 'xml' | 'markdown' | 'json';
+  /** Token budget for context */
+  budget?: number;
+}
+
+/**
+ * Result from traversal with context
+ */
+export interface TraversalContextResult {
+  /** Current position after navigation */
+  position: TraversalPosition;
+  /** Session ID */
+  sessionId: string;
+  /** Context at current position */
+  context: {
+    /** Summary for current level */
+    summary?: string;
+    /** Code content (for symbol level) */
+    code?: string;
+    /** List of files (for module level) */
+    files?: Array<{ path: string; summary?: string }>;
+    /** List of symbols (for file level) */
+    symbols?: Array<{ name: string; kind: SymbolKind; summary?: string }>;
+    /** Callers of current symbol */
+    callers?: Array<{ name: string; file: string }>;
+    /** Callees of current symbol */
+    callees?: Array<{ name: string; file: string }>;
+    /** Import relationships */
+    imports?: string[];
+  };
+  /** Navigation hints for next steps */
+  hints: string[];
+}
+
+/**
+ * Session state for traversal
+ */
+export interface TraversalSession {
+  /** Unique session ID */
+  id: string;
+  /** Current position */
+  position: TraversalPosition;
+  /** Navigation history */
+  history: TraversalPosition[];
+  /** Created timestamp */
+  createdAt: number;
+  /** Last activity timestamp */
+  lastActivityAt: number;
 }
 
 // ========== AI/LLM Types ==========

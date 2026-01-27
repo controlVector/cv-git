@@ -95,6 +95,7 @@ import {
   CommitGenerateArgs,
 } from './tools/commit.js';
 import { handleReason, ReasonArgs } from './tools/reason.js';
+import { handleTraverseContext, TraverseContextToolArgs } from './tools/traverse-context.js';
 
 /**
  * Tool definitions
@@ -936,6 +937,75 @@ This provides deeper analysis than cv_explain by recursively gathering context.`
       },
     },
   },
+
+  // Traversal-Aware Context (Claude Code Integration)
+  {
+    name: 'cv_traverse_context',
+    description: `Traversal-aware dynamic context for navigating codebases. Tracks your position (repo → module → file → symbol) and returns context appropriate for each level.
+
+USE THIS TOOL when:
+- You want to explore a codebase hierarchically
+- You need context that changes as you navigate
+- You want to drill into specific files/symbols
+- You need to understand code relationships at different granularities
+
+DIRECTIONS:
+- jump: Go directly to a file, symbol, or module
+- in: Drill down (repo→module→file→symbol)
+- out: Zoom out (symbol→file→module→repo)
+- lateral: Move to sibling at same level
+- stay: Refresh context at current position
+
+The tool maintains session state across calls for continuous navigation.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          description: 'Target file path (for jump or drill-down)',
+        },
+        symbol: {
+          type: 'string',
+          description: 'Target symbol name (for jump or drill-down)',
+        },
+        module: {
+          type: 'string',
+          description: 'Target module/directory (for jump or drill-down)',
+        },
+        direction: {
+          type: 'string',
+          enum: ['in', 'out', 'lateral', 'jump', 'stay'],
+          description: 'Navigation direction',
+          default: 'jump',
+        },
+        sessionId: {
+          type: 'string',
+          description: 'Session ID for stateful navigation (auto-generated if not provided)',
+        },
+        includeCallers: {
+          type: 'boolean',
+          description: 'Include callers of current symbol',
+          default: true,
+        },
+        includeCallees: {
+          type: 'boolean',
+          description: 'Include callees of current symbol',
+          default: true,
+        },
+        format: {
+          type: 'string',
+          enum: ['xml', 'markdown', 'json'],
+          description: 'Output format (xml recommended for Claude)',
+          default: 'xml',
+        },
+        budget: {
+          type: 'number',
+          description: 'Token budget for context',
+          default: 4000,
+        },
+      },
+    },
+  },
 ];
 
 /**
@@ -1196,6 +1266,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'cv_commit_generate':
         result = await handleCommitGenerate(args as unknown as CommitGenerateArgs);
+        break;
+
+      // Traversal-Aware Context
+      case 'cv_traverse_context':
+        result = await handleTraverseContext(args as unknown as TraverseContextToolArgs);
         break;
 
       default:

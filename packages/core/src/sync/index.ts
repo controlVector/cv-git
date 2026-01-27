@@ -14,8 +14,10 @@ import {
   DocumentChunkPayload,
   ParsedDocument,
   CommitNode,
-  ChangeType
+  ChangeType,
+  HierarchicalSummaryOptions
 } from '@cv-git/shared';
+import { HierarchicalSummaryService, createHierarchicalSummaryService } from '../services/hierarchical-summary.js';
 import { shouldSyncFile, detectLanguage, getCVDir } from '@cv-git/shared';
 import { minimatch } from 'minimatch';
 import { GitManager } from '../git/index.js';
@@ -49,6 +51,13 @@ export interface SyncOptions {
   maxFiles?: number;              // Maximum files to process per run
   batchSize?: number;             // Batch size for embeddings (default: 50)
   continueFromLast?: boolean;     // Continue from last chunked sync position
+  // Hierarchical summary options
+  generateSummaries?: boolean;    // Generate hierarchical summaries (default: false)
+  summaryOptions?: {
+    maxSymbolsPerFile?: number;
+    maxFilesPerDirectory?: number;
+    skipUnchanged?: boolean;
+  };
 }
 
 export interface DocumentSyncResult {
@@ -232,6 +241,12 @@ export class SyncEngine {
         console.log('Syncing commit history...');
         const commitDepth = options.commitDepth || 50;
         await this.syncCommitHistory(commitDepth);
+      }
+
+      // 6. Generate hierarchical summaries (if enabled)
+      if (options.generateSummaries && this.vector && this.vector.isConnected()) {
+        console.log('Generating hierarchical summaries...');
+        await this.generateHierarchicalSummaries(parsedFiles, options.summaryOptions);
       }
 
       // 7. Collect statistics
@@ -1137,9 +1152,13 @@ export class SyncEngine {
     console.log('Graph update complete');
 
     // Step 5: Generate and store vector embeddings (if VectorManager available)
+    // Also links graph symbols to their vector chunk IDs
     if (this.vector && this.vector.isConnected()) {
       console.log('Generating vector embeddings...');
-      await this.updateVectorEmbeddings(parsedFiles);
+      const { vectorCount, symbolToChunkMap } = await this.updateVectorEmbeddings(parsedFiles);
+      if (process.env.CV_DEBUG) {
+        console.log(`  Embedded ${vectorCount} chunks, linked ${symbolToChunkMap.size} symbols`);
+      }
     }
   }
 
@@ -1185,9 +1204,12 @@ export class SyncEngine {
 
   /**
    * Generate and store vector embeddings for code chunks
+   * Also builds symbol→chunk mapping and links graph nodes to vectors
    */
-  private async updateVectorEmbeddings(parsedFiles: ParsedFile[]): Promise<number> {
-    if (!this.vector) return 0;
+  private async updateVectorEmbeddings(parsedFiles: ParsedFile[]): Promise<{ vectorCount: number; symbolToChunkMap: Map<string, string[]> }> {
+    const symbolToChunkMap = new Map<string, string[]>();
+
+    if (!this.vector) return { vectorCount: 0, symbolToChunkMap };
 
     try {
       // Collect all code chunks from all files
@@ -1200,10 +1222,31 @@ export class SyncEngine {
 
       if (allChunks.length === 0) {
         console.log('No code chunks to embed');
-        return 0;
+        return { vectorCount: 0, symbolToChunkMap };
       }
 
       console.log(`Found ${allChunks.length} code chunks to embed`);
+
+      // Build symbol→chunk mapping as we process chunks
+      // This links graph symbol nodes to their vector chunk IDs
+      for (const chunk of allChunks) {
+        if (chunk.symbolName) {
+          // Find the symbol in parsed files to get qualified name
+          const file = parsedFiles.find(f => f.path === chunk.file);
+          if (file) {
+            const symbol = file.symbols.find(s =>
+              s.name === chunk.symbolName &&
+              s.startLine <= chunk.startLine &&
+              s.endLine >= chunk.endLine
+            );
+            if (symbol) {
+              const existing = symbolToChunkMap.get(symbol.qualifiedName) || [];
+              existing.push(chunk.id);
+              symbolToChunkMap.set(symbol.qualifiedName, existing);
+            }
+          }
+        }
+      }
 
       // Prepare chunks for embedding (add context)
       const textsToEmbed = allChunks.map(chunk =>
@@ -1247,12 +1290,22 @@ export class SyncEngine {
       console.log('Storing embeddings in Qdrant...');
       await this.vector.upsertBatch('code_chunks', items);
 
+      // Link graph symbols to vector IDs
+      if (symbolToChunkMap.size > 0) {
+        console.log(`Linking ${symbolToChunkMap.size} symbols to vector chunks...`);
+        const linkResult = await this.graph.batchUpdateSymbolVectorIds(symbolToChunkMap);
+        if (linkResult.errors.length > 0) {
+          console.warn(`  ${linkResult.errors.length} link errors (symbols may not exist in graph yet)`);
+        }
+        console.log(`  ✓ Linked ${linkResult.updated} symbols to vectors`);
+      }
+
       console.log(`✓ Stored ${allChunks.length} embeddings`);
-      return allChunks.length;
+      return { vectorCount: allChunks.length, symbolToChunkMap };
 
     } catch (error: any) {
       console.error('Failed to generate/store embeddings:', error.message);
-      return 0;
+      return { vectorCount: 0, symbolToChunkMap };
     }
   }
 
@@ -1568,6 +1621,52 @@ export class SyncEngine {
     parts.push('');
     parts.push(chunk.text);
     return parts.join('\n');
+  }
+
+  /**
+   * Generate hierarchical summaries for parsed files
+   * Creates multi-level summaries (symbol, file, directory) for traversal-aware context
+   */
+  private async generateHierarchicalSummaries(
+    parsedFiles: ParsedFile[],
+    options?: HierarchicalSummaryOptions
+  ): Promise<void> {
+    if (!this.vector) {
+      console.log('Vector manager not available, skipping summary generation');
+      return;
+    }
+
+    try {
+      // Create the summary service
+      const summaryService = createHierarchicalSummaryService(
+        this.vector,
+        this.graph,
+        { useFallback: true } // Use fallback extraction instead of LLM by default
+      );
+
+      // Generate all summaries bottom-up
+      const result = await summaryService.generateAllSummaries(parsedFiles, {
+        maxSymbolsPerFile: options?.maxSymbolsPerFile ?? 50,
+        maxFilesPerDirectory: options?.maxFilesPerDirectory ?? 100,
+        skipUnchanged: options?.skipUnchanged ?? true
+      });
+
+      console.log(`✓ Generated ${result.count} hierarchical summaries`);
+      console.log(`  - Symbols: ${result.byLevel[1]}`);
+      console.log(`  - Files: ${result.byLevel[2]}`);
+      console.log(`  - Directories: ${result.byLevel[3]}`);
+
+      if (result.errors.length > 0) {
+        console.warn(`  - Errors: ${result.errors.length}`);
+        if (process.env.CV_DEBUG) {
+          for (const err of result.errors.slice(0, 5)) {
+            console.warn(`    ${err}`);
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error('Failed to generate hierarchical summaries:', error.message);
+    }
   }
 
   /**

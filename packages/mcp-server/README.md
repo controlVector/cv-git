@@ -6,9 +6,9 @@ Model Context Protocol (MCP) server for CV-Git, enabling AI assistants like Clau
 
 [Model Context Protocol](https://modelcontextprotocol.io/) is Anthropic's open protocol for connecting AI assistants to external tools and data sources. This MCP server exposes CV-Git's powerful code analysis capabilities as tools that Claude and other AI assistants can use.
 
-## Available Tools (34 total)
+## Available Tools (35 total)
 
-### Code Understanding (7 tools)
+### Code Understanding (8 tools)
 
 **cv_find** - Semantic code search
 - Search your codebase using natural language queries
@@ -45,6 +45,18 @@ Model Context Protocol (MCP) server for CV-Git, enabling AI assistants like Clau
 - Deep dive into specific symbols or files
 - See all relationships and dependencies
 - View callers and callees
+
+**cv_traverse_context** - Traversal-aware dynamic context (Recommended for navigation)
+- Navigate codebase with stateful session tracking
+- Context scales automatically based on depth level:
+  - **Repo level** (depth 0): Codebase overview, top modules
+  - **Module level** (depth 1): Directory contents, key exports
+  - **File level** (depth 2): Symbol list, imports, file summary
+  - **Symbol level** (depth 3): Code, callers, callees, docstring
+- Navigation directions: `jump`, `in`, `out`, `lateral`, `stay`
+- Includes navigation hints for next steps
+- Supports XML (default), Markdown, and JSON output
+- Token budget control for efficient context sizing
 
 ### Advanced Code Analysis (5 tools)
 
@@ -299,6 +311,24 @@ Once configured, Claude can automatically use CV-Git tools. Examples:
 > "Find all functions with complexity greater than 15"
 > "Check for circular dependencies"
 > "Show me the top 10 most-called functions"
+
+**Traversal-aware context (recommended for code navigation):**
+> "Show me context for src/auth/oauth.ts"
+> "Drill into the validateToken function"
+> "Zoom out to see the auth module overview"
+> "Navigate to the next file in this directory"
+
+The `cv_traverse_context` tool maintains session state, so you can navigate naturally:
+```
+# Step 1: Jump to a file
+cv_traverse_context(file="src/auth/oauth.ts", direction="jump")
+
+# Step 2: Drill into a symbol (same session)
+cv_traverse_context(symbol="validateToken", direction="in", sessionId="...")
+
+# Step 3: Zoom out to module
+cv_traverse_context(direction="out", sessionId="...")
+```
 
 **Review changes:**
 > "Review my staged changes and provide feedback"

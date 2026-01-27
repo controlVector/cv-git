@@ -8,6 +8,9 @@ This document provides API reference for the core services in CV-Git.
 - [GraphService](#graphservice)
 - [SemanticGraphService](#semanticgraphservice)
 - [CodebaseSummaryService](#codebasesummaryservice)
+- [HierarchicalSummaryService](#hierarchicalsummaryservice)
+- [TraversalService](#traversalservice)
+- [SessionService](#sessionservice)
 - [RLMRouter](#rlmrouter)
 
 ---
@@ -391,6 +394,238 @@ interface CodebaseSummary {
 
 ---
 
+## HierarchicalSummaryService
+
+Generates multi-level summaries for code at different granularities (symbol → file → directory → repo).
+
+### Import
+
+```typescript
+import {
+  HierarchicalSummaryService,
+  createHierarchicalSummaryService
+} from '@cv-git/core';
+```
+
+### Usage
+
+```typescript
+const summaryService = createHierarchicalSummaryService({
+  aiApiKey: apiKey,
+  aiModel: 'claude-sonnet-4-5-20250514',
+  repoId: 'my-project'
+});
+
+// Generate all summaries bottom-up
+const result = await summaryService.generateAllSummaries(parsedFiles, {
+  forceRegenerate: false,  // Skip unchanged files
+  maxConcurrent: 5
+});
+
+console.log(`Generated ${result.generated} summaries`);
+console.log(`Skipped ${result.skipped} (cached)`);
+
+// Generate individual summaries
+const symbolSummary = await summaryService.generateSymbolSummary(symbol, code);
+const fileSummary = await summaryService.generateFileSummary(parsedFile, symbolSummaries);
+const dirSummary = await summaryService.generateDirectorySummary(dirPath, fileSummaries);
+```
+
+### Hierarchy Levels
+
+| Level | Scope | ID Format | Content |
+|-------|-------|-----------|---------|
+| 0 | Code Chunks | `chunk:{file}:{startLine}` | Raw code |
+| 1 | Symbol Summary | `symbol:{qualifiedName}` | Function/class summary |
+| 2 | File Summary | `file:{path}` | Aggregated symbol summaries |
+| 3 | Directory Summary | `dir:{dirPath}` | Aggregated file summaries |
+| 4 | Repo Summary | `repo:{repoId}` | Codebase overview |
+
+### Types
+
+```typescript
+interface HierarchicalSummaryPayload {
+  id: string;
+  level: 0 | 1 | 2 | 3 | 4;
+  path: string;
+  parent?: string;
+  children?: string[];
+  summary: string;
+  keywords: string[];
+  contentHash: string;  // For cache invalidation
+  symbolKind?: SymbolKind;
+  symbolCount?: number;
+  fileCount?: number;
+  languages?: string[];
+  lastModified: number;
+}
+
+interface SummaryGenerationResult {
+  summaries: HierarchicalSummaryPayload[];
+  generated: number;
+  skipped: number;
+  errors: string[];
+}
+```
+
+---
+
+## TraversalService
+
+Provides traversal-aware dynamic context for Claude Code integration. Tracks position in the codebase and returns context at the appropriate level.
+
+### Import
+
+```typescript
+import { TraversalService, createTraversalService } from '@cv-git/core';
+```
+
+### Usage
+
+```typescript
+const traversalService = createTraversalService(
+  graphManager,
+  vectorManager,
+  graphService,
+  sessionService
+);
+
+// Navigate to a file
+const result = await traversalService.traverse({
+  file: 'src/auth/oauth.ts',
+  direction: 'jump'
+});
+
+// Drill into a symbol
+const symbolResult = await traversalService.traverse({
+  symbol: 'validateToken',
+  direction: 'in',
+  sessionId: result.sessionId,
+  includeCallers: true,
+  includeCallees: true
+});
+
+// Zoom out to module level
+const moduleResult = await traversalService.traverse({
+  direction: 'out',
+  sessionId: result.sessionId
+});
+```
+
+### Navigation Directions
+
+| Direction | Behavior |
+|-----------|----------|
+| `jump` | Navigate directly to specified target |
+| `in` | Drill down (repo → module → file → symbol) |
+| `out` | Zoom out (symbol → file → module → repo) |
+| `lateral` | Navigate to sibling (next file, related symbol) |
+| `stay` | Refresh context at current position |
+
+### Context by Depth Level
+
+| Depth | Level | Context Returned |
+|-------|-------|------------------|
+| 0 | Repository | Codebase overview, top modules |
+| 1 | Module | Directory contents, key exports |
+| 2 | File | Symbol list, imports, file summary |
+| 3 | Symbol | Code, callers, callees, docstring |
+
+### Types
+
+```typescript
+interface TraverseContextArgs {
+  file?: string;           // Target file path
+  symbol?: string;         // Target symbol name
+  module?: string;         // Target module/directory
+  direction: 'in' | 'out' | 'lateral' | 'jump' | 'stay';
+  sessionId?: string;      // For stateful navigation
+  includeCallers?: boolean;
+  includeCallees?: boolean;
+  format?: 'xml' | 'markdown' | 'json';
+  budget?: number;         // Token budget for context
+}
+
+interface TraversalContextResult {
+  position: TraversalPosition;
+  sessionId: string;
+  context: {
+    summary?: string;
+    code?: string;
+    files?: Array<{ path: string; summary?: string }>;
+    symbols?: Array<{ name: string; kind: string; summary?: string }>;
+    callers?: Array<{ name: string; file: string }>;
+    callees?: Array<{ name: string; file: string }>;
+    imports?: string[];
+  };
+  hints: string[];  // Navigation suggestions
+}
+```
+
+---
+
+## SessionService
+
+Manages traversal sessions for stateful navigation across tool calls.
+
+### Import
+
+```typescript
+import { SessionService, createSessionService } from '@cv-git/core';
+```
+
+### Usage
+
+```typescript
+const sessionService = createSessionService({
+  maxSessions: 100,
+  sessionTimeout: 30 * 60 * 1000,  // 30 minutes
+  persistToDisk: true,
+  persistDir: '.cv/sessions'
+});
+
+// Get or create session
+const session = await sessionService.getSession(sessionId);
+
+// Update position
+await sessionService.updateSession(session, newPosition);
+
+// Navigate back in history
+const previousPosition = await sessionService.goBack(session);
+
+// Cleanup
+await sessionService.close();
+```
+
+### Types
+
+```typescript
+interface TraversalSession {
+  id: string;
+  position: TraversalPosition;
+  history: TraversalPosition[];
+  createdAt: number;
+  lastActivityAt: number;
+}
+
+interface TraversalPosition {
+  file?: string;
+  symbol?: string;
+  module?: string;
+  depth: number;  // 0=repo, 1=module, 2=file, 3=symbol
+  timestamp: number;
+}
+
+interface SessionServiceOptions {
+  maxSessions?: number;      // Default: 100
+  sessionTimeout?: number;   // Default: 30 minutes
+  persistToDisk?: boolean;   // Default: false
+  persistDir?: string;       // Default: '.cv/sessions'
+}
+```
+
+---
+
 ## RLMRouter
 
 Router for the Reasoning Language Model that handles complex multi-step tasks.
@@ -486,3 +721,90 @@ type RLMTaskType =
 | `cv_summary_view` | loadCodebaseSummary() |
 | `cv_find` | SemanticGraphService.search() |
 | `cv_auto_context` | SemanticGraphService |
+| `cv_traverse_context` | TraversalService, SessionService |
+
+---
+
+## cv_traverse_context MCP Tool
+
+The `cv_traverse_context` tool enables traversal-aware dynamic context for Claude Code. It tracks your position in the codebase and automatically provides context at the appropriate level.
+
+### Tool Arguments
+
+```typescript
+{
+  file?: string;           // Target file path
+  symbol?: string;         // Target symbol name
+  module?: string;         // Target module/directory
+  direction?: string;      // 'in' | 'out' | 'lateral' | 'jump' | 'stay' (default: 'jump')
+  sessionId?: string;      // Session ID for stateful navigation
+  includeCallers?: boolean; // Include callers of current symbol (default: true)
+  includeCallees?: boolean; // Include callees of current symbol (default: true)
+  format?: string;         // 'xml' | 'markdown' | 'json' (default: 'xml')
+  budget?: number;         // Token budget for context (default: 4000)
+}
+```
+
+### Usage Pattern
+
+```
+# Step 1: Navigate to a file
+cv_traverse_context(file="src/auth/oauth.ts", direction="jump")
+→ Returns: File summary + symbol list
+
+# Step 2: Drill into a symbol (using session from step 1)
+cv_traverse_context(symbol="validateToken", direction="in", sessionId="abc123")
+→ Returns: Function code + callers + callees
+
+# Step 3: Zoom out to see the module
+cv_traverse_context(direction="out", sessionId="abc123")
+→ Returns: auth module summary + sibling files
+
+# Step 4: Lateral navigation to related file
+cv_traverse_context(file="src/auth/jwt.ts", direction="lateral", sessionId="abc123")
+→ Returns: jwt.ts context
+
+# Context automatically swaps based on your position
+```
+
+### Output Format (XML - Default)
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<traverse_context>
+  <session>
+    <id>abc123</id>
+    <depth>3</depth>
+    <file>src/auth/oauth.ts</file>
+    <symbol>validateToken</symbol>
+  </session>
+  <context>
+    <summary>Validates OAuth tokens against the identity provider</summary>
+    <code><![CDATA[
+async function validateToken(token: string): Promise<boolean> {
+  // ... function code
+}
+    ]]></code>
+    <callers>
+      <caller name="authMiddleware" file="src/middleware/auth.ts"/>
+      <caller name="protectedRoute" file="src/routes/api.ts"/>
+    </callers>
+    <callees>
+      <callee name="decodeJWT" file="src/auth/jwt.ts"/>
+      <callee name="fetchUserClaims" file="src/auth/claims.ts"/>
+    </callees>
+  </context>
+  <hints>
+    <hint>Use direction="out" to see the auth module overview</hint>
+    <hint>Related symbols: refreshToken, revokeToken</hint>
+  </hints>
+</traverse_context>
+```
+
+### Key Benefits for AI Agents
+
+1. **Stateful Navigation**: Session IDs maintain context across multiple tool calls
+2. **Automatic Context Scaling**: Get repo overview, module summary, file details, or symbol code based on depth
+3. **Smart Navigation Hints**: Suggestions for where to look next
+4. **Token Budget Control**: Limit context size to fit your needs
+5. **Graph-Aware**: Callers/callees from the code knowledge graph

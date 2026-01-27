@@ -9,7 +9,8 @@
  */
 
 import { GraphManager } from '../graph/index.js';
-import { SymbolNode } from '@cv-git/shared';
+import { VectorManager } from '../vector/index.js';
+import { SymbolNode, CodeChunkPayload } from '@cv-git/shared';
 import { getGlobalCache, CacheService } from './cache-service.js';
 
 // ========== Type Definitions ==========
@@ -773,6 +774,98 @@ export class GraphService {
       outgoingCount: r.outgoingCount as number,
       totalConnections: r.totalConnections as number
     }));
+  }
+
+  // ========== Symbol-Vector Methods ==========
+
+  /**
+   * Get vectors for a symbol by looking up in graph then fetching from Qdrant
+   * High-level method that bridges graph and vector stores
+   *
+   * @param qualifiedName - Symbol's qualified name
+   * @param vector - VectorManager instance for Qdrant retrieval
+   * @returns Symbol with its associated vector payloads
+   */
+  async getVectorsForSymbol(
+    qualifiedName: string,
+    vector: VectorManager
+  ): Promise<{
+    symbol: SymbolNode;
+    vectors: Array<{ id: string; payload: CodeChunkPayload }>;
+  } | null> {
+    // Get symbol with vector IDs from graph
+    const result = await this.graph.getSymbolWithVectors(qualifiedName);
+
+    if (!result) {
+      return null;
+    }
+
+    const { symbol, vectorIds } = result;
+
+    // If no vector IDs, return symbol with empty vectors
+    if (vectorIds.length === 0) {
+      return { symbol, vectors: [] };
+    }
+
+    // Fetch vectors from Qdrant
+    const collections = vector.getCollectionNames();
+    const vectors: Array<{ id: string; payload: CodeChunkPayload }> = [];
+
+    // Search for each vector ID by payload._id
+    for (const vectorId of vectorIds) {
+      try {
+        // Use semantic search with the symbol name as query and filter by file
+        const searchResults = await vector.searchCode(
+          symbol.name,
+          5,
+          { file: symbol.file }
+        );
+
+        // Find the matching result
+        const match = searchResults.find(r => r.id === vectorId || r.payload?.id === vectorId);
+        if (match) {
+          vectors.push({
+            id: vectorId,
+            payload: match.payload
+          });
+        }
+      } catch {
+        // Vector not found or search failed - skip
+      }
+    }
+
+    return { symbol, vectors };
+  }
+
+  /**
+   * Get all symbols in a file with their vectors
+   * Useful for file-level context retrieval
+   */
+  async getFileSymbolsWithVectors(
+    filePath: string,
+    vector: VectorManager
+  ): Promise<Array<{
+    symbol: SymbolNode;
+    vectors: Array<{ id: string; payload: CodeChunkPayload }>;
+  }>> {
+    // Get all symbols in the file
+    const symbols = await this.graph.getFileSymbols(filePath);
+    const results: Array<{
+      symbol: SymbolNode;
+      vectors: Array<{ id: string; payload: CodeChunkPayload }>;
+    }> = [];
+
+    // Fetch vectors for each symbol
+    for (const symbol of symbols) {
+      const result = await this.getVectorsForSymbol(symbol.qualifiedName, vector);
+      if (result) {
+        results.push(result);
+      } else {
+        results.push({ symbol, vectors: [] });
+      }
+    }
+
+    return results;
   }
 
   // ========== Helper Methods ==========

@@ -71,3 +71,21 @@ export {
   ContainerStatus,
   ContainerServiceOptions
 } from './container-service.js';
+
+export {
+  HierarchicalSummaryService,
+  createHierarchicalSummaryService,
+  SummaryContext
+} from './hierarchical-summary.js';
+
+export {
+  TraversalService,
+  createTraversalService,
+  TraversalServiceOptions
+} from './traversal-service.js';
+
+export {
+  SessionService,
+  createSessionService,
+  SessionServiceOptions
+} from './session-service.js';

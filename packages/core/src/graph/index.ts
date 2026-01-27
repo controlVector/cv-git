@@ -1084,6 +1084,110 @@ export class GraphManager {
     return result[0].s as SymbolNode;
   }
 
+  // ========== Symbol-Vector Linking Methods ==========
+
+  /**
+   * Get a symbol with its associated vector IDs
+   * Used for linking graph traversal to vector search
+   */
+  async getSymbolWithVectors(qualifiedName: string): Promise<{ symbol: SymbolNode; vectorIds: string[] } | null> {
+    const result = await this.query(
+      'MATCH (s:Symbol {qualifiedName: $qualifiedName}) RETURN s, s.vectorIds as vectorIds',
+      { qualifiedName }
+    );
+
+    if (result.length === 0) {
+      return null;
+    }
+
+    const symbol = result[0].s as SymbolNode;
+    // Handle both legacy vectorId and new vectorIds array
+    let vectorIds: string[] = [];
+    if (result[0].vectorIds && Array.isArray(result[0].vectorIds)) {
+      vectorIds = result[0].vectorIds;
+    } else if (symbol.vectorId) {
+      vectorIds = [symbol.vectorId];
+    }
+
+    return { symbol, vectorIds };
+  }
+
+  /**
+   * Update vector IDs for a single symbol
+   * @param qualifiedName - Symbol's qualified name
+   * @param vectorIds - Array of chunk IDs in Qdrant
+   */
+  async updateSymbolVectorIds(qualifiedName: string, vectorIds: string[]): Promise<void> {
+    const cypher = `
+      MATCH (s:Symbol {qualifiedName: $qualifiedName})
+      SET s.vectorIds = $vectorIds,
+          s.vectorId = $primaryVectorId,
+          s.updatedAt = $updatedAt
+      RETURN s
+    `;
+
+    await this.query(cypher, {
+      qualifiedName,
+      vectorIds,
+      primaryVectorId: vectorIds[0] || '',
+      updatedAt: Date.now()
+    });
+  }
+
+  /**
+   * Batch update vector IDs for multiple symbols
+   * More efficient than individual updates for sync operations
+   * @param symbolToVectors - Map of qualified name to vector IDs
+   */
+  async batchUpdateSymbolVectorIds(symbolToVectors: Map<string, string[]>): Promise<{ updated: number; errors: string[] }> {
+    let updated = 0;
+    const errors: string[] = [];
+
+    // Process in batches of 50 for efficiency
+    const entries = Array.from(symbolToVectors.entries());
+    const batchSize = 50;
+
+    for (let i = 0; i < entries.length; i += batchSize) {
+      const batch = entries.slice(i, i + batchSize);
+
+      for (const [qualifiedName, vectorIds] of batch) {
+        try {
+          await this.updateSymbolVectorIds(qualifiedName, vectorIds);
+          updated++;
+        } catch (error: any) {
+          errors.push(`Failed to update ${qualifiedName}: ${error.message}`);
+        }
+      }
+    }
+
+    return { updated, errors };
+  }
+
+  /**
+   * Get all symbols that have vector embeddings
+   * Useful for verifying sync state
+   */
+  async getSymbolsWithVectors(): Promise<Array<{ qualifiedName: string; vectorIds: string[] }>> {
+    const result = await this.query(
+      'MATCH (s:Symbol) WHERE s.vectorIds IS NOT NULL AND size(s.vectorIds) > 0 RETURN s.qualifiedName as qualifiedName, s.vectorIds as vectorIds'
+    );
+
+    return result.map(r => ({
+      qualifiedName: r.qualifiedName as string,
+      vectorIds: (r.vectorIds as string[]) || []
+    }));
+  }
+
+  /**
+   * Clear all vector IDs from symbols (useful for re-sync)
+   */
+  async clearSymbolVectorIds(): Promise<number> {
+    const result = await this.query(
+      'MATCH (s:Symbol) WHERE s.vectorIds IS NOT NULL SET s.vectorIds = null, s.vectorId = null RETURN count(s) as count'
+    );
+    return result[0]?.count || 0;
+  }
+
   /**
    * Get all symbols in a file
    */

@@ -12,7 +12,9 @@ import {
   CommitPayload,
   VectorError,
   CodeChunk,
-  VectorPayload
+  VectorPayload,
+  HierarchicalSummaryPayload,
+  HierarchyLevel
 } from '@cv-git/shared';
 import { chunkArray } from '@cv-git/shared';
 import { EmbeddingCache, createEmbeddingCache, CacheStats } from './embedding-cache.js';
@@ -23,6 +25,7 @@ export interface VectorCollections {
   docstrings: string;
   commits: string;
   documentChunks: string;
+  summaries: string;  // Hierarchical summaries (symbol, file, directory, repo)
 }
 
 // Embedding model configurations with their vector dimensions
@@ -146,7 +149,8 @@ export class VectorManager {
         codeChunks: getVectorCollectionName(opts.repoId, 'code_chunks'),
         docstrings: getVectorCollectionName(opts.repoId, 'docstrings'),
         commits: getVectorCollectionName(opts.repoId, 'commits'),
-        documentChunks: getVectorCollectionName(opts.repoId, 'document_chunks')
+        documentChunks: getVectorCollectionName(opts.repoId, 'document_chunks'),
+        summaries: getVectorCollectionName(opts.repoId, 'summaries')
       };
     } else {
       // Use explicit collections or defaults (shared mode)
@@ -154,7 +158,8 @@ export class VectorManager {
         codeChunks: opts.collections?.codeChunks || 'code_chunks',
         docstrings: opts.collections?.docstrings || 'docstrings',
         commits: opts.collections?.commits || 'commits',
-        documentChunks: opts.collections?.documentChunks || 'document_chunks'
+        documentChunks: opts.collections?.documentChunks || 'document_chunks',
+        summaries: opts.collections?.summaries || 'summaries'
       };
     }
 
@@ -520,6 +525,9 @@ export class VectorManager {
 
     // Create document chunks collection
     await this.ensureCollection(this.collections.documentChunks, this.vectorSize);
+
+    // Create summaries collection (hierarchical: symbol, file, directory, repo)
+    await this.ensureCollection(this.collections.summaries, this.vectorSize);
   }
 
   /**
@@ -1000,6 +1008,172 @@ export class VectorManager {
     }
 
     return results;
+  }
+
+  // ========== Hierarchical Summary Methods ==========
+
+  /**
+   * Search summaries at a specific hierarchy level
+   * @param query - Search query text
+   * @param level - Hierarchy level (0-4: chunk, symbol, file, directory, repo)
+   * @param options - Search options
+   */
+  async searchByLevel(
+    query: string,
+    level: HierarchyLevel,
+    options?: {
+      limit?: number;
+      path?: string;  // Filter by path prefix
+      minScore?: number;
+    }
+  ): Promise<VectorSearchResult<HierarchicalSummaryPayload>[]> {
+    const filter: any = {
+      must: [
+        { key: 'level', match: { value: level } }
+      ]
+    };
+
+    if (options?.path) {
+      filter.must.push({
+        key: 'path',
+        match: { text: options.path }
+      });
+    }
+
+    const results = await this.search<HierarchicalSummaryPayload>(
+      this.collections.summaries,
+      query,
+      options?.limit || 10,
+      filter
+    );
+
+    if (options?.minScore !== undefined) {
+      return results.filter(r => r.score >= options.minScore!);
+    }
+
+    return results;
+  }
+
+  /**
+   * Search hierarchically - start at high level and drill down
+   * Returns summaries at progressively lower levels
+   * @param query - Search query
+   * @param options - Search options
+   */
+  async searchHierarchical(
+    query: string,
+    options?: {
+      startLevel?: HierarchyLevel;  // Starting level (default: 3 = directory)
+      endLevel?: HierarchyLevel;    // Ending level (default: 1 = symbol)
+      limitPerLevel?: number;       // Results per level
+      minScore?: number;
+    }
+  ): Promise<Map<HierarchyLevel, VectorSearchResult<HierarchicalSummaryPayload>[]>> {
+    const startLevel = options?.startLevel ?? 3;
+    const endLevel = options?.endLevel ?? 1;
+    const limitPerLevel = options?.limitPerLevel ?? 5;
+
+    const results = new Map<HierarchyLevel, VectorSearchResult<HierarchicalSummaryPayload>[]>();
+
+    // Search from high level to low level
+    for (let level = startLevel; level >= endLevel; level--) {
+      const levelResults = await this.searchByLevel(query, level as HierarchyLevel, {
+        limit: limitPerLevel,
+        minScore: options?.minScore
+      });
+      results.set(level as HierarchyLevel, levelResults);
+    }
+
+    return results;
+  }
+
+  /**
+   * Get children summaries for a parent summary
+   * Used for drill-down navigation in traversal
+   * @param parentId - Parent summary ID
+   */
+  async getSummaryChildren(parentId: string): Promise<VectorSearchResult<HierarchicalSummaryPayload>[]> {
+    if (!this.client) {
+      throw new VectorError('Not connected to Qdrant');
+    }
+
+    try {
+      // Search for summaries that have this parent
+      const results = await this.client.scroll(this.collections.summaries, {
+        filter: {
+          must: [
+            { key: 'parent', match: { value: parentId } }
+          ]
+        },
+        limit: 100,
+        with_payload: true,
+        with_vector: false
+      });
+
+      return results.points.map(point => ({
+        id: point.payload?._id as string || String(point.id),
+        score: 1.0, // No scoring for scroll
+        payload: point.payload as HierarchicalSummaryPayload
+      }));
+    } catch (error: any) {
+      throw new VectorError(`Failed to get children: ${error.message}`, error);
+    }
+  }
+
+  /**
+   * Get a specific summary by ID
+   * @param summaryId - Summary ID
+   */
+  async getSummary(summaryId: string): Promise<HierarchicalSummaryPayload | null> {
+    if (!this.client) {
+      throw new VectorError('Not connected to Qdrant');
+    }
+
+    try {
+      const results = await this.client.scroll(this.collections.summaries, {
+        filter: {
+          must: [
+            { key: '_id', match: { value: summaryId } }
+          ]
+        },
+        limit: 1,
+        with_payload: true,
+        with_vector: false
+      });
+
+      if (results.points.length === 0) {
+        return null;
+      }
+
+      return results.points[0].payload as HierarchicalSummaryPayload;
+    } catch (error: any) {
+      throw new VectorError(`Failed to get summary: ${error.message}`, error);
+    }
+  }
+
+  /**
+   * Upsert a hierarchical summary
+   * @param summary - Summary payload (id will be used as the point ID)
+   * @param vector - Embedding vector
+   */
+  async upsertSummary(summary: HierarchicalSummaryPayload, vector: number[]): Promise<void> {
+    await this.upsert(this.collections.summaries, summary.id, vector, summary);
+  }
+
+  /**
+   * Batch upsert summaries
+   * @param summaries - Array of summary payloads with vectors
+   */
+  async upsertSummaryBatch(
+    summaries: Array<{ summary: HierarchicalSummaryPayload; vector: number[] }>
+  ): Promise<void> {
+    const items = summaries.map(({ summary, vector }) => ({
+      id: summary.id,
+      vector,
+      payload: summary
+    }));
+
+    await this.upsertBatch(this.collections.summaries, items);
   }
 
   /**
