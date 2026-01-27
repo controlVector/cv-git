@@ -313,6 +313,71 @@ describe('GraphService', () => {
     });
   });
 
+  describe('getVectorsForSymbol', () => {
+    const mockVectorManager = {
+      getCollectionNames: vi.fn().mockReturnValue({ codeChunks: 'code_chunks' }),
+      searchCode: vi.fn()
+    };
+
+    beforeEach(() => {
+      mockGraphManager.getSymbolWithVectors = vi.fn();
+      mockVectorManager.searchCode.mockReset();
+    });
+
+    it('should return null when symbol not found', async () => {
+      mockGraphManager.getSymbolWithVectors.mockResolvedValueOnce(null);
+
+      const result = await service.getVectorsForSymbol('nonexistent', mockVectorManager as any);
+
+      expect(result).toBeNull();
+    });
+
+    it('should return symbol with empty vectors when no vectorIds', async () => {
+      mockGraphManager.getSymbolWithVectors.mockResolvedValueOnce({
+        symbol: { name: 'testFunc', qualifiedName: 'test.ts:testFunc', kind: 'function', file: 'test.ts' },
+        vectorIds: []
+      });
+
+      const result = await service.getVectorsForSymbol('test.ts:testFunc', mockVectorManager as any);
+
+      expect(result).not.toBeNull();
+      expect(result!.symbol.name).toBe('testFunc');
+      expect(result!.vectors).toEqual([]);
+    });
+
+    it('should fetch vectors from Qdrant when vectorIds present', async () => {
+      mockGraphManager.getSymbolWithVectors.mockResolvedValueOnce({
+        symbol: { name: 'testFunc', qualifiedName: 'test.ts:testFunc', kind: 'function', file: 'test.ts' },
+        vectorIds: ['chunk_1', 'chunk_2']
+      });
+
+      mockVectorManager.searchCode.mockResolvedValue([
+        { id: 'chunk_1', score: 0.95, payload: { text: 'function code', file: 'test.ts' } }
+      ]);
+
+      const result = await service.getVectorsForSymbol('test.ts:testFunc', mockVectorManager as any);
+
+      expect(result).not.toBeNull();
+      expect(result!.symbol.name).toBe('testFunc');
+      expect(mockVectorManager.searchCode).toHaveBeenCalled();
+    });
+
+    it('should handle vector fetch errors gracefully', async () => {
+      mockGraphManager.getSymbolWithVectors.mockResolvedValueOnce({
+        symbol: { name: 'testFunc', qualifiedName: 'test.ts:testFunc', kind: 'function', file: 'test.ts' },
+        vectorIds: ['chunk_1']
+      });
+
+      mockVectorManager.searchCode.mockRejectedValueOnce(new Error('Qdrant error'));
+
+      const result = await service.getVectorsForSymbol('test.ts:testFunc', mockVectorManager as any);
+
+      // Should return symbol with empty vectors on error
+      expect(result).not.toBeNull();
+      expect(result!.symbol.name).toBe('testFunc');
+    });
+  });
+
   describe('caching integration', () => {
     it('should cache findPath results', async () => {
       mockGraphManager.query.mockResolvedValue([{

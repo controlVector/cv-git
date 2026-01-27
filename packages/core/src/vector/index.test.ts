@@ -241,3 +241,181 @@ describe('VectorManager Repository Isolation', () => {
     });
   });
 });
+
+describe('VectorManager Level-Aware Search', () => {
+  let manager: VectorManager;
+  let mockClient: any;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    manager = new VectorManager({
+      url: 'http://localhost:6333',
+      repoId: 'test-repo',
+      ollamaUrl: 'http://localhost:11434'
+    });
+
+    // Create a mock client and inject it directly
+    mockClient = {
+      getCollections: vi.fn().mockResolvedValue({ collections: [] }),
+      createCollection: vi.fn().mockResolvedValue(undefined),
+      search: vi.fn().mockResolvedValue([]),
+      scroll: vi.fn().mockResolvedValue({ points: [], next_page_offset: null }),
+      getCollection: vi.fn().mockResolvedValue({ config: { params: { vectors: { size: 768 } } } })
+    };
+    (manager as any).client = mockClient;
+  });
+
+  describe('searchByLevel', () => {
+    it('should filter by hierarchy level', async () => {
+      // Mock search to return level-specific results
+      mockClient.search.mockResolvedValueOnce([
+        {
+          id: 'point_1',
+          score: 0.9,
+          payload: {
+            _id: 'file:src/index.ts',
+            level: 2,
+            path: 'src/index.ts',
+            summary: 'Main entry point',
+            file: 'src/index.ts',
+            language: 'typescript'
+          }
+        }
+      ]);
+
+      // Mock embeddings
+      vi.spyOn(manager, 'embed').mockResolvedValueOnce(new Array(768).fill(0));
+
+      const results = await manager.searchByLevel('entry point', 2, { limit: 10 });
+
+      expect(mockClient.search).toHaveBeenCalled();
+      // Verify the filter includes level
+      const searchCall = mockClient.search.mock.calls[0];
+      expect(searchCall[1].filter.must).toContainEqual(
+        expect.objectContaining({ key: 'level', match: { value: 2 } })
+      );
+    });
+
+    it('should filter by path prefix when provided', async () => {
+      mockClient.search.mockResolvedValueOnce([]);
+      vi.spyOn(manager, 'embed').mockResolvedValueOnce(new Array(768).fill(0));
+
+      await manager.searchByLevel('test', 2, { limit: 10, path: 'src/services/' });
+
+      const searchCall = mockClient.search.mock.calls[0];
+      // Should have both level and path filters
+      expect(searchCall[1].filter.must.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe('searchHierarchical', () => {
+    it('should search multiple levels from high to low', async () => {
+      // Mock search for each level
+      mockClient.search.mockResolvedValue([]);
+      vi.spyOn(manager, 'embed').mockResolvedValue(new Array(768).fill(0));
+
+      const results = await manager.searchHierarchical('authentication', {
+        startLevel: 3,
+        endLevel: 1
+      });
+
+      // Should return a Map with results for levels 3, 2, 1
+      expect(results).toBeInstanceOf(Map);
+      expect(results.has(3)).toBe(true);
+      expect(results.has(2)).toBe(true);
+      expect(results.has(1)).toBe(true);
+    });
+
+    it('should use default levels when not specified', async () => {
+      mockClient.search.mockResolvedValue([]);
+      vi.spyOn(manager, 'embed').mockResolvedValue(new Array(768).fill(0));
+
+      const results = await manager.searchHierarchical('test');
+
+      // Default is startLevel=3, endLevel=1
+      expect(results.has(3)).toBe(true);
+      expect(results.has(2)).toBe(true);
+      expect(results.has(1)).toBe(true);
+    });
+  });
+
+  describe('getSummary', () => {
+    it('should fetch summary by ID', async () => {
+      mockClient.scroll.mockResolvedValueOnce({
+        points: [
+          {
+            id: 'point_1',
+            payload: {
+              _id: 'file:src/index.ts',
+              level: 2,
+              summary: 'Main entry point',
+              file: 'src/index.ts',
+              language: 'typescript'
+            }
+          }
+        ],
+        next_page_offset: null
+      });
+
+      const result = await manager.getSummary('file:src/index.ts');
+
+      expect(result).not.toBeNull();
+      expect(result!.summary).toBe('Main entry point');
+    });
+
+    it('should return null when summary not found', async () => {
+      mockClient.scroll.mockResolvedValueOnce({
+        points: [],
+        next_page_offset: null
+      });
+
+      const result = await manager.getSummary('nonexistent');
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('getSummaryChildren', () => {
+    it('should fetch children summaries by parent ID', async () => {
+      mockClient.scroll.mockResolvedValueOnce({
+        points: [
+          {
+            id: 'child_1',
+            payload: {
+              _id: 'symbol:src/index.ts:main',
+              level: 1,
+              parent: 'file:src/index.ts',
+              summary: 'Main function'
+            }
+          },
+          {
+            id: 'child_2',
+            payload: {
+              _id: 'symbol:src/index.ts:init',
+              level: 1,
+              parent: 'file:src/index.ts',
+              summary: 'Init function'
+            }
+          }
+        ],
+        next_page_offset: null
+      });
+
+      const results = await manager.getSummaryChildren('file:src/index.ts');
+
+      expect(results).toHaveLength(2);
+      expect(results[0].payload.parent).toBe('file:src/index.ts');
+    });
+
+    it('should return empty array when no children', async () => {
+      mockClient.scroll.mockResolvedValueOnce({
+        points: [],
+        next_page_offset: null
+      });
+
+      const results = await manager.getSummaryChildren('file:empty.ts');
+
+      expect(results).toEqual([]);
+    });
+  });
+});

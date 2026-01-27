@@ -171,6 +171,8 @@ function testFunction() {
     const mockSymbolSummaries: HierarchicalSummaryPayload[] = [
       {
         id: 'symbol:src/utils/helpers.ts:helper',
+        file: 'src/utils/helpers.ts',
+        language: 'typescript',
         level: 1,
         path: 'src/utils/helpers.ts:helper',
         summary: 'Helper function',
@@ -238,6 +240,8 @@ function testFunction() {
     const mockFileSummaries: HierarchicalSummaryPayload[] = [
       {
         id: 'file:src/utils/helpers.ts',
+        file: 'src/utils/helpers.ts',
+        language: 'typescript',
         level: 2,
         path: 'src/utils/helpers.ts',
         summary: 'Helper utilities',
@@ -249,6 +253,8 @@ function testFunction() {
       },
       {
         id: 'file:src/utils/format.ts',
+        file: 'src/utils/format.ts',
+        language: 'typescript',
         level: 2,
         path: 'src/utils/format.ts',
         summary: 'Formatting utilities',

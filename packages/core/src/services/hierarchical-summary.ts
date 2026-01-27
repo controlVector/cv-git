@@ -24,6 +24,25 @@ export interface SummaryContext {
   useFallback?: boolean;
 }
 
+export interface ProgressCallback {
+  /** Called with progress updates */
+  (progress: {
+    phase: 'symbols' | 'files' | 'directories' | 'storing';
+    current: number;
+    total: number;
+    message?: string;
+  }): void;
+}
+
+export interface EnhancedSummaryOptions {
+  /** Maximum concurrent LLM calls */
+  concurrency?: number;
+  /** Progress callback for UI updates */
+  onProgress?: ProgressCallback;
+  /** Batch size for LLM calls (when supported) */
+  llmBatchSize?: number;
+}
+
 /**
  * Service for generating and managing hierarchical code summaries
  */
@@ -73,6 +92,8 @@ export class HierarchicalSummaryService {
 
     const payload: HierarchicalSummaryPayload = {
       id,
+      file: symbol.file,
+      language: this.getLanguageFromFile(symbol.file),
       level: 1,
       path: symbol.qualifiedName,
       parent: `file:${symbol.file}`,
@@ -133,6 +154,8 @@ export class HierarchicalSummaryService {
 
     const payload: HierarchicalSummaryPayload = {
       id,
+      file: parsedFile.path,
+      language: parsedFile.language,
       level: 2,
       path: parsedFile.path,
       parent,
@@ -205,6 +228,8 @@ export class HierarchicalSummaryService {
 
     const payload: HierarchicalSummaryPayload = {
       id,
+      file: dirPath,
+      language: languages[0] || 'mixed',
       level: 3,
       path: dirPath,
       parent,
@@ -228,7 +253,7 @@ export class HierarchicalSummaryService {
    */
   async generateAllSummaries(
     parsedFiles: ParsedFile[],
-    options?: HierarchicalSummaryOptions
+    options?: HierarchicalSummaryOptions & EnhancedSummaryOptions
   ): Promise<SummaryGenerationResult> {
     const result: SummaryGenerationResult = {
       count: 0,
@@ -238,52 +263,100 @@ export class HierarchicalSummaryService {
     };
 
     const allSummaries: HierarchicalSummaryPayload[] = [];
+    const concurrency = options?.concurrency ?? 5;
+    const onProgress = options?.onProgress;
 
-    // Level 1: Symbol summaries
+    // Level 1: Symbol summaries (parallel processing)
     console.log('Generating symbol summaries...');
     const symbolSummariesByFile = new Map<string, HierarchicalSummaryPayload[]>();
 
+    // Collect all symbol tasks
+    const symbolTasks: Array<{
+      file: ParsedFile;
+      symbol: SymbolNode;
+      code: string;
+    }> = [];
+
     for (const file of parsedFiles) {
-      const fileSummaries: HierarchicalSummaryPayload[] = [];
-
       for (const symbol of file.symbols.slice(0, options?.maxSymbolsPerFile || 50)) {
-        try {
-          // Find the code for this symbol
-          const code = this.extractSymbolCode(file, symbol);
-          const summary = await this.generateSymbolSummary(symbol, code, options);
-          fileSummaries.push(summary);
-          allSummaries.push(summary);
-          result.byLevel[1]++;
-        } catch (error: any) {
-          result.errors.push(`Symbol ${symbol.qualifiedName}: ${error.message}`);
-        }
+        const code = this.extractSymbolCode(file, symbol);
+        symbolTasks.push({ file, symbol, code });
       }
-
-      symbolSummariesByFile.set(file.path, fileSummaries);
     }
 
-    // Level 2: File summaries
+    const totalSymbols = symbolTasks.length;
+    let completedSymbols = 0;
+
+    // Process symbols in parallel batches
+    const symbolResults = await this.processInParallel(
+      symbolTasks,
+      async (task) => {
+        const summary = await this.generateSymbolSummary(task.symbol, task.code, options);
+        completedSymbols++;
+        if (onProgress) {
+          onProgress({
+            phase: 'symbols',
+            current: completedSymbols,
+            total: totalSymbols,
+            message: `Processing ${task.symbol.name}`
+          });
+        }
+        return { filePath: task.file.path, summary };
+      },
+      concurrency,
+      (error, task) => {
+        result.errors.push(`Symbol ${task.symbol.qualifiedName}: ${error.message}`);
+        completedSymbols++;
+      }
+    );
+
+    // Group symbol summaries by file
+    for (const item of symbolResults) {
+      const existing = symbolSummariesByFile.get(item.filePath) || [];
+      existing.push(item.summary);
+      symbolSummariesByFile.set(item.filePath, existing);
+      allSummaries.push(item.summary);
+      result.byLevel[1]++;
+    }
+
+    // Level 2: File summaries (parallel processing)
     console.log('Generating file summaries...');
     const fileSummariesByDir = new Map<string, HierarchicalSummaryPayload[]>();
+    let completedFiles = 0;
 
-    for (const file of parsedFiles) {
-      try {
+    const fileResults = await this.processInParallel(
+      parsedFiles,
+      async (file) => {
         const symbolSummaries = symbolSummariesByFile.get(file.path) || [];
         const summary = await this.generateFileSummary(file, symbolSummaries, options);
-        allSummaries.push(summary);
-        result.byLevel[2]++;
-
-        // Group by directory
-        const dirPath = path.dirname(file.path);
-        const existing = fileSummariesByDir.get(dirPath) || [];
-        existing.push(summary);
-        fileSummariesByDir.set(dirPath, existing);
-      } catch (error: any) {
+        completedFiles++;
+        if (onProgress) {
+          onProgress({
+            phase: 'files',
+            current: completedFiles,
+            total: parsedFiles.length,
+            message: `Processing ${path.basename(file.path)}`
+          });
+        }
+        return { dirPath: path.dirname(file.path), summary };
+      },
+      concurrency,
+      (error, file) => {
         result.errors.push(`File ${file.path}: ${error.message}`);
+        completedFiles++;
       }
+    );
+
+    // Group file summaries by directory
+    for (const item of fileResults) {
+      const existing = fileSummariesByDir.get(item.dirPath) || [];
+      existing.push(item.summary);
+      fileSummariesByDir.set(item.dirPath, existing);
+      allSummaries.push(item.summary);
+      result.byLevel[2]++;
     }
 
-    // Level 3: Directory summaries (bottom-up)
+    // Level 3: Directory summaries (bottom-up, must be sequential due to dependencies)
     console.log('Generating directory summaries...');
     const dirSummaries = new Map<string, HierarchicalSummaryPayload>();
 
@@ -292,6 +365,7 @@ export class HierarchicalSummaryService {
       (a, b) => b.split('/').length - a.split('/').length
     );
 
+    let completedDirs = 0;
     for (const dirPath of directories) {
       if (dirPath === '.') continue; // Skip root directory
 
@@ -314,8 +388,19 @@ export class HierarchicalSummaryService {
           allSummaries.push(summary);
           result.byLevel[3]++;
         }
+
+        completedDirs++;
+        if (onProgress) {
+          onProgress({
+            phase: 'directories',
+            current: completedDirs,
+            total: directories.length,
+            message: `Processing ${path.basename(dirPath)}`
+          });
+        }
       } catch (error: any) {
         result.errors.push(`Directory ${dirPath}: ${error.message}`);
+        completedDirs++;
       }
     }
 
@@ -324,10 +409,67 @@ export class HierarchicalSummaryService {
     // Store all summaries in vector database
     if (allSummaries.length > 0) {
       console.log(`Storing ${allSummaries.length} summaries in vector database...`);
+      if (onProgress) {
+        onProgress({
+          phase: 'storing',
+          current: 0,
+          total: allSummaries.length,
+          message: 'Generating embeddings and storing...'
+        });
+      }
       await this.storeSummaries(allSummaries);
+      if (onProgress) {
+        onProgress({
+          phase: 'storing',
+          current: allSummaries.length,
+          total: allSummaries.length,
+          message: 'Complete'
+        });
+      }
     }
 
     return result;
+  }
+
+  /**
+   * Process items in parallel with controlled concurrency
+   */
+  private async processInParallel<T, R>(
+    items: T[],
+    processor: (item: T) => Promise<R>,
+    concurrency: number,
+    onError: (error: Error, item: T) => void
+  ): Promise<R[]> {
+    const results: R[] = [];
+    const queue = [...items];
+    const inFlight: Promise<void>[] = [];
+
+    const processNext = async (): Promise<void> => {
+      if (queue.length === 0) return;
+
+      const item = queue.shift()!;
+      try {
+        const result = await processor(item);
+        results.push(result);
+      } catch (error: any) {
+        onError(error, item);
+      }
+
+      // Process next item
+      if (queue.length > 0) {
+        await processNext();
+      }
+    };
+
+    // Start initial batch
+    for (let i = 0; i < Math.min(concurrency, items.length); i++) {
+      inFlight.push(processNext());
+    }
+
+    // Wait for all to complete
+    await Promise.all(inFlight);
+
+    return results;
   }
 
   /**
@@ -506,6 +648,33 @@ KEYWORDS: <comma-separated keywords>`;
 
   private hashContent(content: string): string {
     return crypto.createHash('sha256').update(content).digest('hex').slice(0, 16);
+  }
+
+  private getLanguageFromFile(filePath: string): string {
+    const ext = path.extname(filePath).toLowerCase();
+    const languageMap: Record<string, string> = {
+      '.ts': 'typescript',
+      '.tsx': 'typescript',
+      '.js': 'javascript',
+      '.jsx': 'javascript',
+      '.py': 'python',
+      '.rs': 'rust',
+      '.go': 'go',
+      '.java': 'java',
+      '.cpp': 'cpp',
+      '.c': 'c',
+      '.h': 'c',
+      '.hpp': 'cpp',
+      '.rb': 'ruby',
+      '.php': 'php',
+      '.swift': 'swift',
+      '.kt': 'kotlin',
+      '.cs': 'csharp',
+      '.scala': 'scala',
+      '.vue': 'vue',
+      '.svelte': 'svelte'
+    };
+    return languageMap[ext] || 'unknown';
   }
 
   /**

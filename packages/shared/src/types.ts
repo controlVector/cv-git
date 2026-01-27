@@ -489,6 +489,8 @@ export interface TraverseContextArgs {
   includeCallers?: boolean;
   /** Include callees in context */
   includeCallees?: boolean;
+  /** Include semantically related symbols */
+  includeRelated?: boolean;
   /** Output format */
   format?: 'xml' | 'markdown' | 'json';
   /** Token budget for context */
@@ -519,6 +521,8 @@ export interface TraversalContextResult {
     callees?: Array<{ name: string; file: string }>;
     /** Import relationships */
     imports?: string[];
+    /** Semantically related symbols (based on vector similarity) */
+    relatedSymbols?: Array<{ name: string; file: string; score: number; summary?: string }>;
   };
   /** Navigation hints for next steps */
   hints: string[];

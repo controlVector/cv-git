@@ -178,3 +178,152 @@ describe('GraphManager Repository Isolation', () => {
     });
   });
 });
+
+describe('GraphManager Symbol-Vector Linking', () => {
+  let manager: GraphManager;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    manager = new GraphManager({
+      url: 'redis://localhost:6379',
+      repoId: 'test-repo'
+    });
+  });
+
+  describe('getSymbolWithVectors', () => {
+    it('should return null when symbol not found', async () => {
+      // Mock query to return empty
+      vi.spyOn(manager, 'query').mockResolvedValueOnce([]);
+
+      const result = await manager.getSymbolWithVectors('nonexistent:symbol');
+
+      expect(result).toBeNull();
+    });
+
+    it('should return symbol with vectorIds array', async () => {
+      const mockSymbol = {
+        name: 'testFunc',
+        qualifiedName: 'test.ts:testFunc',
+        kind: 'function',
+        file: 'test.ts',
+        startLine: 1,
+        endLine: 10
+      };
+
+      vi.spyOn(manager, 'query').mockResolvedValueOnce([{
+        s: mockSymbol,
+        vectorIds: ['chunk_1', 'chunk_2']
+      }]);
+
+      const result = await manager.getSymbolWithVectors('test.ts:testFunc');
+
+      expect(result).not.toBeNull();
+      expect(result!.symbol.name).toBe('testFunc');
+      expect(result!.vectorIds).toEqual(['chunk_1', 'chunk_2']);
+    });
+
+    it('should handle legacy vectorId field', async () => {
+      const mockSymbol = {
+        name: 'testFunc',
+        qualifiedName: 'test.ts:testFunc',
+        kind: 'function',
+        file: 'test.ts',
+        startLine: 1,
+        endLine: 10,
+        vectorId: 'legacy_chunk'
+      };
+
+      vi.spyOn(manager, 'query').mockResolvedValueOnce([{
+        s: mockSymbol,
+        vectorIds: null // No new vectorIds
+      }]);
+
+      const result = await manager.getSymbolWithVectors('test.ts:testFunc');
+
+      expect(result).not.toBeNull();
+      expect(result!.vectorIds).toEqual(['legacy_chunk']);
+    });
+
+    it('should return empty vectorIds when none exist', async () => {
+      const mockSymbol = {
+        name: 'testFunc',
+        qualifiedName: 'test.ts:testFunc',
+        kind: 'function',
+        file: 'test.ts',
+        startLine: 1,
+        endLine: 10
+      };
+
+      vi.spyOn(manager, 'query').mockResolvedValueOnce([{
+        s: mockSymbol,
+        vectorIds: null
+      }]);
+
+      const result = await manager.getSymbolWithVectors('test.ts:testFunc');
+
+      expect(result).not.toBeNull();
+      expect(result!.vectorIds).toEqual([]);
+    });
+  });
+
+  describe('updateSymbolVectorIds', () => {
+    it('should update vectorIds for a symbol', async () => {
+      const querySpy = vi.spyOn(manager, 'query').mockResolvedValueOnce([]);
+
+      await manager.updateSymbolVectorIds('test.ts:testFunc', ['chunk_1', 'chunk_2']);
+
+      expect(querySpy).toHaveBeenCalledWith(
+        expect.stringContaining('SET s.vectorIds'),
+        expect.objectContaining({
+          qualifiedName: 'test.ts:testFunc',
+          vectorIds: ['chunk_1', 'chunk_2']
+        })
+      );
+    });
+  });
+
+  describe('batchUpdateSymbolVectorIds', () => {
+    it('should batch update multiple symbols', async () => {
+      const updateSpy = vi.spyOn(manager, 'updateSymbolVectorIds').mockResolvedValue();
+
+      const symbolToVectors = new Map([
+        ['func1', ['chunk_1']],
+        ['func2', ['chunk_2', 'chunk_3']],
+        ['func3', ['chunk_4']]
+      ]);
+
+      const result = await manager.batchUpdateSymbolVectorIds(symbolToVectors);
+
+      expect(updateSpy).toHaveBeenCalledTimes(3);
+      expect(result.updated).toBe(3);
+      expect(result.errors).toEqual([]);
+    });
+
+    it('should report errors without stopping batch', async () => {
+      const updateSpy = vi.spyOn(manager, 'updateSymbolVectorIds')
+        .mockResolvedValueOnce()
+        .mockRejectedValueOnce(new Error('Update failed'))
+        .mockResolvedValueOnce();
+
+      const symbolToVectors = new Map([
+        ['func1', ['chunk_1']],
+        ['func2', ['chunk_2']],
+        ['func3', ['chunk_3']]
+      ]);
+
+      const result = await manager.batchUpdateSymbolVectorIds(symbolToVectors);
+
+      expect(updateSpy).toHaveBeenCalledTimes(3);
+      expect(result.updated).toBe(2);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('func2');
+    });
+
+    it('should handle empty map', async () => {
+      const result = await manager.batchUpdateSymbolVectorIds(new Map());
+
+      expect(result.updated).toBe(0);
+      expect(result.errors).toEqual([]);
+    });
+  });
+});

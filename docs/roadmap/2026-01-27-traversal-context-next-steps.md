@@ -50,12 +50,14 @@ This document outlines the next steps for replacing Claude Code's default contex
 - [x] Write tests for `HierarchicalSummaryService` (32 tests)
 - [x] Write tests for `TraversalService` (41 tests)
 - [x] Write tests for `SessionService` (21 tests)
-- [ ] Write tests for graph-vector linking methods
-- [ ] Write tests for level-aware search
+- [x] Write tests for graph-vector linking methods (22 tests)
+- [x] Write tests for level-aware search (8 tests)
+- [x] Write tests for `getVectorsForSymbol` (4 tests)
 
 #### 1.2 Integration Tests
+- [x] Create integration test suite for `cv_traverse_context` tool (12 tests)
+- [x] Run integration tests with infrastructure (all 12 pass)
 - [ ] Test full sync with hierarchical summary generation
-- [ ] Test traversal across all depth levels
 - [ ] Test session persistence and recovery
 - [ ] Test with real codebases of varying sizes
 
@@ -68,14 +70,17 @@ This document outlines the next steps for replacing Claude Code's default contex
 ### 2. Performance Optimization (Medium Priority)
 
 #### 2.1 Summary Generation
-- [ ] Implement parallel summary generation for large codebases
-- [ ] Add progress reporting during sync
+- [x] Implement parallel summary generation for large codebases
+- [x] Add progress reporting during sync
+- [x] Add `concurrency` and `onProgress` options to `generateAllSummaries()`
 - [ ] Optimize LLM calls with batching
-- [ ] Add summary caching to avoid regeneration
+- [x] Add summary caching to avoid regeneration (content-addressed)
 
 #### 2.2 Context Retrieval
+- [x] Add caching layer for frequently accessed contexts
+- [x] Implement `ContextCache` with TTL and LRU eviction
+- [x] Cache modules, files, symbols, summaries, callers/callees
 - [ ] Profile and optimize traversal queries
-- [ ] Add caching layer for frequently accessed contexts
 - [ ] Optimize token budget allocation
 
 ### 3. Claude Code Integration (High Priority)
@@ -99,8 +104,14 @@ This document outlines the next steps for replacing Claude Code's default contex
 ### 4. Enhanced Navigation Features (Future)
 
 #### 4.1 Smart Navigation Hints
-- [ ] Improve hint generation based on graph analysis
-- [ ] Add "related symbols" suggestions from semantic similarity
+- [x] Improve hint generation based on graph analysis
+  - Shows public symbols, functions, classes at file level
+  - Shows entry point files (index.ts, main.ts) at module level
+  - Shows callers/callees count at symbol level
+- [x] Add "related symbols" suggestions from semantic similarity
+  - New `includeRelated` option in `cv_traverse_context`
+  - Uses vector search to find semantically similar symbols
+  - Configurable via `maxRelatedSymbols` option
 - [ ] Add "recently visited" tracking for quick jumps
 
 #### 4.2 Bookmark System

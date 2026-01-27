@@ -486,8 +486,8 @@ describe('TraversalService', () => {
 
       it('should include imports', async () => {
         mockGraphManager.getFileDependencies.mockResolvedValueOnce([
-          { path: './helper' },
-          { path: 'lodash' }
+          './helper',
+          'lodash'
         ]);
 
         const result = await service.traverse({
@@ -593,7 +593,10 @@ describe('TraversalService', () => {
         direction: 'jump'
       });
 
-      expect(result.hints.some(h => h.includes('Symbols'))).toBe(true);
+      // Now shows "Public:" or "Functions:" or "Classes/Interfaces:" based on symbol types
+      expect(result.hints.some(h =>
+        h.includes('Public') || h.includes('Functions') || h.includes('Classes')
+      )).toBe(true);
     });
 
     it('should suggest navigation options at symbol level', async () => {
@@ -651,6 +654,313 @@ describe('TraversalService', () => {
       });
 
       expect(mockGraphManager.getCallers).toHaveBeenCalled();
+    });
+  });
+
+  describe('caching', () => {
+    it('should enable caching by default', () => {
+      const stats = service.getCacheStats();
+      expect(stats).not.toBeNull();
+      expect(stats?.maxEntries).toBe(1000);
+      expect(stats?.ttlMs).toBe(60000);
+    });
+
+    it('should respect enableCaching=false option', () => {
+      const uncachedService = createTraversalService(
+        mockGraphManager as any,
+        mockVectorManager as any,
+        mockGraphService as any,
+        mockSessionService as any,
+        { enableCaching: false }
+      );
+
+      expect(uncachedService.getCacheStats()).toBeNull();
+    });
+
+    it('should use custom cache options', () => {
+      const customService = createTraversalService(
+        mockGraphManager as any,
+        mockVectorManager as any,
+        mockGraphService as any,
+        mockSessionService as any,
+        { cacheTtlMs: 30000, maxCacheEntries: 500 }
+      );
+
+      const stats = customService.getCacheStats();
+      expect(stats?.maxEntries).toBe(500);
+      expect(stats?.ttlMs).toBe(30000);
+    });
+
+    it('should cache module list', async () => {
+      // First call
+      await service.traverse({ direction: 'jump' });
+
+      // Second call - should use cache
+      await service.traverse({ direction: 'jump' });
+
+      // graph.query should only be called once for modules
+      const queryCalls = mockGraphManager.query.mock.calls.filter(
+        call => call[0].includes('MATCH (f:File)')
+      );
+      expect(queryCalls.length).toBe(1);
+    });
+
+    it('should cache file symbols', async () => {
+      // First call - navigate to file
+      await service.traverse({ file: 'src/index.ts', direction: 'jump' });
+
+      // Second call - should use cached symbols
+      await service.traverse({ file: 'src/index.ts', direction: 'jump' });
+
+      // getFileSymbols should only be called once
+      expect(mockGraphManager.getFileSymbols).toHaveBeenCalledTimes(1);
+    });
+
+    it('should cache summaries', async () => {
+      mockVectorManager.getSummary.mockResolvedValue({
+        summary: 'Test summary'
+      });
+
+      // First call
+      await service.traverse({ file: 'src/index.ts', direction: 'jump' });
+
+      // Second call - should use cached summary
+      await service.traverse({ file: 'src/index.ts', direction: 'jump' });
+
+      // getSummary should only be called once for file:src/index.ts
+      const summaryCalls = mockVectorManager.getSummary.mock.calls.filter(
+        call => call[0] === 'file:src/index.ts'
+      );
+      expect(summaryCalls.length).toBe(1);
+    });
+
+    it('should allow cache invalidation', async () => {
+      // First call
+      await service.traverse({ direction: 'jump' });
+
+      // Invalidate cache
+      service.invalidateCache();
+
+      // Second call - should fetch again
+      await service.traverse({ direction: 'jump' });
+
+      // query should be called twice now
+      const queryCalls = mockGraphManager.query.mock.calls.filter(
+        call => call[0].includes('MATCH (f:File)')
+      );
+      expect(queryCalls.length).toBe(2);
+    });
+
+    it('should allow pattern-based cache invalidation', async () => {
+      // Navigate to multiple files
+      await service.traverse({ file: 'src/index.ts', direction: 'jump' });
+      await service.traverse({ file: 'lib/main.ts', direction: 'jump' });
+
+      // Invalidate only src files
+      service.invalidateCache('src/');
+
+      // Navigate again
+      await service.traverse({ file: 'src/index.ts', direction: 'jump' });
+      await service.traverse({ file: 'lib/main.ts', direction: 'jump' });
+
+      // src/index.ts should have been re-fetched (2 calls)
+      // lib/main.ts should still be cached (1 call)
+      const srcCalls = mockGraphManager.getFileSymbols.mock.calls.filter(
+        call => call[0] === 'src/index.ts'
+      );
+      const libCalls = mockGraphManager.getFileSymbols.mock.calls.filter(
+        call => call[0] === 'lib/main.ts'
+      );
+      expect(srcCalls.length).toBe(2);
+      expect(libCalls.length).toBe(1);
+    });
+
+    it('should track cache size', async () => {
+      // Initial size is 0
+      expect(service.getCacheStats()?.size).toBe(0);
+
+      // Navigate and populate cache
+      await service.traverse({ direction: 'jump' });
+
+      // Cache should have entries now
+      expect(service.getCacheStats()?.size).toBeGreaterThan(0);
+    });
+  });
+
+  describe('enhanced hints', () => {
+    it('should suggest entry point files in module', async () => {
+      mockGraphManager.query.mockResolvedValueOnce([
+        { path: 'src/index.ts' },
+        { path: 'src/main.ts' },
+        { path: 'src/utils.ts' }
+      ]);
+
+      const result = await service.traverse({
+        module: 'src',
+        direction: 'jump'
+      });
+
+      expect(result.hints.some(h => h.includes('Entry points'))).toBe(true);
+    });
+
+    it('should show caller/callee hints at symbol level', async () => {
+      mockGraphManager.getSymbolWithVectors.mockResolvedValueOnce({
+        symbol: { qualifiedName: 'test:func', name: 'func', kind: 'function', file: 'test.ts' }
+      });
+      mockGraphManager.getCallers.mockResolvedValue([
+        { name: 'caller1', file: 'a.ts' },
+        { name: 'caller2', file: 'b.ts' }
+      ]);
+      mockGraphManager.getCallees.mockResolvedValue([
+        { name: 'callee1', file: 'c.ts' }
+      ]);
+
+      const result = await service.traverse({
+        symbol: 'func',
+        file: 'test.ts',
+        direction: 'jump',
+        includeCallers: true
+      });
+
+      expect(result.hints.some(h => h.includes('Called by'))).toBe(true);
+      expect(result.hints.some(h => h.includes('Calls'))).toBe(true);
+    });
+
+    it('should show classes/interfaces when present', async () => {
+      mockGraphManager.getFileSymbols.mockResolvedValueOnce([
+        { name: 'MyClass', qualifiedName: 'test:MyClass', kind: 'class', file: 'test.ts', visibility: 'public' },
+        { name: 'MyInterface', qualifiedName: 'test:MyInterface', kind: 'interface', file: 'test.ts', visibility: 'public' }
+      ]);
+
+      const result = await service.traverse({
+        file: 'test.ts',
+        direction: 'jump'
+      });
+
+      expect(result.hints.some(h => h.includes('Classes/Interfaces'))).toBe(true);
+    });
+  });
+
+  describe('related symbols', () => {
+    it('should not include related symbols by default', async () => {
+      mockGraphManager.getSymbolWithVectors.mockResolvedValueOnce({
+        symbol: { qualifiedName: 'test:func', name: 'func', kind: 'function', file: 'test.ts' }
+      });
+      mockVectorManager.getSummary.mockResolvedValueOnce({
+        summary: 'Test function'
+      });
+
+      const result = await service.traverse({
+        symbol: 'func',
+        file: 'test.ts',
+        direction: 'jump'
+      });
+
+      expect(result.context.relatedSymbols).toBeUndefined();
+    });
+
+    it('should include related symbols when requested via args', async () => {
+      // Create service with related symbols search mocked
+      const serviceWithRelated = createTraversalService(
+        mockGraphManager as any,
+        {
+          ...mockVectorManager,
+          searchByLevel: vi.fn().mockResolvedValue([
+            {
+              payload: { _id: 'symbol:other.ts:relatedFunc', file: 'other.ts', summary: 'Related function' },
+              score: 0.85
+            }
+          ])
+        } as any,
+        mockGraphService as any,
+        mockSessionService as any,
+        { includeRelatedSymbols: false } // Default off
+      );
+
+      mockGraphManager.getSymbolWithVectors.mockResolvedValueOnce({
+        symbol: { qualifiedName: 'test:func', name: 'func', kind: 'function', file: 'test.ts' }
+      });
+      mockVectorManager.getSummary.mockResolvedValueOnce({
+        summary: 'Test function'
+      });
+
+      const result = await serviceWithRelated.traverse({
+        symbol: 'func',
+        file: 'test.ts',
+        direction: 'jump',
+        includeRelated: true
+      });
+
+      expect(result.context.relatedSymbols).toBeDefined();
+      expect(result.context.relatedSymbols!.length).toBeGreaterThan(0);
+      expect(result.context.relatedSymbols![0].name).toBe('relatedFunc');
+    });
+
+    it('should include related symbols when enabled in options', async () => {
+      const serviceWithRelated = createTraversalService(
+        mockGraphManager as any,
+        {
+          ...mockVectorManager,
+          searchByLevel: vi.fn().mockResolvedValue([
+            {
+              payload: { _id: 'symbol:other.ts:helper', file: 'other.ts', summary: 'Helper function' },
+              score: 0.9
+            }
+          ])
+        } as any,
+        mockGraphService as any,
+        mockSessionService as any,
+        { includeRelatedSymbols: true }
+      );
+
+      mockGraphManager.getSymbolWithVectors.mockResolvedValueOnce({
+        symbol: { qualifiedName: 'test:func', name: 'func', kind: 'function', file: 'test.ts' }
+      });
+      mockVectorManager.getSummary.mockResolvedValueOnce({
+        summary: 'Test function'
+      });
+
+      const result = await serviceWithRelated.traverse({
+        symbol: 'func',
+        file: 'test.ts',
+        direction: 'jump'
+      });
+
+      expect(result.context.relatedSymbols).toBeDefined();
+    });
+
+    it('should respect maxRelatedSymbols option', async () => {
+      const serviceWithMax = createTraversalService(
+        mockGraphManager as any,
+        {
+          ...mockVectorManager,
+          searchByLevel: vi.fn().mockResolvedValue([
+            { payload: { _id: 'symbol:a.ts:func1', file: 'a.ts', summary: 'Func 1' }, score: 0.9 },
+            { payload: { _id: 'symbol:b.ts:func2', file: 'b.ts', summary: 'Func 2' }, score: 0.8 },
+            { payload: { _id: 'symbol:c.ts:func3', file: 'c.ts', summary: 'Func 3' }, score: 0.7 },
+            { payload: { _id: 'symbol:d.ts:func4', file: 'd.ts', summary: 'Func 4' }, score: 0.6 }
+          ])
+        } as any,
+        mockGraphService as any,
+        mockSessionService as any,
+        { includeRelatedSymbols: true, maxRelatedSymbols: 2 }
+      );
+
+      mockGraphManager.getSymbolWithVectors.mockResolvedValueOnce({
+        symbol: { qualifiedName: 'test:func', name: 'func', kind: 'function', file: 'test.ts' }
+      });
+      mockVectorManager.getSummary.mockResolvedValueOnce({
+        summary: 'Test function'
+      });
+
+      const result = await serviceWithMax.traverse({
+        symbol: 'func',
+        file: 'test.ts',
+        direction: 'jump'
+      });
+
+      expect(result.context.relatedSymbols).toBeDefined();
+      expect(result.context.relatedSymbols!.length).toBe(2);
     });
   });
 });
