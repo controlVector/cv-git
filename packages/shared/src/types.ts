@@ -1042,3 +1042,7 @@ export interface SystemPackageInfo {
   /** pkg-config module name */
   pkgConfigName?: string;
 }
+
+// ========== Context Manifold Types ==========
+
+export * from './manifold-types.js';

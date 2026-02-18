@@ -11,8 +11,11 @@ import { successResult, errorResult, createIsolatedGraphManager, getServiceUrls 
 import {
   configManager,
   createVectorManager,
+  createManifoldService,
+  readManifest,
+  generateRepoId,
 } from '@cv-git/core';
-import { VectorSearchResult, CodeChunkPayload, SymbolNode } from '@cv-git/shared';
+import { VectorSearchResult, CodeChunkPayload, SymbolNode, getCVDir } from '@cv-git/shared';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { getOpenAIApiKey, getOpenRouterApiKey } from '../credentials.js';
@@ -51,6 +54,16 @@ export async function handleAutoContext(args: AutoContextArgs): Promise<ToolResu
       includeRequirements = true,
       includeDocs = true,
     } = args;
+
+    // Try manifold-enhanced context first
+    try {
+      const manifoldResult = await tryManifoldContext(args);
+      if (manifoldResult) {
+        return manifoldResult;
+      }
+    } catch {
+      // Manifold unavailable, fall through to existing path
+    }
 
     // Initialize graph manager with repo isolation
     let graph = null;
@@ -445,6 +458,84 @@ function generateJSONAutoContext(data: AutoContextData): string {
   };
 
   return JSON.stringify(context, null, 2);
+}
+
+/**
+ * Try to use the manifold for enhanced context assembly.
+ * Returns null if manifold is unavailable (graceful degradation).
+ */
+async function tryManifoldContext(args: AutoContextArgs): Promise<ToolResult | null> {
+  const { findRepoRoot } = await import('@cv-git/shared');
+  const repoRoot = await findRepoRoot();
+  if (!repoRoot) return null;
+
+  const cvDir = getCVDir(repoRoot);
+
+  // Quick check: does the manifold state file exist?
+  try {
+    await fs.access(path.join(cvDir, 'manifold', 'state.json'));
+  } catch {
+    return null; // No manifold, fall back
+  }
+
+  let repoId: string;
+  try {
+    const manifest = await readManifest(cvDir);
+    repoId = manifest?.repository?.id || generateRepoId(repoRoot);
+  } catch {
+    repoId = generateRepoId(repoRoot);
+  }
+
+  // Set up optional dependencies
+  let graph = null;
+  try {
+    const isolated = await createIsolatedGraphManager();
+    graph = isolated.graph;
+    await graph.connect();
+  } catch {
+    // Graph optional
+  }
+
+  let vector = null;
+  try {
+    const config = await configManager.load(repoRoot);
+    const serviceUrls = await getServiceUrls(config);
+    const openaiApiKey = config.ai.apiKey || await getOpenAIApiKey();
+    const openrouterApiKey = await getOpenRouterApiKey();
+
+    if (openaiApiKey || openrouterApiKey) {
+      vector = createVectorManager({
+        url: serviceUrls.qdrant,
+        openrouterApiKey,
+        openaiApiKey,
+        repoId,
+      });
+      await vector.connect();
+    }
+  } catch {
+    // Vector optional
+  }
+
+  const manifold = createManifoldService({ repoRoot, repoId, graph, vector });
+  await manifold.initialize();
+
+  const result = await manifold.assembleContext(args.query, {
+    format: args.format || 'xml',
+    budget: args.budget || 20000,
+    currentFile: args.currentFile,
+  });
+
+  // Cleanup
+  await manifold.close();
+  if (vector) await vector.close();
+  if (graph) await graph.close();
+
+  // Only return manifold result if it has meaningful content
+  if (result.dimensions.filter(d => d.available && d.score > 0).length < 2) {
+    return null; // Not enough data, fall back
+  }
+
+  return successResult(result.context);
 }
 
 /**

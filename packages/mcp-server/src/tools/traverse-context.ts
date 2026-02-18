@@ -16,16 +16,21 @@ import {
   createVectorManager,
   createGraphService,
   createSessionService,
-  createTraversalService
+  createTraversalService,
+  createManifoldService,
+  readManifest,
+  generateRepoId,
 } from '@cv-git/core';
 import {
   findRepoRoot,
+  getCVDir,
   TraverseContextArgs,
   TraversalDirection,
   TraversalContextResult
 } from '@cv-git/shared';
 import { getOpenAIApiKey, getOpenRouterApiKey } from '../credentials.js';
 import * as path from 'path';
+import * as fs from 'fs/promises';
 
 /**
  * Tool arguments interface
@@ -152,6 +157,34 @@ export async function handleTraverseContext(args: TraverseContextToolArgs): Prom
 
     // Execute traversal
     const result = await traversalService.traverse(traverseArgs);
+
+    // Update manifold navigational dimension (best-effort, non-blocking)
+    try {
+      const cvDir = getCVDir(repoRoot);
+      const manifoldStatePath = path.join(cvDir, 'manifold', 'state.json');
+      await fs.access(manifoldStatePath);
+
+      let repoId: string;
+      try {
+        const manifest = await readManifest(cvDir);
+        repoId = manifest?.repository?.id || generateRepoId(repoRoot);
+      } catch {
+        repoId = generateRepoId(repoRoot);
+      }
+
+      const manifold = createManifoldService({
+        repoRoot,
+        repoId,
+        graph,
+        vector,
+      });
+      await manifold.initialize();
+      await manifold.updateNavigational();
+      await manifold.save();
+      await manifold.close();
+    } catch {
+      // Manifold update is optional — don't fail the traversal
+    }
 
     // Format output
     let output: string;

@@ -50,7 +50,11 @@ export function syncCommand(): Command {
     .option('--max-files <number>', 'Maximum number of files to process per run (for large repos)', parseInt)
     .option('--batch-size <number>', 'Batch size for embedding generation (default: 50)', parseInt)
     .option('--continue', 'Continue from where the last chunked sync left off')
-    .option('--no-embeddings', 'Skip vector embeddings (graph-only sync)');
+    .option('--no-embeddings', 'Skip vector embeddings (graph-only sync)')
+    .option('--summaries', 'Generate hierarchical summaries for changed symbols (default: enabled)')
+    .option('--no-summaries', 'Skip summary generation')
+    .option('--summary-strategy <strategy>', 'Summary cost strategy: free, budget, quality (default: free)', 'free')
+    .option('--summary-budget <cents>', 'Maximum LLM budget in cents for summary generation (default: 5)', parseInt);
 
   addGlobalOptions(cmd);
 

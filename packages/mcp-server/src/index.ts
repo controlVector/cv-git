@@ -96,6 +96,7 @@ import {
 } from './tools/commit.js';
 import { handleReason, ReasonArgs } from './tools/reason.js';
 import { handleTraverseContext, TraverseContextToolArgs } from './tools/traverse-context.js';
+import { handleManifoldStatus, ManifoldStatusArgs } from './tools/manifold-status.js';
 
 /**
  * Tool definitions
@@ -938,6 +939,22 @@ This provides deeper analysis than cv_explain by recursively gathering context.`
     },
   },
 
+  // Context Manifold
+  {
+    name: 'cv_manifold_status',
+    description: 'Get diagnostics for the context manifold. Shows health of all 9 dimensions (structural, semantic, temporal, requirements, summary, navigational, session, intent, impact) and their data sources.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        refresh: {
+          type: 'boolean',
+          description: 'Refresh manifold state before reporting',
+          default: false,
+        },
+      },
+    },
+  },
+
   // Traversal-Aware Context (Claude Code Integration)
   {
     name: 'cv_traverse_context',
@@ -1266,6 +1283,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'cv_commit_generate':
         result = await handleCommitGenerate(args as unknown as CommitGenerateArgs);
+        break;
+
+      // Context Manifold
+      case 'cv_manifold_status':
+        result = await handleManifoldStatus(args as unknown as ManifoldStatusArgs);
         break;
 
       // Traversal-Aware Context

@@ -14,10 +14,10 @@ const HOOK_MARKER = '# CV-GIT HOOK';
 
 const POST_COMMIT_HOOK = `#!/bin/sh
 ${HOOK_MARKER} - DO NOT EDIT THIS LINE
-# Auto-sync knowledge graph after commit
+# Auto-sync knowledge graph after commit (with delta summaries)
 # Runs in background to avoid slowing down commits
 
-cv sync --incremental --quiet 2>/dev/null &
+cv sync --incremental --summaries --quiet 2>/dev/null &
 `;
 
 const POST_MERGE_HOOK = `#!/bin/sh
@@ -25,7 +25,15 @@ ${HOOK_MARKER} - DO NOT EDIT THIS LINE
 # Auto-sync knowledge graph after merge/pull
 # Runs in background to avoid slowing down merges
 
-cv sync --incremental --quiet 2>/dev/null &
+cv sync --incremental --summaries --quiet 2>/dev/null &
+`;
+
+const POST_CHECKOUT_HOOK = `#!/bin/sh
+${HOOK_MARKER} - DO NOT EDIT THIS LINE
+# Auto-sync knowledge graph after branch checkout
+# Runs in background to avoid slowing down checkouts
+
+cv sync --incremental --summaries --quiet 2>/dev/null &
 `;
 
 const PREPARE_COMMIT_MSG_HOOK = `#!/bin/sh
@@ -82,9 +90,10 @@ export function hooksCommand(): Command {
     .description('Install git hooks for automatic sync and AI commit messages')
     .option('--post-commit', 'Only install post-commit hook (auto-sync)')
     .option('--post-merge', 'Only install post-merge hook (auto-sync)')
+    .option('--post-checkout', 'Only install post-checkout hook (auto-sync)')
     .option('--prepare-commit-msg', 'Only install prepare-commit-msg hook (AI commit messages)')
     .option('--ai-commit', 'Alias for --prepare-commit-msg')
-    .action(async (options: { postCommit?: boolean; postMerge?: boolean; prepareCommitMsg?: boolean; aiCommit?: boolean }) => {
+    .action(async (options: { postCommit?: boolean; postMerge?: boolean; postCheckout?: boolean; prepareCommitMsg?: boolean; aiCommit?: boolean }) => {
       try {
         const repoRoot = await findRepoRoot();
         if (!repoRoot) {
@@ -98,7 +107,7 @@ export function hooksCommand(): Command {
         await fs.mkdir(hooksDir, { recursive: true });
 
         const wantsPrepareCommitMsg = options.prepareCommitMsg || options.aiCommit;
-        const installAll = !options.postCommit && !options.postMerge && !wantsPrepareCommitMsg;
+        const installAll = !options.postCommit && !options.postMerge && !options.postCheckout && !wantsPrepareCommitMsg;
         let installed = 0;
 
         // Install post-commit hook
@@ -112,6 +121,13 @@ export function hooksCommand(): Command {
         if (installAll || options.postMerge) {
           const hookPath = path.join(hooksDir, 'post-merge');
           const result = await installHook(hookPath, POST_MERGE_HOOK, 'post-merge');
+          if (result) installed++;
+        }
+
+        // Install post-checkout hook
+        if (installAll || options.postCheckout) {
+          const hookPath = path.join(hooksDir, 'post-checkout');
+          const result = await installHook(hookPath, POST_CHECKOUT_HOOK, 'post-checkout');
           if (result) installed++;
         }
 
@@ -130,6 +146,9 @@ export function hooksCommand(): Command {
           }
           if (installAll || options.postMerge) {
             console.log(chalk.gray('  • post-merge: auto-sync knowledge graph'));
+          }
+          if (installAll || options.postCheckout) {
+            console.log(chalk.gray('  • post-checkout: auto-sync knowledge graph'));
           }
           if (installAll || wantsPrepareCommitMsg) {
             console.log(chalk.cyan('  • prepare-commit-msg: AI commit message generation'));
@@ -166,7 +185,7 @@ export function hooksCommand(): Command {
         const wantsPrepareCommitMsgOnly = options.prepareCommitMsg || options.aiCommit;
         const hooks = wantsPrepareCommitMsgOnly
           ? ['prepare-commit-msg']
-          : ['post-commit', 'post-merge', 'prepare-commit-msg'];
+          : ['post-commit', 'post-merge', 'post-checkout', 'prepare-commit-msg'];
 
         for (const hookName of hooks) {
           const hookPath = path.join(hooksDir, hookName);
@@ -306,10 +325,11 @@ export function hooksCommand(): Command {
         const hookDescriptions: Record<string, string> = {
           'post-commit': 'auto-sync after commit',
           'post-merge': 'auto-sync after merge/pull',
+          'post-checkout': 'auto-sync after branch checkout',
           'prepare-commit-msg': 'AI commit message generation'
         };
 
-        for (const hookName of ['post-commit', 'post-merge', 'prepare-commit-msg']) {
+        for (const hookName of ['post-commit', 'post-merge', 'post-checkout', 'prepare-commit-msg']) {
           const hookPath = path.join(hooksDir, hookName);
           const status = await getHookStatus(hookPath);
 

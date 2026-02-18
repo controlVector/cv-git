@@ -43,6 +43,28 @@ export interface EnhancedSummaryOptions {
   llmBatchSize?: number;
 }
 
+/** Cost control strategy for summary generation */
+export type CostStrategy = 'free' | 'budget' | 'quality';
+
+export interface CostControlOptions {
+  /** Cost strategy: 'free' (docstring/AST only), 'budget' (LLM for complex symbols), 'quality' (LLM for all) */
+  costStrategy?: CostStrategy;
+  /** Maximum number of LLM calls (default: 100) */
+  maxLLMCalls?: number;
+  /** Maximum LLM budget in cents (default: 5) */
+  llmBudgetCents?: number;
+  /** Complexity threshold for LLM usage in budget mode (default: 10) */
+  complexityThreshold?: number;
+}
+
+export interface DeltaSummaryResult {
+  generated: number;
+  skipped: number;
+  llmCalls: number;
+  estimatedCostCents: number;
+  errors: string[];
+}
+
 /**
  * Service for generating and managing hierarchical code summaries
  */
@@ -675,6 +697,117 @@ KEYWORDS: <comma-separated keywords>`;
       '.svelte': 'svelte'
     };
     return languageMap[ext] || 'unknown';
+  }
+
+  /**
+   * Generate summaries for only changed/new files (delta mode).
+   * Uses cost control to minimize LLM usage.
+   */
+  async generateDeltaSummaries(
+    parsedFiles: ParsedFile[],
+    costOptions?: CostControlOptions,
+    enhancedOptions?: EnhancedSummaryOptions
+  ): Promise<DeltaSummaryResult> {
+    const strategy = costOptions?.costStrategy || 'free';
+    const maxLLMCalls = costOptions?.maxLLMCalls ?? 100;
+    const llmBudgetCents = costOptions?.llmBudgetCents ?? 5;
+    const complexityThreshold = costOptions?.complexityThreshold ?? 10;
+
+    let llmCalls = 0;
+    let estimatedCostCents = 0;
+    const costPerCall = 0.005; // ~$0.005 per small LLM call
+
+    const result: DeltaSummaryResult = {
+      generated: 0,
+      skipped: 0,
+      llmCalls: 0,
+      estimatedCostCents: 0,
+      errors: [],
+    };
+
+    // Override context based on cost strategy
+    const originalUseFallback = this.context.useFallback;
+    const originalGenerateSummary = this.context.generateSummary;
+
+    // Create a cost-aware generate function
+    const costAwareGenerate = this.context.generateSummary
+      ? async (prompt: string, maxTokens?: number): Promise<string> => {
+          if (strategy === 'free') {
+            // Never use LLM
+            return '';
+          }
+          if (strategy === 'budget') {
+            // Check budget
+            if (llmCalls >= maxLLMCalls || estimatedCostCents >= llmBudgetCents) {
+              return '';
+            }
+          }
+          llmCalls++;
+          estimatedCostCents += costPerCall;
+          return originalGenerateSummary!(prompt, maxTokens);
+        }
+      : undefined;
+
+    // Temporarily patch context
+    if (strategy === 'free') {
+      this.context.useFallback = true;
+    } else {
+      this.context.generateSummary = costAwareGenerate;
+      this.context.useFallback = false;
+    }
+
+    try {
+      const summaryResult = await this.generateAllSummaries(parsedFiles, {
+        skipUnchanged: true,
+        maxSymbolsPerFile: 50,
+        maxFilesPerDirectory: 100,
+        ...enhancedOptions,
+      });
+
+      result.generated = summaryResult.count;
+      result.skipped = summaryResult.skipped;
+      result.llmCalls = llmCalls;
+      result.estimatedCostCents = Math.round(estimatedCostCents * 100) / 100;
+      result.errors = summaryResult.errors;
+
+    } finally {
+      // Restore original context
+      this.context.useFallback = originalUseFallback;
+      this.context.generateSummary = originalGenerateSummary;
+    }
+
+    return result;
+  }
+
+  /**
+   * Check if a symbol should use LLM for summary generation (budget mode).
+   */
+  shouldUseLLM(
+    symbol: SymbolNode,
+    costOptions: CostControlOptions,
+    currentLLMCalls: number,
+    currentCostCents: number
+  ): boolean {
+    const { costStrategy, maxLLMCalls = 100, llmBudgetCents = 5, complexityThreshold = 10 } = costOptions;
+
+    // Free strategy never uses LLM
+    if (costStrategy === 'free') return false;
+
+    // Quality strategy always uses LLM
+    if (costStrategy === 'quality') return true;
+
+    // Budget strategy: check conditions
+    // Has a good docstring already?
+    if (symbol.docstring && symbol.docstring.length > 20) return false;
+
+    // Low complexity?
+    if (symbol.complexity < complexityThreshold) return false;
+
+    // Budget exhausted?
+    if (currentLLMCalls >= maxLLMCalls) return false;
+    if (currentCostCents >= llmBudgetCents) return false;
+
+    return true;
   }
 
   /**

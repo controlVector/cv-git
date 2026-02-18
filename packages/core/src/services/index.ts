@@ -89,3 +89,9 @@ export {
   createSessionService,
   SessionServiceOptions
 } from './session-service.js';
+
+export {
+  ManifoldService,
+  createManifoldService,
+  ManifoldServiceDeps
+} from './manifold-service.js';

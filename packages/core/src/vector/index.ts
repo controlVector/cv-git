@@ -1177,6 +1177,45 @@ export class VectorManager {
   }
 
   /**
+   * Search summaries collection for cached context.
+   * Convenience wrapper for summary-first query path.
+   */
+  async searchSummaries(
+    query: string,
+    limit: number = 10,
+    options?: {
+      minScore?: number;
+      level?: number;
+      path?: string;
+    }
+  ): Promise<VectorSearchResult<HierarchicalSummaryPayload>[]> {
+    const filter: any = {};
+
+    if (options?.level !== undefined) {
+      filter.must = filter.must || [];
+      filter.must.push({ key: 'level', match: { value: options.level } });
+    }
+
+    if (options?.path) {
+      filter.must = filter.must || [];
+      filter.must.push({ key: 'path', match: { text: options.path } });
+    }
+
+    const results = await this.search<HierarchicalSummaryPayload>(
+      this.collections.summaries,
+      query,
+      limit,
+      Object.keys(filter).length > 0 ? filter : undefined
+    );
+
+    if (options?.minScore !== undefined) {
+      return results.filter(r => r.score >= options.minScore!);
+    }
+
+    return results;
+  }
+
+  /**
    * Delete vector by ID
    */
   async delete(collection: string, id: string): Promise<void> {

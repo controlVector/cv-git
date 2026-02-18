@@ -280,6 +280,25 @@ export interface NPMCredential extends BaseCredential {
 }
 
 /**
+ * Metadata for credentials obtained via CV-Hub proxy authentication.
+ * This is stored in BaseCredential.metadata, not as a separate type.
+ *
+ * When authMethod === 'cv-hub-proxy':
+ *   - hubUrl: The CV-Hub API URL used for proxying
+ *   - cvHubCredentialName: Name of the CV-Hub credential used for proxy auth
+ *   - proxyTokenId: Server-side identifier for the proxied token
+ *
+ * When authMethod === 'direct' (or undefined):
+ *   - Token was entered directly by the user (PAT, app password, etc.)
+ */
+export interface ProxyAuthMetadata {
+  authMethod: 'direct' | 'cv-hub-proxy';
+  hubUrl?: string;
+  cvHubCredentialName?: string;
+  proxyTokenId?: string;
+}
+
+/**
  * Union type of all credential types
  */
 export type Credential =

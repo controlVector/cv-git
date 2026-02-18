@@ -17,7 +17,7 @@ import {
   ChangeType,
   HierarchicalSummaryOptions
 } from '@cv-git/shared';
-import { HierarchicalSummaryService, createHierarchicalSummaryService } from '../services/hierarchical-summary.js';
+import { HierarchicalSummaryService, createHierarchicalSummaryService, CostControlOptions, DeltaSummaryResult } from '../services/hierarchical-summary.js';
 import { shouldSyncFile, detectLanguage, getCVDir } from '@cv-git/shared';
 import { minimatch } from 'minimatch';
 import { GitManager } from '../git/index.js';
@@ -25,6 +25,7 @@ import { CodeParser } from '../parser/index.js';
 import { GraphManager } from '../graph/index.js';
 import { VectorManager } from '../vector/index.js';
 import { DeltaSyncManager, createDeltaSyncManager, SyncDelta } from './delta.js';
+import { ManifoldService } from '../services/manifold-service.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -52,12 +53,14 @@ export interface SyncOptions {
   batchSize?: number;             // Batch size for embeddings (default: 50)
   continueFromLast?: boolean;     // Continue from last chunked sync position
   // Hierarchical summary options
-  generateSummaries?: boolean;    // Generate hierarchical summaries (default: false)
+  generateSummaries?: boolean;    // Generate hierarchical summaries (default: true)
   summaryOptions?: {
     maxSymbolsPerFile?: number;
     maxFilesPerDirectory?: number;
     skipUnchanged?: boolean;
   };
+  // Cost control for summary generation
+  summaryCostControl?: CostControlOptions;
 }
 
 export interface DocumentSyncResult {
@@ -80,6 +83,13 @@ export interface SyncError {
 /**
  * Sync report saved to .cv/sync-report.json
  */
+export interface SummaryStats {
+  generated: number;
+  skipped: number;
+  llmCalls: number;
+  estimatedCostCents: number;
+}
+
 export interface SyncReport {
   timestamp: number;
   duration: number;
@@ -91,6 +101,7 @@ export interface SyncReport {
     symbolsCreated: number;
     vectorsCreated: number;
   };
+  summaryStats?: SummaryStats;
   errors: SyncError[];
   systemInfo?: {
     nodeVersion: string;
@@ -101,6 +112,7 @@ export interface SyncReport {
 
 export class SyncEngine {
   private delta: DeltaSyncManager;
+  private manifold?: ManifoldService;
 
   constructor(
     private repoRoot: string,
@@ -110,6 +122,33 @@ export class SyncEngine {
     private vector?: VectorManager
   ) {
     this.delta = createDeltaSyncManager(repoRoot);
+  }
+
+  /**
+   * Set optional ManifoldService for post-sync dimension updates
+   */
+  setManifold(manifold: ManifoldService): void {
+    this.manifold = manifold;
+  }
+
+  /**
+   * Update manifold dimensions after sync completes
+   * Best-effort: failures don't affect sync results
+   */
+  private async updateManifold(changedFiles?: string[]): Promise<void> {
+    if (!this.manifold) return;
+    try {
+      await this.manifold.updateStructural();
+      await this.manifold.updateTemporal();
+      await this.manifold.updateDevSession();
+      await this.manifold.updateIntent();
+      if (changedFiles && changedFiles.length > 0) {
+        await this.manifold.updateImpact(changedFiles);
+      }
+      await this.manifold.save();
+    } catch {
+      // Manifold update is optional — don't fail the sync
+    }
   }
 
   /**
@@ -312,6 +351,9 @@ export class SyncEngine {
         console.log(`- Parse errors: ${syncErrors.length} (see .cv/sync-report.json for details)`);
       }
 
+      // Update manifold dimensions after full sync
+      await this.updateManifold();
+
       return syncState;
 
     } catch (error: any) {
@@ -391,6 +433,9 @@ export class SyncEngine {
       await this.saveSyncState(syncState);
 
       console.log(`Incremental sync completed in ${syncState.syncDuration}s`);
+
+      // Update manifold dimensions
+      await this.updateManifold(changedFiles);
 
       return syncState;
 
@@ -551,6 +596,23 @@ export class SyncEngine {
         await this.updateGraph(parsedFiles);
       }
 
+      // Generate delta summaries for changed files (if enabled, default: true)
+      let summaryStats: SummaryStats | undefined;
+      const generateSummaries = options.generateSummaries !== false;
+      if (generateSummaries && parsedFiles.length > 0 && this.vector && this.vector.isConnected()) {
+        console.log('Generating summaries for changed files...');
+        const summaryResult = await this.generateDeltaSummaries(parsedFiles, options.summaryCostControl);
+        summaryStats = {
+          generated: summaryResult.generated,
+          skipped: summaryResult.skipped,
+          llmCalls: summaryResult.llmCalls,
+          estimatedCostCents: summaryResult.estimatedCostCents,
+        };
+        if (summaryResult.generated > 0) {
+          console.log(`✓ Generated ${summaryResult.generated} summaries (${summaryResult.estimatedCostCents}¢ cost)`);
+        }
+      }
+
       // Sync commit history (if enabled)
       const syncCommits = options.syncCommits !== false; // default: true
       if (syncCommits) {
@@ -633,6 +695,7 @@ export class SyncEngine {
           symbolsCreated: stats.symbolCount,
           vectorsCreated: vectorCount
         },
+        summaryStats,
         errors: syncErrors,
         systemInfo: {
           nodeVersion: process.version,
@@ -646,9 +709,16 @@ export class SyncEngine {
       console.log(`- Added: ${delta.added.length}`);
       console.log(`- Modified: ${delta.modified.length}`);
       console.log(`- Deleted: ${delta.deleted.length}`);
+      if (summaryStats && summaryStats.generated > 0) {
+        console.log(`- Summaries: ${summaryStats.generated} generated`);
+      }
       if (syncErrors.length > 0) {
         console.log(`- Parse errors: ${syncErrors.length} (see .cv/sync-report.json for details)`);
       }
+
+      // Update manifold dimensions with changed files
+      const manifoldFiles = [...delta.added, ...delta.modified];
+      await this.updateManifold(manifoldFiles);
 
       return syncState;
 
@@ -1006,6 +1076,31 @@ export class SyncEngine {
     } catch (error: any) {
       console.error('Chunked sync failed:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Generate delta summaries for changed files only.
+   * Uses cost control to minimize LLM usage.
+   */
+  async generateDeltaSummaries(
+    parsedFiles: ParsedFile[],
+    costControl?: CostControlOptions
+  ): Promise<DeltaSummaryResult> {
+    if (!this.vector || !this.vector.isConnected()) {
+      return { generated: 0, skipped: 0, llmCalls: 0, estimatedCostCents: 0, errors: ['Vector manager not available'] };
+    }
+
+    try {
+      const summaryService = createHierarchicalSummaryService(
+        this.vector,
+        this.graph,
+        { useFallback: costControl?.costStrategy !== 'quality' }
+      );
+
+      return await summaryService.generateDeltaSummaries(parsedFiles, costControl);
+    } catch (error: any) {
+      return { generated: 0, skipped: 0, llmCalls: 0, estimatedCostCents: 0, errors: [error.message] };
     }
   }
 

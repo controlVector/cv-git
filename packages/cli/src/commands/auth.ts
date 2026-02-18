@@ -484,6 +484,29 @@ async function setupGitHub(credentials: CredentialManager, autoBrowser: boolean 
   console.log(chalk.bold.cyan('GitHub Authentication'));
   console.log(chalk.bold('──────────────────────────────────────────\n'));
 
+  const { method } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'method',
+      message: 'How would you like to authenticate with GitHub?',
+      choices: [
+        {
+          name: `${chalk.cyan('Personal Access Token')} ${chalk.gray('— Direct PAT, you manage the token')}`,
+          value: 'pat',
+        },
+        {
+          name: `${chalk.cyan('CV-Hub Proxy')} ${chalk.gray('— Authenticate via ControlFab, no PAT needed')}`,
+          value: 'proxy',
+        },
+      ],
+    },
+  ]);
+
+  if (method === 'proxy') {
+    await setupGitHubViaProxy(credentials, autoBrowser);
+    return;
+  }
+
   const url = 'https://github.com/settings/tokens/new?scopes=repo,workflow,write:packages';
 
   if (autoBrowser) {
@@ -531,12 +554,118 @@ async function setupGitHub(credentials: CredentialManager, autoBrowser: boolean 
       token,
       scopes,
       username: user.username,
+      metadata: { authMethod: 'direct' },
     });
 
     console.log(chalk.green('✅ GitHub authentication configured!\n'));
   } catch (error: any) {
     spinner.fail(chalk.red(`Token validation failed: ${error.message}`));
     console.log(chalk.yellow('\nPlease try again with a valid token.\n'));
+  }
+}
+
+async function setupGitHubViaProxy(credentials: CredentialManager, autoBrowser: boolean): Promise<void> {
+  console.log(chalk.gray('\nSetting up GitHub via CV-Hub proxy...\n'));
+
+  // Ensure CV-Hub auth exists
+  const allCreds = await credentials.list();
+  const cvHubCred = allCreds.find(
+    (c) => c.type === CredentialType.GIT_PLATFORM_TOKEN &&
+           c.metadata?.platform === 'cv-hub'
+  );
+
+  if (!cvHubCred) {
+    console.log(chalk.yellow('CV-Hub authentication required first.\n'));
+    await setupCVHub(credentials, autoBrowser);
+
+    // Re-check after setup
+    const updatedCreds = await credentials.list();
+    const newCvHub = updatedCreds.find(
+      (c) => c.type === CredentialType.GIT_PLATFORM_TOKEN &&
+             c.metadata?.platform === 'cv-hub'
+    );
+    if (!newCvHub) {
+      console.log(chalk.red('CV-Hub authentication was not completed. Cannot proceed with proxy setup.'));
+      return;
+    }
+  }
+
+  // Get CV-Hub credential for the API call
+  const hubCred = await credentials.getGitPlatformToken(GitPlatform.CV_HUB);
+  if (!hubCred) {
+    console.log(chalk.red('CV-Hub token not found.'));
+    return;
+  }
+
+  const hubUrl = cvHubCred?.metadata?.hubUrl || 'https://api.controlfab.ai';
+  const spinner = ora('Connecting GitHub via CV-Hub proxy...').start();
+
+  try {
+    const response = await fetch(`${hubUrl}/api/v1/git-proxy/connect`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${hubCred}`,
+      },
+      body: JSON.stringify({
+        platform: 'github',
+        scopes: ['repo', 'workflow', 'write:packages'],
+      }),
+    });
+
+    if (response.status === 403) {
+      const body = await response.json() as { redirect_url?: string; message?: string };
+      spinner.warn(chalk.yellow('GitHub connection required in CV-Hub'));
+      if (body.redirect_url) {
+        console.log(chalk.gray('\nPlease connect GitHub in CV-Hub first:'));
+        console.log(chalk.blue(`  ${body.redirect_url}`));
+        if (autoBrowser) {
+          await openBrowser(body.redirect_url);
+        }
+      } else {
+        console.log(chalk.gray('\n' + (body.message || 'Please connect GitHub in the CV-Hub web UI first.')));
+      }
+      return;
+    }
+
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => ({})) as { message?: string };
+      throw new Error(errBody.message || `HTTP ${response.status}`);
+    }
+
+    const data = await response.json() as {
+      token: string;
+      expires_in?: number;
+      proxy_token_id?: string;
+      username?: string;
+      scopes?: string[];
+    };
+
+    const expiresAt = data.expires_in
+      ? new Date(Date.now() + data.expires_in * 1000)
+      : undefined;
+
+    await credentials.store<GitPlatformTokenCredential>({
+      type: CredentialType.GIT_PLATFORM_TOKEN,
+      name: 'github-proxy',
+      platform: GitPlatform.GITHUB,
+      token: data.token,
+      scopes: data.scopes || ['repo'],
+      username: data.username,
+      expiresAt,
+      metadata: {
+        authMethod: 'cv-hub-proxy',
+        hubUrl,
+        cvHubCredentialName: cvHubCred?.name,
+        proxyTokenId: data.proxy_token_id,
+      },
+    });
+
+    spinner.succeed(chalk.green(`GitHub connected via CV-Hub proxy${data.username ? ` (${data.username})` : ''}`));
+    console.log(chalk.green('✅ GitHub proxy authentication configured!\n'));
+  } catch (error: any) {
+    spinner.fail(chalk.red(`Proxy connection failed: ${error.message}`));
+    console.log(chalk.yellow('\nPlease try again or use a Personal Access Token instead.\n'));
   }
 }
 
@@ -757,6 +886,29 @@ async function setupGitLab(credentials: CredentialManager, autoBrowser: boolean 
   console.log(chalk.bold.cyan('GitLab Authentication'));
   console.log(chalk.bold('──────────────────────────────────────────\n'));
 
+  const { method } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'method',
+      message: 'How would you like to authenticate with GitLab?',
+      choices: [
+        {
+          name: `${chalk.cyan('Access Token')} ${chalk.gray('— Direct PAT/Group/Project token')}`,
+          value: 'token',
+        },
+        {
+          name: `${chalk.cyan('CV-Hub Proxy')} ${chalk.gray('— Authenticate via ControlFab, no token needed')}`,
+          value: 'proxy',
+        },
+      ],
+    },
+  ]);
+
+  if (method === 'proxy') {
+    await setupGitLabViaProxy(credentials, autoBrowser);
+    return;
+  }
+
   console.log(chalk.yellow('GitLab Token Types:\n'));
   console.log(chalk.green('  Personal Access Token (Recommended)'));
   console.log(chalk.gray('    - Full access to all your projects and groups'));
@@ -917,6 +1069,109 @@ async function setupGitLab(credentials: CredentialManager, autoBrowser: boolean 
   } catch (error: any) {
     spinner.fail(chalk.red(`Token validation failed: ${error.message}`));
     console.log(chalk.yellow('\nPlease try again with a valid token.\n'));
+  }
+}
+
+async function setupGitLabViaProxy(credentials: CredentialManager, autoBrowser: boolean): Promise<void> {
+  console.log(chalk.gray('\nSetting up GitLab via CV-Hub proxy...\n'));
+
+  // Ensure CV-Hub auth exists
+  const allCreds = await credentials.list();
+  const cvHubCred = allCreds.find(
+    (c) => c.type === CredentialType.GIT_PLATFORM_TOKEN &&
+           c.metadata?.platform === 'cv-hub'
+  );
+
+  if (!cvHubCred) {
+    console.log(chalk.yellow('CV-Hub authentication required first.\n'));
+    await setupCVHub(credentials, autoBrowser);
+
+    const updatedCreds = await credentials.list();
+    const newCvHub = updatedCreds.find(
+      (c) => c.type === CredentialType.GIT_PLATFORM_TOKEN &&
+             c.metadata?.platform === 'cv-hub'
+    );
+    if (!newCvHub) {
+      console.log(chalk.red('CV-Hub authentication was not completed. Cannot proceed with proxy setup.'));
+      return;
+    }
+  }
+
+  const hubToken = await credentials.getGitPlatformToken(GitPlatform.CV_HUB);
+  if (!hubToken) {
+    console.log(chalk.red('CV-Hub token not found.'));
+    return;
+  }
+
+  const hubUrl = cvHubCred?.metadata?.hubUrl || 'https://api.controlfab.ai';
+  const spinner = ora('Connecting GitLab via CV-Hub proxy...').start();
+
+  try {
+    const response = await fetch(`${hubUrl}/api/v1/git-proxy/connect`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${hubToken}`,
+      },
+      body: JSON.stringify({
+        platform: 'gitlab',
+        scopes: ['api', 'read_user', 'read_repository', 'write_repository'],
+      }),
+    });
+
+    if (response.status === 403) {
+      const body = await response.json() as { redirect_url?: string; message?: string };
+      spinner.warn(chalk.yellow('GitLab connection required in CV-Hub'));
+      if (body.redirect_url) {
+        console.log(chalk.gray('\nPlease connect GitLab in CV-Hub first:'));
+        console.log(chalk.blue(`  ${body.redirect_url}`));
+        if (autoBrowser) {
+          await openBrowser(body.redirect_url);
+        }
+      } else {
+        console.log(chalk.gray('\n' + (body.message || 'Please connect GitLab in the CV-Hub web UI first.')));
+      }
+      return;
+    }
+
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => ({})) as { message?: string };
+      throw new Error(errBody.message || `HTTP ${response.status}`);
+    }
+
+    const data = await response.json() as {
+      token: string;
+      expires_in?: number;
+      proxy_token_id?: string;
+      username?: string;
+      scopes?: string[];
+    };
+
+    const expiresAt = data.expires_in
+      ? new Date(Date.now() + data.expires_in * 1000)
+      : undefined;
+
+    await credentials.store<GitPlatformTokenCredential>({
+      type: CredentialType.GIT_PLATFORM_TOKEN,
+      name: 'gitlab-proxy',
+      platform: GitPlatform.GITLAB,
+      token: data.token,
+      scopes: data.scopes || ['api'],
+      username: data.username,
+      expiresAt,
+      metadata: {
+        authMethod: 'cv-hub-proxy',
+        hubUrl,
+        cvHubCredentialName: cvHubCred?.name,
+        proxyTokenId: data.proxy_token_id,
+      },
+    });
+
+    spinner.succeed(chalk.green(`GitLab connected via CV-Hub proxy${data.username ? ` (${data.username})` : ''}`));
+    console.log(chalk.green('✅ GitLab proxy authentication configured!\n'));
+  } catch (error: any) {
+    spinner.fail(chalk.red(`Proxy connection failed: ${error.message}`));
+    console.log(chalk.yellow('\nPlease try again or use an Access Token instead.\n'));
   }
 }
 

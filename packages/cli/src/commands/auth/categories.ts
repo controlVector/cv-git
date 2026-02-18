@@ -43,12 +43,12 @@ export const AUTH_CATEGORIES: AuthCategory[] = [
       {
         id: 'github',
         name: 'GitHub',
-        description: 'GitHub Personal Access Token',
+        description: 'GitHub PAT or CV-Hub proxy authentication',
       },
       {
         id: 'gitlab',
         name: 'GitLab',
-        description: 'GitLab Personal/Group/Project Access Token',
+        description: 'GitLab Access Token or CV-Hub proxy authentication',
       },
       {
         id: 'bitbucket',

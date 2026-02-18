@@ -214,28 +214,181 @@ export class CredentialManager {
 
   /**
    * Get git platform token (for any platform: GitHub, CV Platform, etc.)
+   *
+   * Resolution order for platform-specific lookups:
+   * 1. Direct credential (authMethod !== 'cv-hub-proxy') — preferred
+   * 2. Proxy credential (authMethod === 'cv-hub-proxy') — fallback
+   * 3. On-demand fetch from CV-Hub if connected — last resort
    */
   async getGitPlatformToken(platform?: GitPlatform): Promise<string | null> {
     await this.init();
 
     if (platform) {
-      // Get token for specific platform
       const metadata = await this.loadMetadata();
-      const match = metadata.find(
+      const platformCreds = metadata.filter(
         (m) =>
           m.type === CredentialType.GIT_PLATFORM_TOKEN &&
-          (m.metadata?.platform === platform)
+          m.metadata?.platform === platform
       );
 
-      if (!match) return null;
+      // 1. Prefer direct credentials
+      const directMatch = platformCreds.find(
+        (m) => m.metadata?.authMethod !== 'cv-hub-proxy'
+      );
+      if (directMatch) {
+        const cred = await this.retrieve(CredentialType.GIT_PLATFORM_TOKEN, directMatch.name);
+        return cred ? (cred as GitPlatformTokenCredential).token : null;
+      }
 
-      const cred = await this.retrieve(CredentialType.GIT_PLATFORM_TOKEN, match.name);
-      return cred ? (cred as GitPlatformTokenCredential).token : null;
+      // 2. Fall back to proxy credentials
+      const proxyMatch = platformCreds.find(
+        (m) => m.metadata?.authMethod === 'cv-hub-proxy'
+      );
+      if (proxyMatch) {
+        const cred = await this.retrieve(CredentialType.GIT_PLATFORM_TOKEN, proxyMatch.name) as GitPlatformTokenCredential | null;
+        if (cred) {
+          // Auto-refresh if expired
+          if (cred.expiresAt && new Date(cred.expiresAt) < new Date()) {
+            const refreshed = await this.refreshProxiedToken(platform, cred);
+            return refreshed;
+          }
+          return cred.token;
+        }
+      }
+
+      // 3. Try on-demand fetch from CV-Hub
+      const proxiedToken = await this.getProxiedToken(platform);
+      if (proxiedToken) return proxiedToken;
+
+      return null;
     }
 
     // Get any git platform token (first one found)
     const cred = await this.retrieve(CredentialType.GIT_PLATFORM_TOKEN);
     return cred ? (cred as GitPlatformTokenCredential).token : null;
+  }
+
+  /**
+   * Fetch a platform token on-demand from CV-Hub proxy
+   */
+  private async getProxiedToken(platform: GitPlatform): Promise<string | null> {
+    try {
+      // Find CV-Hub credential
+      const metadata = await this.loadMetadata();
+      const cvHubCred = metadata.find(
+        (m) => m.type === CredentialType.GIT_PLATFORM_TOKEN &&
+               m.metadata?.platform === 'cv-hub'
+      );
+      if (!cvHubCred) return null;
+
+      const cred = await this.retrieve(CredentialType.GIT_PLATFORM_TOKEN, cvHubCred.name) as GitPlatformTokenCredential | null;
+      if (!cred) return null;
+
+      const hubUrl = cred.metadata?.hubUrl || 'https://api.controlfab.ai';
+      const response = await fetch(`${hubUrl}/api/v1/git-proxy/token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${cred.token}`,
+        },
+        body: JSON.stringify({ platform }),
+      });
+
+      if (!response.ok) return null;
+
+      const data = await response.json() as {
+        token: string;
+        expires_in?: number;
+        proxy_token_id?: string;
+        username?: string;
+        scopes?: string[];
+      };
+
+      // Store the proxied token for future use
+      const expiresAt = data.expires_in
+        ? new Date(Date.now() + data.expires_in * 1000)
+        : undefined;
+
+      await this.store<GitPlatformTokenCredential>({
+        type: CredentialType.GIT_PLATFORM_TOKEN,
+        name: `${platform}-proxy`,
+        platform,
+        token: data.token,
+        scopes: data.scopes || [],
+        username: data.username,
+        expiresAt,
+        metadata: {
+          authMethod: 'cv-hub-proxy',
+          hubUrl,
+          cvHubCredentialName: cvHubCred.name,
+          proxyTokenId: data.proxy_token_id,
+        },
+      });
+
+      return data.token;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Refresh an expired proxied token via CV-Hub
+   */
+  private async refreshProxiedToken(
+    platform: GitPlatform,
+    expiredCred: GitPlatformTokenCredential
+  ): Promise<string | null> {
+    try {
+      const hubUrl = expiredCred.metadata?.hubUrl || 'https://api.controlfab.ai';
+      const cvHubCredName = expiredCred.metadata?.cvHubCredentialName;
+      if (!cvHubCredName) return null;
+
+      // Get CV-Hub access token
+      const cvHubCred = await this.retrieve(CredentialType.GIT_PLATFORM_TOKEN, cvHubCredName) as GitPlatformTokenCredential | null;
+      if (!cvHubCred) return null;
+
+      const response = await fetch(`${hubUrl}/api/v1/git-proxy/refresh`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${cvHubCred.token}`,
+        },
+        body: JSON.stringify({
+          platform,
+          proxy_token_id: expiredCred.metadata?.proxyTokenId,
+        }),
+      });
+
+      if (!response.ok) return null;
+
+      const data = await response.json() as {
+        token: string;
+        expires_in?: number;
+        proxy_token_id?: string;
+      };
+
+      // Update stored credential
+      const expiresAt = data.expires_in
+        ? new Date(Date.now() + data.expires_in * 1000)
+        : undefined;
+
+      await this.update<GitPlatformTokenCredential>(
+        CredentialType.GIT_PLATFORM_TOKEN,
+        expiredCred.name,
+        {
+          token: data.token,
+          expiresAt,
+          metadata: {
+            ...expiredCred.metadata,
+            proxyTokenId: data.proxy_token_id || expiredCred.metadata?.proxyTokenId,
+          },
+        }
+      );
+
+      return data.token;
+    } catch {
+      return null;
+    }
   }
 
   /**
