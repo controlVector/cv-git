@@ -6,6 +6,7 @@
  */
 
 import { promises as fs } from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
 export interface LockOptions {
@@ -62,7 +63,7 @@ export async function acquireLock(
       // Try to create lock file exclusively
       const lockContent: LockContent = {
         pid: process.pid,
-        hostname: require('os').hostname(),
+        hostname: os.hostname(),
         createdAt: new Date().toISOString(),
       };
 

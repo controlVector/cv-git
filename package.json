@@ -24,6 +24,10 @@
     "benchmark:json": "node tests/benchmarks/comprehensive-benchmark.mjs --json",
     "benchmark:compare": "node tests/benchmarks/comprehensive-benchmark.mjs --compare",
     "benchmark:baseline": "node tests/benchmarks/comprehensive-benchmark.mjs --save-baseline",
+    "benchmark:manifold": "node tests/benchmarks/manifold-benchmark.mjs",
+    "benchmark:manifold:json": "node tests/benchmarks/manifold-benchmark.mjs --json",
+    "benchmark:manifold:compare": "node tests/benchmarks/manifold-benchmark.mjs --compare",
+    "benchmark:manifold:baseline": "node tests/benchmarks/manifold-benchmark.mjs --save-baseline",
     "lint": "pnpm -r lint",
     "clean": "pnpm -r clean && rm -rf node_modules coverage",
     "cv": "node packages/cli/dist/index.js"
