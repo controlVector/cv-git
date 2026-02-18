@@ -121,7 +121,7 @@ export class TraversalService {
 
   constructor(
     private graph: GraphManager,
-    private vector: VectorManager,
+    private vector: VectorManager | null,
     private graphService: GraphService,
     private sessionService: SessionService,
     options?: TraversalServiceOptions
@@ -445,13 +445,16 @@ export class TraversalService {
     if (symbolResult) {
       const { symbol } = symbolResult;
 
-      // Get the code for this symbol (use cache for vectors)
-      const vectorCacheKey = `vectors:${symbol.qualifiedName}`;
-      let vectors = this.cache?.get<any>(vectorCacheKey);
-      if (!vectors) {
-        vectors = await this.graphService.getVectorsForSymbol(symbol.qualifiedName, this.vector);
-        if (this.cache && vectors) {
-          this.cache.set(vectorCacheKey, vectors);
+      // Get the code for this symbol (use cache for vectors, requires vector)
+      let vectors: any = null;
+      if (this.vector) {
+        const vectorCacheKey = `vectors:${symbol.qualifiedName}`;
+        vectors = this.cache?.get<any>(vectorCacheKey);
+        if (!vectors) {
+          vectors = await this.graphService.getVectorsForSymbol(symbol.qualifiedName, this.vector);
+          if (this.cache && vectors) {
+            this.cache.set(vectorCacheKey, vectors);
+          }
         }
       }
       if (vectors && vectors.vectors.length > 0) {
@@ -527,6 +530,7 @@ export class TraversalService {
     }
 
     try {
+      if (!this.vector) return [];
       // Search for similar symbol summaries (level 1 = symbol level)
       const results = await this.vector.searchByLevel(summary, 1, {
         limit: this.options.maxRelatedSymbols + 1 // +1 because current symbol might be in results
@@ -632,11 +636,13 @@ export class TraversalService {
   private async getRepoContext(budget: number): Promise<TraversalContextResult['context']> {
     const context: TraversalContextResult['context'] = {};
 
-    // Get repo summary (cached)
-    const repoId = this.vector.getRepoId() || 'default';
-    const summary = await this.getCachedSummary(`repo:${repoId}`);
-    if (summary) {
-      context.summary = summary.summary;
+    // Get repo summary (cached, requires vector)
+    if (this.vector) {
+      const repoId = this.vector.getRepoId() || 'default';
+      const summary = await this.getCachedSummary(`repo:${repoId}`);
+      if (summary) {
+        context.summary = summary.summary;
+      }
     }
 
     // Get top-level modules (already cached in getModules)
@@ -869,6 +875,7 @@ export class TraversalService {
       if (cached !== undefined) return cached;
     }
 
+    if (!this.vector) return null;
     const summary = await this.vector.getSummary(summaryId);
 
     // Cache result (even nulls to avoid repeated lookups)
@@ -907,7 +914,7 @@ export class TraversalService {
  */
 export function createTraversalService(
   graph: GraphManager,
-  vector: VectorManager,
+  vector: VectorManager | null,
   graphService: GraphService,
   sessionService: SessionService,
   options?: TraversalServiceOptions

@@ -90,28 +90,10 @@ export async function handleTraverseContext(args: TraverseContextToolArgs): Prom
     // Load configuration
     const config = await configManager.load(repoRoot);
 
-    // Get API keys
-    const openaiApiKey = config.ai.apiKey || await getOpenAIApiKey();
-    const openrouterApiKey = await getOpenRouterApiKey();
-
-    if (!openaiApiKey && !openrouterApiKey) {
-      return errorResult(
-        'No embedding API key found. Run `cv auth setup openai` or `cv auth setup openrouter`.'
-      );
-    }
-
     // Get service URLs
     const serviceUrls = await getServiceUrls(config);
 
-    // Initialize services
-    const vector = createVectorManager({
-      url: serviceUrls.qdrant,
-      openrouterApiKey,
-      openaiApiKey,
-      collections: config.vector.collections,
-      repoId: path.basename(repoRoot)
-    });
-
+    // Initialize graph (required)
     let graph;
     try {
       const isolated = await createIsolatedGraphManager(repoRoot);
@@ -124,14 +106,25 @@ export async function handleTraverseContext(args: TraverseContextToolArgs): Prom
       );
     }
 
+    // Initialize vector (optional — traversal degrades gracefully without it)
+    let vector: ReturnType<typeof createVectorManager> | null = null;
     try {
-      await vector.connect();
-    } catch (vectorError: any) {
-      await graph.close();
-      return errorResult(
-        'Qdrant unavailable. Start with: docker run -d -p 6333:6333 qdrant/qdrant\n' +
-        `Error: ${vectorError.message}`
-      );
+      const openaiApiKey = config.ai.apiKey || await getOpenAIApiKey();
+      const openrouterApiKey = await getOpenRouterApiKey();
+
+      if (openaiApiKey || openrouterApiKey) {
+        vector = createVectorManager({
+          url: serviceUrls.qdrant,
+          openrouterApiKey,
+          openaiApiKey,
+          collections: config.vector.collections,
+          repoId: path.basename(repoRoot)
+        });
+        await vector.connect();
+      }
+    } catch {
+      // Qdrant unavailable — continue without vector search
+      vector = null;
     }
 
     // Create services
@@ -202,7 +195,7 @@ export async function handleTraverseContext(args: TraverseContextToolArgs): Prom
     }
 
     // Cleanup
-    await vector.close();
+    if (vector) await vector.close();
     await graph.close();
     await sessionService.close();
 
