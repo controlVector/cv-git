@@ -12,6 +12,7 @@ import type { GitPlatformAdapter } from './adapter.js';
 import { GitHubAdapter } from './adapters/github.js';
 import { GitLabAdapter } from './adapters/gitlab.js';
 import { BitbucketAdapter } from './adapters/bitbucket.js';
+import { CVHubAdapter } from './adapters/cv-hub.js';
 
 /**
  * Platform configuration
@@ -58,6 +59,12 @@ export function createPlatformAdapter(
         webUrl: config.webUrl,
       });
 
+    case GitPlatform.CV_HUB:
+      return new CVHubAdapter(credentials, {
+        apiUrl: config.apiUrl,
+        webUrl: config.webUrl,
+      });
+
     default:
       throw new Error(`Unknown platform type: ${config.type}`);
   }
@@ -78,6 +85,11 @@ export function detectPlatformFromRemote(remoteUrl: string): GitPlatform {
     return GitPlatform.BITBUCKET;
   } else if (remoteUrl.includes('cv-platform.com')) {
     return GitPlatform.CV_PLATFORM;
+  } else if (
+    remoteUrl.includes('hub.controlvector.io') ||
+    remoteUrl.includes('controlfab.ai')
+  ) {
+    return GitPlatform.CV_HUB;
   }
 
   // Default to GitHub if can't detect
@@ -100,6 +112,8 @@ export function getDefaultApiUrl(platform: GitPlatform): string {
       return 'https://gitlab.com/api/v4';
     case GitPlatform.BITBUCKET:
       return 'https://api.bitbucket.org/2.0';
+    case GitPlatform.CV_HUB:
+      return 'https://api.controlfab.ai/v1';
     default:
       throw new Error(`Unknown platform: ${platform}`);
   }
@@ -121,6 +135,8 @@ export function getDefaultWebUrl(platform: GitPlatform): string {
       return 'https://gitlab.com';
     case GitPlatform.BITBUCKET:
       return 'https://bitbucket.org';
+    case GitPlatform.CV_HUB:
+      return 'https://hub.controlvector.io';
     default:
       throw new Error(`Unknown platform: ${platform}`);
   }

@@ -47,3 +47,4 @@ export {
 export { GitHubAdapter } from './adapters/github.js';
 export { GitLabAdapter } from './adapters/gitlab.js';
 export { BitbucketAdapter } from './adapters/bitbucket.js';
+export { CVHubAdapter } from './adapters/cv-hub.js';
