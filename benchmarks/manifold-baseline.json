@@ -1,0 +1,227 @@
+{
+  "timestamp": "2026-02-18T17:05:34.342Z",
+  "nodeVersion": "v18.19.1",
+  "platform": "linux",
+  "arch": "x64",
+  "benchmarks": {
+    "lifecycle": [
+      {
+        "name": "manifold:init:cold",
+        "iterations": 5,
+        "avgMs": 0.202,
+        "minMs": 0.162,
+        "maxMs": 0.267,
+        "stdDev": 0.042,
+        "opsPerSecond": 4941.06,
+        "skipped": false
+      },
+      {
+        "name": "manifold:init:warm",
+        "iterations": 10,
+        "avgMs": 0.24,
+        "minMs": 0.157,
+        "maxMs": 0.655,
+        "stdDev": 0.142,
+        "opsPerSecond": 4175.22,
+        "skipped": false
+      }
+    ],
+    "refresh": [
+      {
+        "name": "manifold:refreshAll",
+        "iterations": 5,
+        "avgMs": 67.695,
+        "minMs": 64.589,
+        "maxMs": 72.231,
+        "stdDev": 2.588,
+        "opsPerSecond": 14.77,
+        "skipped": false
+      },
+      {
+        "name": "manifold:update:structural",
+        "iterations": 10,
+        "avgMs": 3.595,
+        "minMs": 1.998,
+        "maxMs": 6.257,
+        "stdDev": 1.151,
+        "opsPerSecond": 278.14,
+        "skipped": false
+      },
+      {
+        "name": "manifold:update:semantic",
+        "iterations": 10,
+        "avgMs": 0.009,
+        "minMs": 0,
+        "maxMs": 0.084,
+        "stdDev": 0.025,
+        "opsPerSecond": 111879.36,
+        "skipped": false
+      },
+      {
+        "name": "manifold:update:temporal",
+        "iterations": 10,
+        "avgMs": 43.219,
+        "minMs": 41.757,
+        "maxMs": 45.501,
+        "stdDev": 1.036,
+        "opsPerSecond": 23.14,
+        "skipped": false
+      },
+      {
+        "name": "manifold:update:requirements",
+        "iterations": 10,
+        "avgMs": 1.187,
+        "minMs": 0.238,
+        "maxMs": 2.631,
+        "stdDev": 0.727,
+        "opsPerSecond": 842.49,
+        "skipped": false
+      },
+      {
+        "name": "manifold:update:summary",
+        "iterations": 10,
+        "avgMs": 0.038,
+        "minMs": 0.015,
+        "maxMs": 0.095,
+        "stdDev": 0.026,
+        "opsPerSecond": 26641.59,
+        "skipped": false
+      },
+      {
+        "name": "manifold:update:navigational",
+        "iterations": 10,
+        "avgMs": 0.002,
+        "minMs": 0.001,
+        "maxMs": 0.004,
+        "stdDev": 0.001,
+        "opsPerSecond": 516129.92,
+        "skipped": false
+      },
+      {
+        "name": "manifold:update:session",
+        "iterations": 10,
+        "avgMs": 7.867,
+        "minMs": 5.604,
+        "maxMs": 10.679,
+        "stdDev": 1.587,
+        "opsPerSecond": 127.12,
+        "skipped": false
+      },
+      {
+        "name": "manifold:update:intent",
+        "iterations": 10,
+        "avgMs": 3.989,
+        "minMs": 3.635,
+        "maxMs": 4.25,
+        "stdDev": 0.193,
+        "opsPerSecond": 250.71,
+        "skipped": false
+      },
+      {
+        "name": "manifold:update:impact",
+        "iterations": 10,
+        "avgMs": 2.909,
+        "minMs": 1.11,
+        "maxMs": 4.789,
+        "stdDev": 1.195,
+        "opsPerSecond": 343.78,
+        "skipped": false
+      }
+    ],
+    "query": [
+      {
+        "name": "manifold:rank:structural",
+        "iterations": 20,
+        "avgMs": 0.02,
+        "minMs": 0.008,
+        "maxMs": 0.161,
+        "stdDev": 0.034,
+        "opsPerSecond": 50534.91,
+        "skipped": false
+      },
+      {
+        "name": "manifold:rank:semantic",
+        "iterations": 20,
+        "avgMs": 0.008,
+        "minMs": 0.007,
+        "maxMs": 0.01,
+        "stdDev": 0.001,
+        "opsPerSecond": 124939.89,
+        "skipped": false
+      },
+      {
+        "name": "manifold:rank:temporal",
+        "iterations": 20,
+        "avgMs": 0.008,
+        "minMs": 0.007,
+        "maxMs": 0.014,
+        "stdDev": 0.002,
+        "opsPerSecond": 121242.25,
+        "skipped": false
+      },
+      {
+        "name": "manifold:assembleContext",
+        "iterations": 5,
+        "avgMs": 0.471,
+        "minMs": 0.156,
+        "maxMs": 1.531,
+        "stdDev": 0.532,
+        "opsPerSecond": 2121.97,
+        "skipped": false
+      }
+    ],
+    "persistence": [
+      {
+        "name": "manifold:save",
+        "iterations": 10,
+        "avgMs": 0.176,
+        "minMs": 0.145,
+        "maxMs": 0.291,
+        "stdDev": 0.04,
+        "opsPerSecond": 5666.11,
+        "skipped": false
+      },
+      {
+        "name": "manifold:load",
+        "iterations": 10,
+        "avgMs": 0.074,
+        "minMs": 0.067,
+        "maxMs": 0.089,
+        "stdDev": 0.005,
+        "opsPerSecond": 13457.74,
+        "skipped": false
+      }
+    ],
+    "memory": [
+      {
+        "name": "manifold:memory",
+        "heapUsedMB": 37.33,
+        "rssMB": 116.46,
+        "deltaMB": 2.7,
+        "skipped": false
+      }
+    ],
+    "mcp": [
+      {
+        "name": "manifold:mcp:autocontext",
+        "iterations": 3,
+        "avgMs": 321.199,
+        "minMs": 314.032,
+        "maxMs": 325.195,
+        "stdDev": 5.079,
+        "opsPerSecond": 3.11,
+        "skipped": false
+      }
+    ],
+    "cache": [
+      {
+        "name": "manifold:cache:repeat",
+        "iterations": 5,
+        "avgFirstMs": 0.306,
+        "avgSecondMs": 0.218,
+        "ratio": 1.4,
+        "skipped": false
+      }
+    ]
+  }
+}
