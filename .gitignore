@@ -69,6 +69,7 @@ coverage/
 # Benchmark output (not test files)
 benchmarks/results/
 benchmarks/baseline.json
+benchmarks/manifold-baseline.json
 benchmark-results.json
 
 # Temporary files
