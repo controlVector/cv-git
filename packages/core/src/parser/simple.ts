@@ -75,6 +75,20 @@ export class SimpleParser implements ILanguageParser {
           import: /import\s+(?:static\s+)?([^;]+);/gm,
           export: /public\s+(?:class|interface|enum)\s+(\w+)/gm
         };
+      case 'c':
+        return {
+          function: /^(?:static\s+)?(?:inline\s+)?(?:const\s+)?(?:unsigned\s+)?(?:signed\s+)?(?:void|int|char|short|long|float|double|size_t|bool|_Bool|\w+_t|\w+\s*\*)\s+\*?(\w+)\s*\([^)]*\)\s*\{/gm,
+          class: /(?:typedef\s+)?struct\s+(\w+)|typedef\s+(?:struct|union|enum)\s*\{[^}]*\}\s*(\w+)/gm,
+          import: /#include\s+[<"]([^>"]+)[>"]/gm,
+          export: /^(?!static\s)(?:void|int|char|short|long|float|double|size_t|bool|_Bool|\w+_t|\w+\s*\*)\s+\*?(\w+)\s*\(/gm
+        };
+      case 'cpp':
+        return {
+          function: /^(?:static\s+)?(?:inline\s+)?(?:virtual\s+)?(?:const\s+)?(?:unsigned\s+)?(?:void|int|char|short|long|float|double|size_t|bool|auto|std::\w+|\w+_t|\w+\s*\*)\s+\*?(?:(\w+)::)?(\w+)\s*\([^)]*\)\s*(?:const\s*)?(?:override\s*)?(?:noexcept\s*)?\{/gm,
+          class: /(?:class|struct)\s+(\w+)(?:\s*:\s*(?:public|protected|private)\s+\w+)?/gm,
+          import: /#include\s+[<"]([^>"]+)[>"]/gm,
+          export: /^(?!static\s)(?:class|struct)\s+(\w+)/gm
+        };
       default:
         return {
           function: /function\s+(\w+)/gm,
@@ -253,6 +267,7 @@ export class SimpleParser implements ILanguageParser {
   private getImportSource(match: RegExpExecArray): string {
     // For JS/TS: match[4] is the source path
     // For Python: match[1] is from source, match[2] is what's imported
+    // For C/C++: match[1] is the header path from #include
     // For others: match[1] is typically the source
     if (this.config.language === 'typescript' || this.config.language === 'javascript') {
       return match[4] || match[0];
@@ -323,7 +338,9 @@ export function createSimpleParsers(): Map<string, ILanguageParser> {
     { language: 'python', extensions: ['.py', '.pyi'] },
     { language: 'go', extensions: ['.go'] },
     { language: 'rust', extensions: ['.rs'] },
-    { language: 'java', extensions: ['.java'] }
+    { language: 'java', extensions: ['.java'] },
+    { language: 'c', extensions: ['.c', '.h'] },
+    { language: 'cpp', extensions: ['.cpp', '.cc', '.cxx', '.hpp', '.hxx', '.hh'] },
   ];
 
   for (const config of configs) {

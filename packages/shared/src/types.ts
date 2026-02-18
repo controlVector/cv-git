@@ -678,6 +678,7 @@ export interface CVConfig {
     root: string;
     name: string;
     initDate: string;
+    repoId?: string;
   };
   llm: {
     provider: 'anthropic' | 'openai' | 'ollama';

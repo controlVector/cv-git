@@ -38,7 +38,7 @@ export const AUTH_CATEGORIES: AuthCategory[] = [
   {
     id: 'git',
     name: 'Git Platforms',
-    description: 'Git hosting and version control (GitHub, GitLab, Bitbucket)',
+    description: 'Git hosting and version control (GitHub, GitLab, Bitbucket, CV-Hub)',
     providers: [
       {
         id: 'github',
@@ -54,6 +54,11 @@ export const AUTH_CATEGORIES: AuthCategory[] = [
         id: 'bitbucket',
         name: 'Bitbucket',
         description: 'Bitbucket App Password',
+      },
+      {
+        id: 'cv-hub',
+        name: 'CV-Hub',
+        description: 'Control Fabric code hosting (OAuth Device Flow)',
       },
     ],
   },

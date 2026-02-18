@@ -45,6 +45,7 @@ import {
   testDigitalOceanSpaces,
 } from './auth/devops/digitalocean.js';
 import { setupNPM, testNPM, configureNPMCLI } from './auth/publish/npm.js';
+import { setupCVHub, testCVHub } from './auth/git/cv-hub.js';
 import { addGlobalOptions } from '../utils/output.js';
 
 export function authCommand(): Command {
@@ -278,6 +279,9 @@ async function runSetup(
     case 'bitbucket':
       await setupBitbucket(credentials, autoBrowser);
       return true;
+    case 'cv-hub':
+      await setupCVHub(credentials, autoBrowser);
+      return true;
 
     // AI providers
     case 'anthropic':
@@ -372,6 +376,12 @@ async function runTest(service: string, credentials: CredentialManager): Promise
         break;
       }
 
+      case 'cv-hub': {
+        spinner.stop();
+        await testCVHub(credentials);
+        break;
+      }
+
       case 'anthropic': {
         const key = await credentials.getAnthropicKey();
         if (!key) {
@@ -454,7 +464,7 @@ async function runTest(service: string, credentials: CredentialManager): Promise
       default:
         spinner.fail(chalk.red(`Unknown service: ${service}`));
         console.log(chalk.gray('\nAvailable services:'));
-        console.log(chalk.gray('  Git: github, gitlab, bitbucket'));
+        console.log(chalk.gray('  Git: github, gitlab, bitbucket, cv-hub'));
         console.log(chalk.gray('  AI: anthropic, openai, openrouter'));
         console.log(chalk.gray('  DNS: cloudflare'));
         console.log(chalk.gray('  DevOps: aws, digitalocean, digitalocean-spaces'));

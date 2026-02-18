@@ -54,6 +54,8 @@ export class CodeParser {
     if (treeSitterAvailable) {
       try {
         this.initializeTreeSitterParsers();
+        // Also register simple parsers for languages tree-sitter doesn't cover (C, C++, etc.)
+        this.registerMissingSimpleParsers();
         return;
       } catch (error: any) {
         treeSitterAvailable = false;
@@ -65,6 +67,18 @@ export class CodeParser {
 
     // Fall back to simple parsers
     this.initializeSimpleParsers();
+  }
+
+  /**
+   * Register simple parsers for languages not covered by tree-sitter
+   */
+  private registerMissingSimpleParsers(): void {
+    const simpleParsers = createSimpleParsers();
+    for (const [language, parser] of simpleParsers) {
+      if (!this.parsers.has(language)) {
+        this.registerParser(language, parser);
+      }
+    }
   }
 
   /**
@@ -231,10 +245,10 @@ export function createParser(): CodeParser {
 }
 
 // Re-export base classes for extending
+// NOTE: Tree-sitter parser files (typescript, python, go, rust, java) are NOT
+// re-exported here because their top-level `import Parser from 'tree-sitter'`
+// would force esbuild to eagerly initialize the native modules at bundle load
+// time, crashing the CLI before Commander can process --version/--help.
+// They are loaded dynamically via require() inside initializeTreeSitterParsers().
 export { ILanguageParser, BaseLanguageParser, TreeSitterNode } from './base.js';
-export { TypeScriptParser, createTypeScriptParser } from './typescript.js';
-export { PythonParser, createPythonParser } from './python.js';
-export { GoParser, createGoParser } from './go.js';
-export { RustParser, createRustParser } from './rust.js';
-export { JavaParser, createJavaParser } from './java.js';
 export { MarkdownParser, createMarkdownParser, MarkdownParserConfig } from './markdown.js';

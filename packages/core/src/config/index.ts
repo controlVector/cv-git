@@ -6,6 +6,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { CVConfig, ConfigError } from '@cv-git/shared';
 import { getCVDir, ensureDir, loadSharedCredentials } from '@cv-git/shared';
+import { generateRepoId, getGraphDatabaseName } from '../storage/repo-id.js';
 
 // Re-export service URL utilities
 export * from './service-urls.js';
@@ -107,7 +108,7 @@ const DEFAULT_CONFIG: CVConfig = {
       'vendor/**',
       'third_party/**',
     ],
-    includeLanguages: ['typescript', 'javascript', 'python', 'go', 'rust']
+    includeLanguages: ['typescript', 'javascript', 'python', 'go', 'rust', 'c', 'cpp']
   },
   docs: {
     enabled: true,
@@ -134,13 +135,20 @@ export class ConfigManager {
     const cvDir = getCVDir(repoRoot);
     await ensureDir(cvDir);
 
+    const repoId = generateRepoId(repoRoot);
+
     const config: CVConfig = {
       ...DEFAULT_CONFIG,
       repository: {
         root: repoRoot,
         name: repoName,
-        initDate: new Date().toISOString()
-      }
+        initDate: new Date().toISOString(),
+        repoId,
+      },
+      graph: {
+        ...DEFAULT_CONFIG.graph,
+        database: getGraphDatabaseName(repoId),
+      },
     };
 
     const configPath = path.join(cvDir, 'config.json');
@@ -166,6 +174,19 @@ export class ConfigManager {
       // Merge with defaults to handle missing fields
       this.config = this.mergeWithDefaults(config);
       this.configPath = configPath;
+
+      // Auto-migrate legacy configs that use hardcoded 'cv-git' database
+      if (this.config.graph.database === 'cv-git') {
+        const repoId = this.config.repository.repoId || generateRepoId(repoRoot);
+        this.config.repository.repoId = repoId;
+        this.config.graph.database = getGraphDatabaseName(repoId);
+        // Persist the migration
+        await this.save();
+      } else if (!this.config.repository.repoId) {
+        // Config has a custom database name but no repoId — store repoId
+        this.config.repository.repoId = generateRepoId(repoRoot);
+        await this.save();
+      }
 
       return this.config;
     } catch (error: any) {

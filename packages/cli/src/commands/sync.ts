@@ -49,7 +49,8 @@ export function syncCommand(): Command {
     .option('--reset-delta', 'Reset delta tracking (forces full sync next time)')
     .option('--max-files <number>', 'Maximum number of files to process per run (for large repos)', parseInt)
     .option('--batch-size <number>', 'Batch size for embedding generation (default: 50)', parseInt)
-    .option('--continue', 'Continue from where the last chunked sync left off');
+    .option('--continue', 'Continue from where the last chunked sync left off')
+    .option('--no-embeddings', 'Skip vector embeddings (graph-only sync)');
 
   addGlobalOptions(cmd);
 
@@ -222,9 +223,12 @@ export function syncCommand(): Command {
         }
 
         // Set up Qdrant if we have any embedding capability
+        const skipEmbeddings = options.embeddings === false;
         const hasEmbeddingCapability = ollamaUrl || openaiApiKey || openrouterApiKey;
 
-        if (hasEmbeddingCapability && config.vector) {
+        if (skipEmbeddings) {
+          output.info('Skipping vector embeddings (--no-embeddings)');
+        } else if (hasEmbeddingCapability && config.vector) {
           spinner = output.spinner('Setting up Qdrant...').start();
 
           const qdrantInfo = await ensureQdrant({ silent: true });
@@ -390,7 +394,8 @@ export function syncCommand(): Command {
               )
             );
 
-            displaySyncResults(syncState);
+            const graphStats = await graph.getStats();
+            displaySyncResults(syncState, graphStats);
             await graph.close();
             if (vector) await vector.close();
             return;
@@ -417,7 +422,8 @@ export function syncCommand(): Command {
             console.log(chalk.green('✔ Delta sync completed'));
           }
 
-          displayDeltaSyncResults(syncState);
+          const graphStats = await graph.getStats();
+          displayDeltaSyncResults(syncState, graphStats);
 
           // Export to .cv/ if anything changed
           if (syncState.delta.added.length > 0 ||
@@ -470,7 +476,8 @@ export function syncCommand(): Command {
         console.log(); // Newline after sync logs
         console.log(chalk.green('✔ Full sync completed'));
 
-        displaySyncResults(syncState);
+        const graphStats = await graph.getStats();
+        displaySyncResults(syncState, graphStats);
 
         // Export to .cv/ files for portability
         console.log();
@@ -747,7 +754,7 @@ async function syncSingleRepoInWorkspace(
   };
 }
 
-function displaySyncResults(syncState: any): void {
+function displaySyncResults(syncState: any, graphStats?: { fileCount: number; symbolCount: number }): void {
   console.log();
   console.log(chalk.bold('Sync Results:'));
   console.log(chalk.gray('─'.repeat(50)));
@@ -777,6 +784,15 @@ function displaySyncResults(syncState: any): void {
     }
   }
 
+  // Sanity check: graph has far more files than sync processed
+  if (graphStats && syncState.fileCount > 0) {
+    if (graphStats.fileCount > syncState.fileCount * 2) {
+      console.log();
+      console.log(chalk.yellow(`  Note: Graph contains ${graphStats.fileCount} files but only ${syncState.fileCount} were processed.`));
+      console.log(chalk.yellow(`  The graph may contain stale data from previous syncs. Run 'cv sync --force' to rebuild.`));
+    }
+  }
+
   console.log(chalk.gray('─'.repeat(50)));
   console.log();
 
@@ -788,7 +804,7 @@ function displaySyncResults(syncState: any): void {
   console.log();
 }
 
-function displayDeltaSyncResults(syncState: any): void {
+function displayDeltaSyncResults(syncState: any, graphStats?: { fileCount: number; symbolCount: number }): void {
   console.log();
   console.log(chalk.bold('Delta Sync Results:'));
   console.log(chalk.gray('─'.repeat(50)));
@@ -824,6 +840,18 @@ function displayDeltaSyncResults(syncState: any): void {
       syncState.errors.forEach((err: string) => {
         console.log(chalk.gray(`    - ${err}`));
       });
+    }
+  }
+
+  // Sanity check: graph has far more files than sync processed
+  if (graphStats && syncState.fileCount > 0) {
+    const totalTracked = delta
+      ? delta.added.length + delta.modified.length + delta.unchanged.length
+      : syncState.fileCount;
+    if (graphStats.fileCount > totalTracked * 2) {
+      console.log();
+      console.log(chalk.yellow(`  Note: Graph contains ${graphStats.fileCount} files but repo only has ${totalTracked}.`));
+      console.log(chalk.yellow(`  The graph may contain stale data. Run 'cv sync --force' to rebuild.`));
     }
   }
 

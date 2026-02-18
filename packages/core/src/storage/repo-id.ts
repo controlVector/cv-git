@@ -17,12 +17,12 @@ import { execSync } from 'child_process';
  * 2. Absolute path (fallback for local-only repos)
  *
  * @param repoRoot - Absolute path to repository root
- * @returns 12-character hex string (unique enough, short for readability)
+ * @returns 16-character hex string (collision-resistant, compact for readability)
  */
 export function generateRepoId(repoRoot: string): string {
   const identifier = getRepoIdentifier(repoRoot);
   const hash = crypto.createHash('sha256').update(identifier).digest('hex');
-  return hash.substring(0, 12);
+  return hash.substring(0, 16);
 }
 
 /**

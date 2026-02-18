@@ -13,6 +13,7 @@ import {
   createVectorManager,
   createGraphService,
   createSemanticGraphService,
+  generateRepoId,
   GraphService,
   SemanticGraphService
 } from '@cv-git/core';
@@ -736,6 +737,88 @@ export function graphCommand(): Command {
       });
     });
 
+  // Subcommand: cv graph info
+  cmd
+    .command('info')
+    .description('Show graph database info and ownership metadata')
+    .option('--json', 'Output as JSON')
+    .action(async (options) => {
+      await withGraph(async (graph) => {
+        const ownership = await graph.getOwnership();
+        const stats = await graph.getStats();
+        const dbName = graph.getDatabaseName();
+        const repoId = graph.getRepoId();
+
+        if (options.json) {
+          console.log(JSON.stringify({ dbName, repoId, ownership, stats }, null, 2));
+          return;
+        }
+
+        console.log();
+        console.log(chalk.bold.cyan('Graph Database Info'));
+        console.log(chalk.gray('\u2500'.repeat(50)));
+        console.log(chalk.white('  Database:   '), chalk.yellow(dbName));
+        console.log(chalk.white('  Repo ID:    '), chalk.yellow(repoId || 'unknown'));
+
+        if (ownership) {
+          console.log(chalk.white('  Owner ID:   '), chalk.yellow(ownership.repoId));
+          console.log(chalk.white('  Created:    '), chalk.gray(new Date(ownership.createdAt).toISOString()));
+          if (repoId && ownership.repoId !== repoId) {
+            console.log(chalk.red('  WARNING:    '), chalk.red('Ownership mismatch! Graph may be contaminated.'));
+          }
+        } else {
+          console.log(chalk.white('  Owner:      '), chalk.gray('no ownership metadata'));
+        }
+
+        console.log();
+        console.log(chalk.white('  Files:      '), chalk.yellow(stats.fileCount));
+        console.log(chalk.white('  Symbols:    '), chalk.yellow(stats.symbolCount));
+        console.log(chalk.white('  Modules:    '), chalk.yellow(stats.moduleCount));
+        console.log(chalk.white('  Commits:    '), chalk.yellow(stats.commitCount));
+        console.log(chalk.white('  Relations:  '), chalk.yellow(stats.relationshipCount));
+        console.log(chalk.gray('\u2500'.repeat(50)));
+        console.log();
+      });
+    });
+
+  // Subcommand: cv graph reset
+  cmd
+    .command('reset')
+    .description('Clear all data from this repository\'s graph')
+    .option('--force', 'Skip confirmation prompt')
+    .action(async (options) => {
+      await withGraph(async (graph) => {
+        const dbName = graph.getDatabaseName();
+        const stats = await graph.getStats();
+
+        if (!options.force) {
+          console.log();
+          console.log(chalk.yellow(`This will delete all data from graph '${dbName}':`));
+          console.log(chalk.gray(`  ${stats.fileCount} files, ${stats.symbolCount} symbols, ${stats.commitCount} commits`));
+          console.log();
+
+          const inquirer = await import('inquirer');
+          const { confirm } = await inquirer.default.prompt([{
+            type: 'confirm',
+            name: 'confirm',
+            message: 'Are you sure you want to reset the graph?',
+            default: false,
+          }]);
+
+          if (!confirm) {
+            console.log(chalk.gray('Cancelled.'));
+            return;
+          }
+        }
+
+        const spinner = ora('Resetting graph...').start();
+        await graph.clear();
+        spinner.succeed(chalk.green(`Graph '${dbName}' has been reset.`));
+        console.log(chalk.gray('Run `cv sync` to rebuild the graph.'));
+        console.log();
+      });
+    });
+
   // Subcommand: cv graph hubs
   cmd
     .command('hubs')
@@ -803,7 +886,8 @@ async function withGraph(fn: (graph: any) => Promise<void>): Promise<void> {
     }
 
     const config = await configManager.load(repoRoot);
-    const graph = createGraphManager(config.graph.url, config.graph.database);
+    const repoId = config.repository.repoId || generateRepoId(repoRoot);
+    const graph = createGraphManager({ url: config.graph.url, repoId });
 
     await graph.connect();
     spinner.stop();
@@ -841,7 +925,8 @@ async function withGraphService(fn: (service: GraphService) => Promise<void>): P
     }
 
     const config = await configManager.load(repoRoot);
-    const graph = createGraphManager(config.graph.url, config.graph.database);
+    const repoId = config.repository.repoId || generateRepoId(repoRoot);
+    const graph = createGraphManager({ url: config.graph.url, repoId });
 
     await graph.connect();
     spinner.stop();
@@ -880,7 +965,8 @@ async function withSemanticService(fn: (service: SemanticGraphService) => Promis
     }
 
     const config = await configManager.load(repoRoot);
-    const graph = createGraphManager(config.graph.url, config.graph.database);
+    const repoId = config.repository.repoId || generateRepoId(repoRoot);
+    const graph = createGraphManager({ url: config.graph.url, repoId });
     const vector = createVectorManager(config.vector.url);
 
     await graph.connect();

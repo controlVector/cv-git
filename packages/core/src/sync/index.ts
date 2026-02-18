@@ -1304,7 +1304,7 @@ export class SyncEngine {
       return { vectorCount: allChunks.length, symbolToChunkMap };
 
     } catch (error: any) {
-      console.error('Failed to generate/store embeddings:', error.message);
+      console.warn('Embeddings skipped: ' + error.message);
       return { vectorCount: 0, symbolToChunkMap };
     }
   }

@@ -137,6 +137,9 @@ export class GraphManager {
       // Create indexes
       await this.createIndexes();
 
+      // Ensure ownership metadata is set
+      await this.ensureOwnership();
+
       // Check and migrate schema if needed
       const schemaResult = await this.ensureSchemaVersion();
       if (schemaResult.migrated) {
@@ -329,6 +332,63 @@ export class GraphManager {
 
     await this.setSchemaVersion(toVersion);
     console.log(`  Schema migration complete.`);
+  }
+
+  /**
+   * Ensure ownership metadata node exists in the graph.
+   * This prevents cross-contamination by tagging each graph with its repo identity.
+   */
+  private async ensureOwnership(): Promise<void> {
+    if (!this.repoId) return;
+
+    try {
+      const existing = await this.query(
+        "MATCH (m:CVGitMeta {key: 'ownership'}) RETURN m.repoId as repoId"
+      );
+
+      if (existing.length === 0) {
+        // First time — create ownership node
+        await this.query(`
+          CREATE (m:CVGitMeta {
+            key: 'ownership',
+            repoId: $repoId,
+            graphName: $graphName,
+            createdAt: $createdAt
+          })
+        `, {
+          repoId: this.repoId,
+          graphName: this.graphName,
+          createdAt: Date.now(),
+        });
+      } else if (existing[0].repoId !== this.repoId) {
+        // Ownership mismatch — this graph belongs to a different repo
+        console.warn(
+          `[GraphManager] WARNING: Graph '${this.graphName}' is owned by repo '${existing[0].repoId}' ` +
+          `but this repo has ID '${this.repoId}'. Possible cross-contamination.`
+        );
+      }
+    } catch {
+      // Non-fatal: ownership check should not block operations
+    }
+  }
+
+  /**
+   * Get ownership metadata for this graph
+   */
+  async getOwnership(): Promise<{ repoId: string; graphName: string; createdAt: number } | null> {
+    try {
+      const result = await this.query(
+        "MATCH (m:CVGitMeta {key: 'ownership'}) RETURN m.repoId as repoId, m.graphName as graphName, m.createdAt as createdAt"
+      );
+      if (result.length === 0) return null;
+      return {
+        repoId: result[0].repoId as string,
+        graphName: result[0].graphName as string,
+        createdAt: result[0].createdAt as number,
+      };
+    } catch {
+      return null;
+    }
   }
 
   /**

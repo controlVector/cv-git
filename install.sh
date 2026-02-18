@@ -88,6 +88,12 @@ check_nodejs() {
         NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
         if [ "$NODE_VERSION" -ge 18 ]; then
             log_info "Node.js $(node -v) found"
+            # Warn about non-LTS versions (odd majors are current/unstable)
+            if [ $((NODE_VERSION % 2)) -ne 0 ]; then
+                log_warn "Node.js v${NODE_VERSION} is not an LTS release."
+                log_warn "Native modules (tree-sitter) may not have prebuilt binaries."
+                log_warn "Recommended: Node.js 20 or 22 (LTS). CV-Git will use regex fallback if needed."
+            fi
             return 0
         fi
     fi
@@ -208,13 +214,14 @@ install_native_modules() {
   }
 }
 PKGJSON
-        cd "$INSTALL_DIR"
+        pushd "$INSTALL_DIR" > /dev/null
         if npm install --production 2>/dev/null; then
             log_info "Native modules installed successfully"
         else
             log_warn "Some native modules may not have installed"
             log_warn "CV-Git will use simple regex parsing as fallback"
         fi
+        popd > /dev/null
     else
         # System mode - use sudo
         sudo mkdir -p "$INSTALL_DIR"
@@ -235,13 +242,14 @@ PKGJSON
   }
 }
 PKGJSON
-        cd "$INSTALL_DIR"
+        pushd "$INSTALL_DIR" > /dev/null
         if sudo npm install --production 2>/dev/null; then
             log_info "Native modules installed successfully"
         else
             log_warn "Some native modules may not have installed"
             log_warn "CV-Git will use simple regex parsing as fallback"
         fi
+        popd > /dev/null
     fi
 }
 
@@ -609,11 +617,22 @@ main() {
     update_path
 
     # Verify installation
-    if "$BIN_DIR/cv" --version &> /dev/null; then
+    if [ ! -f "$BIN_DIR/cv" ]; then
+        log_error "Installation failed: binary not found at $BIN_DIR/cv"
+        exit 1
+    fi
+
+    local verify_output
+    if verify_output=$("$BIN_DIR/cv" --version 2>&1); then
         print_summary
     else
-        log_error "Installation failed. Please check the errors above."
-        exit 1
+        log_warn "Binary installed but 'cv --version' returned an error:"
+        log_warn "$verify_output"
+        echo ""
+        log_warn "This is usually caused by missing native dependencies."
+        log_warn "CV-Git may still work. Try running: cv doctor"
+        echo ""
+        print_summary
     fi
 }
 

@@ -16,7 +16,7 @@ describe('Repository ID Generation', () => {
   describe('generateRepoId', () => {
     it('should generate a 12-character hex string', () => {
       const repoId = generateRepoId('/tmp/test-repo');
-      expect(repoId).toMatch(/^[a-f0-9]{12}$/);
+      expect(repoId).toMatch(/^[a-f0-9]{16}$/);
     });
 
     it('should generate deterministic IDs for the same path', () => {
@@ -34,7 +34,7 @@ describe('Repository ID Generation', () => {
 
     it('should handle paths with special characters', () => {
       const repoId = generateRepoId('/tmp/test repo with spaces');
-      expect(repoId).toMatch(/^[a-f0-9]{12}$/);
+      expect(repoId).toMatch(/^[a-f0-9]{16}$/);
     });
 
     it('should handle relative paths by resolving them', () => {
@@ -60,7 +60,7 @@ describe('Repository ID Generation', () => {
       const repoId = generateRepoId('/tmp/test');
       const dbName = getGraphDatabaseName(repoId);
       // Database names should be alphanumeric with underscore
-      expect(dbName).toMatch(/^cv_[a-f0-9]{12}$/);
+      expect(dbName).toMatch(/^cv_[a-f0-9]{16}$/);
     });
   });
 
@@ -82,7 +82,7 @@ describe('Repository ID Generation', () => {
       const repoId = generateRepoId('/tmp/test');
       const collectionName = getVectorCollectionName(repoId, 'code_chunks');
       // Collection names should be alphanumeric with underscore
-      expect(collectionName).toMatch(/^[a-f0-9]{12}_code_chunks$/);
+      expect(collectionName).toMatch(/^[a-f0-9]{16}_code_chunks$/);
     });
   });
 
@@ -94,7 +94,7 @@ describe('Repository ID Generation', () => {
       expect(info).toHaveProperty('id');
       expect(info).toHaveProperty('name');
       expect(info).toHaveProperty('root');
-      expect(info.id).toMatch(/^[a-f0-9]{12}$/);
+      expect(info.id).toMatch(/^[a-f0-9]{16}$/);
       expect(info.name).toBe('test-repo-info');
       expect(info.root).toBe(testPath);
     });
