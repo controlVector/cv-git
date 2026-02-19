@@ -38,7 +38,10 @@ export enum CredentialType {
 export enum GitPlatform {
   GITHUB = 'github',
   CV_PLATFORM = 'cv-platform',
+  /** ControlVector Hub — hub.controlvector.io */
   CV_HUB = 'cv-hub',
+  /** Control Fabric — hub.controlfab.ai */
+  CONTROLFAB = 'controlfab',
   GITLAB = 'gitlab',
   BITBUCKET = 'bitbucket',
 }

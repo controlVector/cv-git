@@ -277,14 +277,16 @@ export class CredentialManager {
       const metadata = await this.loadMetadata();
       const cvHubCred = metadata.find(
         (m) => m.type === CredentialType.GIT_PLATFORM_TOKEN &&
-               m.metadata?.platform === 'cv-hub'
+               (m.metadata?.platform === 'cv-hub' || m.metadata?.platform === 'controlfab')
       );
       if (!cvHubCred) return null;
 
       const cred = await this.retrieve(CredentialType.GIT_PLATFORM_TOKEN, cvHubCred.name) as GitPlatformTokenCredential | null;
       if (!cred) return null;
 
-      const hubUrl = cred.metadata?.hubUrl || 'https://api.controlfab.ai';
+      const isControlfab = cred.metadata?.platform === 'controlfab';
+      const defaultHubUrl = isControlfab ? 'https://api.controlfab.ai' : 'https://api.hub.controlvector.io';
+      const hubUrl = cred.metadata?.hubUrl || defaultHubUrl;
       const response = await fetch(`${hubUrl}/api/v1/git-proxy/token`, {
         method: 'POST',
         headers: {
@@ -339,7 +341,10 @@ export class CredentialManager {
     expiredCred: GitPlatformTokenCredential
   ): Promise<string | null> {
     try {
-      const hubUrl = expiredCred.metadata?.hubUrl || 'https://api.controlfab.ai';
+      const isControlfab = expiredCred.metadata?.platform === 'controlfab' ||
+        expiredCred.metadata?.hubUrl?.includes('controlfab.ai');
+      const defaultHubUrl = isControlfab ? 'https://api.controlfab.ai' : 'https://api.hub.controlvector.io';
+      const hubUrl = expiredCred.metadata?.hubUrl || defaultHubUrl;
       const cvHubCredName = expiredCred.metadata?.cvHubCredentialName;
       if (!cvHubCredName) return null;
 

@@ -125,14 +125,23 @@ export class CVHubAdapter implements GitPlatformAdapter {
   private initialized = false;
   private baseUrl: string;
   private webUrl: string;
+  private platform: GitPlatform;
 
   constructor(
     private credentials: CredentialManager,
-    options?: { apiUrl?: string; webUrl?: string }
+    options?: { apiUrl?: string; webUrl?: string; platform?: GitPlatform }
   ) {
     this.git = simpleGit();
-    this.baseUrl = options?.apiUrl || process.env.CV_HUB_URL || 'https://api.controlfab.ai';
-    this.webUrl = options?.webUrl || process.env.CV_HUB_APP_URL || 'https://hub.controlvector.io';
+    this.platform = options?.platform || GitPlatform.CV_HUB;
+
+    const isControlfab = this.platform === GitPlatform.CONTROLFAB;
+    const defaultApiUrl = isControlfab ? 'https://api.controlfab.ai' : 'https://api.hub.controlvector.io';
+    const defaultWebUrl = isControlfab ? 'https://hub.controlfab.ai' : 'https://hub.controlvector.io';
+    const envApiUrl = isControlfab ? process.env.CONTROLFAB_URL : process.env.CV_HUB_URL;
+    const envWebUrl = isControlfab ? process.env.CONTROLFAB_APP_URL : process.env.CV_HUB_APP_URL;
+
+    this.baseUrl = options?.apiUrl || envApiUrl || defaultApiUrl;
+    this.webUrl = options?.webUrl || envWebUrl || defaultWebUrl;
   }
 
   // ============================================================================
@@ -142,9 +151,11 @@ export class CVHubAdapter implements GitPlatformAdapter {
   async init(): Promise<void> {
     if (this.initialized) return;
 
-    const token = await this.credentials.getGitPlatformToken(GitPlatform.CV_HUB);
+    const token = await this.credentials.getGitPlatformToken(this.platform);
     if (!token) {
-      throw new Error('CV-Hub token not found. Run: cv auth setup cv-hub');
+      const cmd = this.platform === GitPlatform.CONTROLFAB ? 'cv auth setup controlfab' : 'cv auth setup cv-hub';
+      const name = this.platform === GitPlatform.CONTROLFAB ? 'Control Fabric' : 'ControlVector Hub';
+      throw new Error(`${name} token not found. Run: ${cmd}`);
     }
 
     this.token = token;
@@ -184,7 +195,7 @@ export class CVHubAdapter implements GitPlatformAdapter {
   }
 
   getPlatformName(): string {
-    return 'cv-hub';
+    return this.platform === GitPlatform.CONTROLFAB ? 'controlfab' : 'cv-hub';
   }
 
   async getWebUrl(): Promise<string> {
