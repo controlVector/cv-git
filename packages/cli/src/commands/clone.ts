@@ -43,33 +43,26 @@ function parseRepoUrl(url: string): {
       .replace('.git', '');
   }
 
-  // Extract host from URL
+  // Extract host from URL (support any HTTPS host)
   let host = 'github.com';
-  if (httpsUrl.includes('gitlab.com')) {
-    host = 'gitlab.com';
-  } else if (httpsUrl.includes('bitbucket.org')) {
-    host = 'bitbucket.org';
-  } else if (httpsUrl.includes('github.com')) {
-    host = 'github.com';
+  try {
+    const parsed = new URL(httpsUrl);
+    host = parsed.hostname;
+  } catch {
+    // Fallback for non-URL formats
+    if (httpsUrl.includes('gitlab.com')) {
+      host = 'gitlab.com';
+    } else if (httpsUrl.includes('bitbucket.org')) {
+      host = 'bitbucket.org';
+    }
   }
 
-  // Extract owner and repo from URL
-  // Handles:
-  //   https://github.com/owner/repo.git
-  //   https://gitlab.com/group/subgroup/repo.git
-  //   git@github.com:owner/repo.git
+  // Extract owner and repo from URL path
+  // Handles any host: https://host/path/to/repo.git or https://host/git/owner/repo.git
   let pathPart = '';
-
-  if (httpsUrl.includes('github.com')) {
-    const match = httpsUrl.match(/github\.com\/(.+?)(?:\.git)?$/);
-    pathPart = match?.[1] || '';
-  } else if (httpsUrl.includes('gitlab.com')) {
-    const match = httpsUrl.match(/gitlab\.com\/(.+?)(?:\.git)?$/);
-    pathPart = match?.[1] || '';
-  } else if (httpsUrl.includes('bitbucket.org')) {
-    const match = httpsUrl.match(/bitbucket\.org\/(.+?)(?:\.git)?$/);
-    pathPart = match?.[1] || '';
-  }
+  const hostPattern = host.replace(/\./g, '\\.');
+  const match = httpsUrl.match(new RegExp(`${hostPattern}/(?:git/)?(.+?)(?:\\.git)?$`));
+  pathPart = match?.[1] || '';
 
   // Remove .git suffix if present
   pathPart = pathPart.replace(/\.git$/, '');

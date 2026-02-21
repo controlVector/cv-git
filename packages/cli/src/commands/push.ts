@@ -136,6 +136,8 @@ function detectPlatform(remoteUrl: string): GitPlatform | null {
   if (remoteUrl.includes('github.com')) return GitPlatform.GITHUB;
   if (remoteUrl.includes('gitlab.com')) return GitPlatform.GITLAB;
   if (remoteUrl.includes('bitbucket.org')) return GitPlatform.BITBUCKET;
+  if (remoteUrl.includes('controlvector.io')) return GitPlatform.CV_HUB;
+  if (remoteUrl.includes('controlfab.ai')) return GitPlatform.CONTROLFAB;
   return null;
 }
 
@@ -254,14 +256,26 @@ async function gitPush(
 
     // Add remote and branch if specified
     if (remote) {
+      // Auto-set upstream if no tracking branch is configured
+      if (branch) {
+        try {
+          execSync(`git rev-parse --abbrev-ref @{upstream}`, { encoding: 'utf-8', stdio: 'pipe' });
+        } catch {
+          // No upstream configured — add -u to set it
+          args.push('-u');
+        }
+      }
       args.push(remote);
       if (branch) {
         args.push(branch);
       }
     }
 
-    // Add any extra passthrough arguments
-    args.push(...extraArgs.filter(arg => !arg.startsWith('--skip') && !arg.startsWith('--sync')));
+    // Add any extra passthrough arguments (exclude already-parsed positional args)
+    const parsedPositionals = new Set([remote, branch].filter(Boolean));
+    args.push(...extraArgs.filter(arg =>
+      !arg.startsWith('--skip') && !arg.startsWith('--sync') && !parsedPositionals.has(arg)
+    ));
 
     const git = spawn('git', args, {
       stdio: ['inherit', 'pipe', 'pipe'],
