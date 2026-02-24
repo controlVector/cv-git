@@ -5,6 +5,10 @@
  * User runs setup, sees a code, approves in browser, and the CLI receives tokens.
  */
 
+import { execSync } from 'child_process';
+import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
 import chalk from 'chalk';
 import ora, { Ora } from 'ora';
 import {
@@ -87,6 +91,174 @@ interface UserInfoResponse {
   preferred_username?: string;
   email?: string;
   email_verified?: boolean;
+}
+
+// ==================== Post-Auth: Git Credentials + MCP ====================
+
+/**
+ * Derive the git hostname from the API URL
+ * e.g., https://api.hub.controlvector.io → git.hub.controlvector.io
+ */
+function getGitHost(apiUrl: string): string {
+  try {
+    const url = new URL(apiUrl);
+    // api.hub.controlvector.io → git.hub.controlvector.io
+    return url.hostname.replace(/^api\./, 'git.');
+  } catch {
+    return 'git.hub.controlvector.io';
+  }
+}
+
+/**
+ * Create a PAT via the API using the OAuth access token
+ */
+async function createPATFromOAuth(
+  apiUrl: string,
+  accessToken: string,
+  username: string
+): Promise<string | null> {
+  try {
+    const response = await fetch(`${apiUrl}/api/user/tokens`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        name: `cv-git-cli-${username || 'auto'}`,
+        scopes: ['repo:read', 'repo:write', 'repo:admin'],
+        expiresInDays: 365,
+      }),
+    });
+
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as { token?: string };
+    return data.token || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Configure git credentials for the cv-hub git host.
+ * Uses git credential-store so clone/push works without prompts.
+ */
+function configureGitCredentials(gitHost: string, pat: string): boolean {
+  try {
+    // Use git credential-store (file-based, works everywhere)
+    const credStorePath = join(homedir(), '.git-credentials');
+
+    // Read existing credentials and remove old entries for this host
+    let existing = '';
+    if (existsSync(credStorePath)) {
+      existing = readFileSync(credStorePath, 'utf-8');
+    }
+
+    const lines = existing.split('\n').filter(
+      (line) => line.trim() && !line.includes(`@${gitHost}`)
+    );
+    lines.push(`https://git:${pat}@${gitHost}`);
+
+    writeFileSync(credStorePath, lines.join('\n') + '\n', { mode: 0o600 });
+
+    // Ensure git knows to use credential-store for this host
+    try {
+      execSync(
+        `git config --global credential.https://${gitHost}.helper store`,
+        { stdio: 'ignore' }
+      );
+    } catch {
+      // If per-host config fails, that's ok — the credential file still works
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Write MCP server config for Claude Code integration.
+ * Creates/updates .mcp.json in the current project directory.
+ */
+function configureMCPServer(apiUrl: string, pat: string): boolean {
+  try {
+    // Write to project-level .mcp.json (Claude Code reads this automatically)
+    const mcpPath = join(process.cwd(), '.mcp.json');
+    let mcpConfig: Record<string, any> = {};
+
+    if (existsSync(mcpPath)) {
+      try {
+        mcpConfig = JSON.parse(readFileSync(mcpPath, 'utf-8'));
+      } catch {
+        mcpConfig = {};
+      }
+    }
+
+    if (!mcpConfig.mcpServers) {
+      mcpConfig.mcpServers = {};
+    }
+
+    // Derive MCP URL: api.hub.controlvector.io → mcp.controlvector.io
+    const url = new URL(apiUrl);
+    const mcpHost = url.hostname.replace(/^api\.hub\./, 'mcp.').replace(/^api\./, 'mcp.');
+
+    mcpConfig.mcpServers['cv-hub'] = {
+      type: 'url',
+      url: `https://${mcpHost}/mcp`,
+      headers: {
+        Authorization: `Bearer ${pat}`,
+      },
+    };
+
+    writeFileSync(mcpPath, JSON.stringify(mcpConfig, null, 2) + '\n');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Run post-authentication setup: create PAT, configure git credentials, optionally MCP
+ */
+async function postAuthSetup(
+  config: CVHubInstanceConfig,
+  accessToken: string,
+  username: string
+): Promise<void> {
+  const gitHost = getGitHost(config.apiUrl);
+
+  // Step 1: Create a PAT for git operations
+  const patSpinner = ora('Creating git access token...').start();
+  const pat = await createPATFromOAuth(config.apiUrl, accessToken, username);
+
+  if (!pat) {
+    patSpinner.warn(chalk.yellow('Could not create git token — git push/clone will need manual setup'));
+    console.log(chalk.gray(`  You can create a PAT at ${config.appUrl}/settings/tokens`));
+    return;
+  }
+  patSpinner.succeed(chalk.green('Git access token created'));
+
+  // Step 2: Configure git credentials
+  const gitOk = configureGitCredentials(gitHost, pat);
+  if (gitOk) {
+    console.log(chalk.green(`  ✓ Git credentials configured for ${gitHost}`));
+  } else {
+    console.log(chalk.yellow(`  ⚠ Could not auto-configure git credentials`));
+    console.log(chalk.gray(`  Add to ~/.netrc:\n    machine ${gitHost}\n      login git\n      password ${pat}`));
+  }
+
+  // Step 3: Configure MCP for Claude Code (if in a git repo)
+  try {
+    execSync('git rev-parse --git-dir', { stdio: 'ignore' });
+    const mcpOk = configureMCPServer(config.apiUrl, pat);
+    if (mcpOk) {
+      console.log(chalk.green('  ✓ MCP server configured for Claude Code (.mcp.json)'));
+    }
+  } catch {
+    // Not in a git repo — skip MCP setup silently
+  }
 }
 
 // ==================== Device Authorization Flow ====================
@@ -358,6 +530,14 @@ export async function setupCVHub(
         email: userInfo.email,
       },
     });
+
+    // Post-auth: create PAT, configure git credentials + MCP
+    console.log();
+    await postAuthSetup(
+      config,
+      tokenResponse.access_token,
+      userInfo.preferred_username || userInfo.name || 'user'
+    );
 
     // Display success message
     console.log();
