@@ -565,43 +565,71 @@ async function installClaudeHooks(repoRoot: string, nonInteractive: boolean): Pr
 const CRED_LOOKUP = `# ── Load CV-Hub credentials ──────────────────────────────────────────
 CRED_FILE=""
 for candidate in "\${CLAUDE_PROJECT_DIR:-.}/.claude/cv-hub.credentials" \\
-                 "\${HOME}/.config/cv-hub/credentials"; do
+                 "\${HOME}/.config/cv-hub/credentials" \\
+                 "/root/.config/cv-hub/credentials" \\
+                 \${SUDO_USER:+"/home/\${SUDO_USER}/.config/cv-hub/credentials"}; do
+  [[ -z "$candidate" ]] && continue
   if [[ -f "$candidate" ]]; then
     CRED_FILE="$candidate"
     break
   fi
 done
-if [[ -z "$CRED_FILE" && "$HOME" != "/root" && -f "/root/.config/cv-hub/credentials" ]]; then
-  CRED_FILE="/root/.config/cv-hub/credentials"
-fi
 if [[ -n "$CRED_FILE" ]]; then
   set -a; source "$CRED_FILE"; set +a
 fi`;
 
 // Fallback cred lookup for hooks that already have env vars from session-start
-const CRED_LOOKUP_FALLBACK = `# ── Load CV-Hub credentials (fallback if env vars not propagated) ────
+const CRED_LOOKUP_FALLBACK = `SESSION_ENV="/tmp/cv-hub-session.env"
+
+# ── Source shared session env (primary propagation path) ─────────────
+if [[ -f "$SESSION_ENV" ]]; then
+  set -a; source "$SESSION_ENV"; set +a
+fi
+
+# ── Load CV-Hub credentials (fallback if env vars not propagated) ────
 if [[ -z "\${CV_HUB_API:-}" || -z "\${CV_HUB_PAT:-}" ]]; then
   CRED_FILE=""
   for candidate in "\${CLAUDE_PROJECT_DIR:-.}/.claude/cv-hub.credentials" \\
-                   "\${HOME}/.config/cv-hub/credentials"; do
+                   "\${HOME}/.config/cv-hub/credentials" \\
+                   "/root/.config/cv-hub/credentials" \\
+                   \${SUDO_USER:+"/home/\${SUDO_USER}/.config/cv-hub/credentials"}; do
+    [[ -z "$candidate" ]] && continue
     if [[ -f "$candidate" ]]; then
       CRED_FILE="$candidate"
       break
     fi
   done
-  if [[ -z "$CRED_FILE" && "$HOME" != "/root" && -f "/root/.config/cv-hub/credentials" ]]; then
-    CRED_FILE="/root/.config/cv-hub/credentials"
-  fi
   if [[ -n "$CRED_FILE" ]]; then
     set -a; source "$CRED_FILE"; set +a
   fi
+fi
+
+# ── Derive CV_HUB_REPO from git remote if still empty ───────────────
+if [[ -z "\${CV_HUB_REPO:-}" ]]; then
+  repo_url=$(git remote get-url origin 2>/dev/null || true)
+  if [[ -n "$repo_url" ]]; then
+    CV_HUB_REPO=$(echo "$repo_url" | sed -E 's#\\.git$##' | sed -E 's#.*[:/]([^/]+/[^/]+)$#\\1#')
+    export CV_HUB_REPO
+  fi
+fi
+
+# ── Generate adhoc session ID if still empty ─────────────────────────
+if [[ -z "\${CV_HUB_SESSION_ID:-}" ]]; then
+  CV_HUB_SESSION_ID="adhoc-$(date +%s)-$$"
+  export CV_HUB_SESSION_ID
 fi`;
 
 const HOOK_SESSION_START = `#!/usr/bin/env bash
+if [[ "\${CV_HUB_DEBUG:-}" == "1" ]]; then
+  exec 2>/tmp/cv-hook-session-start-err.log
+  set -x
+fi
 # Claude Code hook: SessionStart
 # Registers executor with CV-Hub and injects initial context.
 # Falls back to local cv knowledge CLI if no API credentials.
 set -euo pipefail
+
+SESSION_ENV="/tmp/cv-hub-session.env"
 
 ${CRED_LOOKUP}
 
@@ -613,8 +641,8 @@ cwd="\${cwd:-$(pwd)}"
 
 # Detect owner/repo from git remote
 repo_url=$(git -C "$cwd" remote get-url origin 2>/dev/null || true)
-repo_name=""
-if [[ -n "$repo_url" ]]; then
+repo_name="\${CV_HUB_REPO:-}"
+if [[ -z "$repo_name" && -n "$repo_url" ]]; then
   repo_name=$(echo "$repo_url" | sed -E 's#\\.git$##' | sed -E 's#.*[:/]([^/]+/[^/]+)$#\\1#')
 fi
 
@@ -644,7 +672,19 @@ EOFPAYLOAD
 
   executor_id=$(echo "$resp" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
 
-  if [[ -n "$executor_id" && -n "\${CLAUDE_ENV_FILE:-}" ]]; then
+  # ── Write shared session env file ────────────────────────────────
+  {
+    echo "CV_HUB_API=\${CV_HUB_API}"
+    echo "CV_HUB_PAT=\${CV_HUB_PAT}"
+    [[ -n "$repo_name" ]] && echo "CV_HUB_REPO=\${repo_name}"
+    [[ -n "$session_id" ]] && echo "CV_HUB_SESSION_ID=\${session_id}"
+    [[ -n "\${executor_id:-}" ]] && echo "CV_HUB_EXECUTOR_ID=\${executor_id}"
+    [[ -n "\${CV_HUB_ORG_OVERRIDE:-}" ]] && echo "CV_HUB_ORG_OVERRIDE=\${CV_HUB_ORG_OVERRIDE}"
+  } > "$SESSION_ENV"
+  chmod 600 "$SESSION_ENV"
+
+  # Future-proofing: also write to CLAUDE_ENV_FILE if it exists
+  if [[ -n "\${CLAUDE_ENV_FILE:-}" ]]; then
     echo "CV_HUB_EXECUTOR_ID=\${executor_id}" >> "$CLAUDE_ENV_FILE"
     echo "CV_HUB_API=\${CV_HUB_API}" >> "$CLAUDE_ENV_FILE"
     echo "CV_HUB_PAT=\${CV_HUB_PAT}" >> "$CLAUDE_ENV_FILE"
@@ -673,8 +713,17 @@ EOFPAYLOAD
   fi
 else
   # ── CLI fallback: local knowledge graph ──────────────────────────────
-  if [[ -n "$session_id" && -n "\${CLAUDE_ENV_FILE:-}" ]]; then
-    echo "CV_SESSION_ID=\${session_id}" >> "$CLAUDE_ENV_FILE"
+  if [[ -n "$session_id" ]]; then
+    # Still write session env for downstream hooks (with what we have)
+    {
+      [[ -n "$repo_name" ]] && echo "CV_HUB_REPO=\${repo_name}"
+      echo "CV_HUB_SESSION_ID=\${session_id}"
+    } > "$SESSION_ENV"
+    chmod 600 "$SESSION_ENV"
+
+    if [[ -n "\${CLAUDE_ENV_FILE:-}" ]]; then
+      echo "CV_SESSION_ID=\${session_id}" >> "$CLAUDE_ENV_FILE"
+    fi
   fi
 
   files_csv=""
@@ -691,6 +740,10 @@ fi
 `;
 
 const HOOK_CONTEXT_TURN = `#!/usr/bin/env bash
+if [[ "\${CV_HUB_DEBUG:-}" == "1" ]]; then
+  exec 2>/tmp/cv-hook-context-turn-err.log
+  set -x
+fi
 # Claude Code hook: Stop (context engine turn injection + egress)
 # Fires after each response cycle. Uses CV-Hub API if available, else local CLI.
 set -euo pipefail
@@ -946,7 +999,9 @@ if [[ -n "\${CV_HUB_EXECUTOR_ID:-}" && -n "\${CV_HUB_API:-}" && -n "\${CV_HUB_PA
     >/dev/null 2>&1 || true
 fi
 
-# ── Cleanup turn counter files ───────────────────────────────────────
+# ── Cleanup ──────────────────────────────────────────────────────────
+rm -f "$SESSION_ENV" 2>/dev/null || true
+rm -f /tmp/cv-connect-turn-* 2>/dev/null || true
 if [[ -n "\${CV_HUB_SESSION_ID:-}" ]]; then
   rm -f "/tmp/cv-connect-turn-\${CV_HUB_SESSION_ID}" 2>/dev/null || true
 fi
