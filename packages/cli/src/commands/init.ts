@@ -487,10 +487,10 @@ async function installClaudeHooks(repoRoot: string, nonInteractive: boolean): Pr
 
   // Merge settings.json
   const hooksConfig: Record<string, any[]> = {
-    SessionStart: [{ matcher: {}, hooks: [{ type: 'command', command: 'bash .claude/hooks/session-start.sh' }] }],
-    SessionEnd: [{ matcher: {}, hooks: [{ type: 'command', command: 'bash .claude/hooks/session-end.sh' }] }],
-    PreCompact: [{ matcher: {}, hooks: [{ type: 'command', command: 'bash .claude/hooks/context-checkpoint.sh' }] }],
-    Stop: [{ matcher: {}, hooks: [{ type: 'command', command: 'bash .claude/hooks/context-turn.sh' }] }],
+    SessionStart: [{ hooks: [{ type: 'command', command: 'bash .claude/hooks/session-start.sh' }] }],
+    SessionEnd: [{ hooks: [{ type: 'command', command: 'bash .claude/hooks/session-end.sh' }] }],
+    PreCompact: [{ hooks: [{ type: 'command', command: 'bash .claude/hooks/context-checkpoint.sh' }] }],
+    Stop: [{ hooks: [{ type: 'command', command: 'bash .claude/hooks/context-turn.sh' }] }],
   };
 
   let existingSettings: any = {};
