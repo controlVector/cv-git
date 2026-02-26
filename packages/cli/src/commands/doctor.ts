@@ -919,27 +919,33 @@ async function checkCVHubAuth(): Promise<DiagnosticResult> {
     const pat = patMatch[1].trim();
 
     try {
-      const resp = await fetch(`${apiUrl}/oauth/userinfo`, {
+      const resp = await fetch(`${apiUrl}/api/v1/context-engine/stats`, {
         headers: { Authorization: `Bearer ${pat}` },
         signal: AbortSignal.timeout(5000),
       });
 
       if (resp.ok) {
-        const userInfo = (await resp.json()) as { preferred_username?: string };
         const orgMatch = content.match(/CV_HUB_ORG_OVERRIDE=(.+)/);
         const org = orgMatch ? orgMatch[1].trim() : '';
-        const parts = [`User: ${userInfo.preferred_username || 'unknown'}`];
+        const parts = ['PAT valid'];
         if (org) parts.push(`Org: ${org}`);
         return {
           name: 'CV-Hub Authentication',
           status: 'pass',
           message: parts.join(', '),
         };
+      } else if (resp.status === 401) {
+        return {
+          name: 'CV-Hub Authentication',
+          status: 'warn',
+          message: 'PAT expired or invalid',
+          fix: 'Run "cv auth login" to re-authenticate',
+        };
       } else {
         return {
           name: 'CV-Hub Authentication',
           status: 'warn',
-          message: `PAT validation failed (HTTP ${resp.status})`,
+          message: `PAT validation returned HTTP ${resp.status}`,
           fix: 'Run "cv auth login" to re-authenticate',
         };
       }
