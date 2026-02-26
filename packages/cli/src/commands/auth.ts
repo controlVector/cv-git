@@ -16,6 +16,9 @@ import chalk from 'chalk';
 import inquirer from 'inquirer';
 import ora from 'ora';
 import Table from 'cli-table3';
+import { mkdirSync, writeFileSync, chmodSync } from 'fs';
+import { homedir } from 'os';
+import { join, dirname } from 'path';
 import {
   CredentialManager,
   CredentialType,
@@ -253,6 +256,89 @@ export function authCommand(): Command {
       } catch (error: any) {
         spinner.fail(chalk.red(`Failed to remove: ${error.message}`));
       }
+    });
+
+  // cv auth add-hub --api <url> --pat <token> [--org <org>]
+  cmd
+    .command('add-hub')
+    .description('Add CV-Hub credentials for context engine hooks')
+    .option('--api <url>', 'CV-Hub API URL', 'https://api.hub.controlvector.io')
+    .option('--pat <token>', 'Personal Access Token')
+    .option('--org <org>', 'Organization override')
+    .action(async (cmdOptions: { api: string; pat?: string; org?: string }) => {
+      let pat = cmdOptions.pat;
+
+      // Prompt for PAT if not provided
+      if (!pat) {
+        const answers = await inquirer.prompt([
+          {
+            type: 'password',
+            name: 'pat',
+            message: 'Enter your CV-Hub Personal Access Token:',
+            validate: (input: string) => input.trim().length > 0 || 'Token is required',
+          },
+        ]);
+        pat = answers.pat;
+      }
+
+      // Validate PAT by hitting health endpoint
+      const spinner = ora('Validating CV-Hub credentials...').start();
+      try {
+        const healthRes = await fetch(`${cmdOptions.api}/health`);
+        if (!healthRes.ok) {
+          spinner.fail(chalk.red(`CV-Hub API unreachable at ${cmdOptions.api}`));
+          return;
+        }
+        const healthData = await healthRes.json() as { status?: string };
+        if (healthData.status !== 'ok') {
+          spinner.fail(chalk.red('CV-Hub API returned unhealthy status'));
+          return;
+        }
+      } catch (error: any) {
+        spinner.fail(chalk.red(`Cannot reach CV-Hub API: ${error.message}`));
+        return;
+      }
+      spinner.succeed(chalk.green('CV-Hub API is healthy'));
+
+      // Build credentials file content
+      const lines = [
+        `CV_HUB_PAT=${pat}`,
+        `CV_HUB_API=${cmdOptions.api}`,
+      ];
+      if (cmdOptions.org) {
+        lines.push(`CV_HUB_ORG_OVERRIDE=${cmdOptions.org}`);
+      }
+      const credContent = lines.join('\n') + '\n';
+
+      // Write ~/.config/cv-hub/credentials
+      const credDir = join(homedir(), '.config', 'cv-hub');
+      const credPath = join(credDir, 'credentials');
+      mkdirSync(credDir, { recursive: true });
+      writeFileSync(credPath, credContent, { mode: 0o600 });
+      console.log(chalk.green(`  ✓ Wrote ${credPath}`));
+
+      // Also store PAT in cv-git credential manager
+      const credentials = new CredentialManager();
+      await credentials.init();
+
+      await credentials.store<GitPlatformTokenCredential>({
+        type: CredentialType.GIT_PLATFORM_TOKEN,
+        name: 'cv_hub:default',
+        platform: GitPlatform.CV_HUB,
+        token: pat!,
+        scopes: ['context-engine'],
+        username: 'cv-hub-pat',
+        metadata: {
+          hubUrl: cmdOptions.api,
+          authMethod: 'direct',
+        },
+      });
+      console.log(chalk.green('  ✓ Stored PAT in cv-git credential manager (cv_hub:default)'));
+
+      console.log();
+      console.log(chalk.green('CV-Hub credentials configured!'));
+      console.log(chalk.gray('  Context engine hooks will use these credentials automatically.'));
+      console.log();
     });
 
   addGlobalOptions(cmd);

@@ -287,6 +287,22 @@ export function initCommand(): Command {
         // Install Claude Code hooks for session knowledge
         await installClaudeHooks(currentDir, nonInteractive);
 
+        // Check for CV-Hub credentials (needed by hooks for context engine)
+        const cvHubCredPaths = [
+          path.join(currentDir, '.claude', 'cv-hub.credentials'),
+          '/home/schmotz/.config/cv-hub/credentials',
+          '/root/.config/cv-hub/credentials',
+          path.join(process.env.HOME || '', '.config', 'cv-hub', 'credentials'),
+        ];
+        const hasHubCreds = cvHubCredPaths.some((p) => fs.existsSync(p));
+        if (!hasHubCreds) {
+          if (!nonInteractive) {
+            console.log();
+            console.log(chalk.yellow('CV-Hub credentials not found.'));
+            console.log(chalk.gray('  Run ') + chalk.cyan('cv auth add-hub') + chalk.gray(' to enable context engine hooks.'));
+          }
+        }
+
         spinner.succeed(`CV-Git ${mode === 'workspace' ? 'workspace' : 'repository'} initialized successfully!`);
 
         if (output.isJson) {
@@ -534,6 +550,22 @@ const HOOK_SESSION_START = `#!/usr/bin/env bash
 # Queries CV-Git knowledge graph for prior session knowledge.
 set -euo pipefail
 
+# ── Load CV-Hub credentials ──────────────────────────────────────────
+CRED_FILE=""
+for f in \\
+  "\${CLAUDE_PROJECT_DIR:-.}/.claude/cv-hub.credentials" \\
+  "/home/schmotz/.config/cv-hub/credentials" \\
+  "/root/.config/cv-hub/credentials" \\
+  "\${HOME}/.config/cv-hub/credentials"; do
+  if [[ -f "$f" ]]; then
+    CRED_FILE="$f"
+    break
+  fi
+done
+if [[ -n "$CRED_FILE" ]]; then
+  set -a; source "$CRED_FILE"; set +a
+fi
+
 input=$(cat)
 session_id=$(echo "$input" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
 
@@ -556,6 +588,22 @@ fi
 const HOOK_CONTEXT_TURN = `#!/usr/bin/env bash
 # Claude Code hook: Stop (egress + pull)
 set -euo pipefail
+
+# ── Load CV-Hub credentials ──────────────────────────────────────────
+CRED_FILE=""
+for f in \\
+  "\${CLAUDE_PROJECT_DIR:-.}/.claude/cv-hub.credentials" \\
+  "/home/schmotz/.config/cv-hub/credentials" \\
+  "/root/.config/cv-hub/credentials" \\
+  "\${HOME}/.config/cv-hub/credentials"; do
+  if [[ -f "$f" ]]; then
+    CRED_FILE="$f"
+    break
+  fi
+done
+if [[ -n "$CRED_FILE" ]]; then
+  set -a; source "$CRED_FILE"; set +a
+fi
 
 if [[ -z "\${CV_SESSION_ID:-}" ]]; then exit 0; fi
 
@@ -607,6 +655,22 @@ const HOOK_CONTEXT_CHECKPOINT = `#!/usr/bin/env bash
 # Claude Code hook: PreCompact
 set -euo pipefail
 
+# ── Load CV-Hub credentials ──────────────────────────────────────────
+CRED_FILE=""
+for f in \\
+  "\${CLAUDE_PROJECT_DIR:-.}/.claude/cv-hub.credentials" \\
+  "/home/schmotz/.config/cv-hub/credentials" \\
+  "/root/.config/cv-hub/credentials" \\
+  "\${HOME}/.config/cv-hub/credentials"; do
+  if [[ -f "$f" ]]; then
+    CRED_FILE="$f"
+    break
+  fi
+done
+if [[ -n "$CRED_FILE" ]]; then
+  set -a; source "$CRED_FILE"; set +a
+fi
+
 if [[ -z "\${CV_SESSION_ID:-}" ]]; then exit 0; fi
 
 input=$(cat)
@@ -646,6 +710,22 @@ fi
 const HOOK_SESSION_END = `#!/usr/bin/env bash
 # Claude Code hook: SessionEnd
 set -euo pipefail
+
+# ── Load CV-Hub credentials ──────────────────────────────────────────
+CRED_FILE=""
+for f in \\
+  "\${CLAUDE_PROJECT_DIR:-.}/.claude/cv-hub.credentials" \\
+  "/home/schmotz/.config/cv-hub/credentials" \\
+  "/root/.config/cv-hub/credentials" \\
+  "\${HOME}/.config/cv-hub/credentials"; do
+  if [[ -f "$f" ]]; then
+    CRED_FILE="$f"
+    break
+  fi
+done
+if [[ -n "$CRED_FILE" ]]; then
+  set -a; source "$CRED_FILE"; set +a
+fi
 
 if [[ -z "\${CV_SESSION_ID:-}" ]]; then exit 0; fi
 rm -f "/tmp/cv-turn-\${CV_SESSION_ID}" 2>/dev/null || true
