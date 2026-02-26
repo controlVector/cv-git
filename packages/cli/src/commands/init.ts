@@ -290,18 +290,20 @@ export function initCommand(): Command {
         // Check for CV-Hub credentials (needed by hooks for context engine)
         const cvHubCredPaths = [
           path.join(currentDir, '.claude', 'cv-hub.credentials'),
-          '/home/schmotz/.config/cv-hub/credentials',
-          '/root/.config/cv-hub/credentials',
           path.join(process.env.HOME || '', '.config', 'cv-hub', 'credentials'),
+          '/root/.config/cv-hub/credentials',
         ];
         const hasHubCreds = cvHubCredPaths.some((p) => fs.existsSync(p));
         if (!hasHubCreds) {
           if (!nonInteractive) {
             console.log();
             console.log(chalk.yellow('CV-Hub credentials not found.'));
-            console.log(chalk.gray('  Run ') + chalk.cyan('cv auth add-hub') + chalk.gray(' to enable context engine hooks.'));
+            console.log(chalk.gray('  Run ') + chalk.cyan('cv auth login') + chalk.gray(' to enable context engine hooks.'));
           }
         }
+
+        // Post-install validation
+        await validateClaudeSetup(currentDir, nonInteractive);
 
         spinner.succeed(`CV-Git ${mode === 'workspace' ? 'workspace' : 'repository'} initialized successfully!`);
 
@@ -503,10 +505,10 @@ async function installClaudeHooks(repoRoot: string, nonInteractive: boolean): Pr
 
   // Merge settings.json
   const hooksConfig: Record<string, any[]> = {
-    SessionStart: [{ hooks: [{ type: 'command', command: 'bash .claude/hooks/session-start.sh' }] }],
-    SessionEnd: [{ hooks: [{ type: 'command', command: 'bash .claude/hooks/session-end.sh' }] }],
-    PreCompact: [{ hooks: [{ type: 'command', command: 'bash .claude/hooks/context-checkpoint.sh' }] }],
-    Stop: [{ hooks: [{ type: 'command', command: 'bash .claude/hooks/context-turn.sh' }] }],
+    SessionStart: [{ hooks: [{ type: 'command', command: 'bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/session-start.sh' }] }],
+    SessionEnd: [{ hooks: [{ type: 'command', command: 'bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/session-end.sh' }] }],
+    PreCompact: [{ hooks: [{ type: 'command', command: 'bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/context-checkpoint.sh' }] }],
+    Stop: [{ hooks: [{ type: 'command', command: 'bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/context-turn.sh' }] }],
   };
 
   let existingSettings: any = {};
@@ -527,10 +529,24 @@ async function installClaudeHooks(repoRoot: string, nonInteractive: boolean): Pr
       existingSettings.hooks[event] = hooks;
     } else {
       const existing = existingSettings.hooks[event] as any[];
-      const existingCommands = new Set(existing.map((h: any) => h.hooks?.[0]?.command));
-      for (const hook of hooks) {
-        if (!existingCommands.has(hook.hooks?.[0]?.command)) {
-          existing.push(hook);
+      // Detect old flat format (e.g., { type: 'command', command: '...' } without nested hooks)
+      const hasOldFormat = existing.some((h: any) => h.type === 'command' && h.command && !h.hooks);
+      // Detect old paths without $CLAUDE_PROJECT_DIR
+      const hasOldPaths = existing.some((h: any) => {
+        const cmd = h.hooks?.[0]?.command || h.command || '';
+        return cmd.includes('.claude/hooks/') && !cmd.includes('$CLAUDE_PROJECT_DIR');
+      });
+
+      if (hasOldFormat || hasOldPaths) {
+        // Replace entirely with new format
+        existingSettings.hooks[event] = hooks;
+      } else {
+        // Dedup: only add hooks that don't already exist
+        const existingCommands = new Set(existing.map((h: any) => h.hooks?.[0]?.command));
+        for (const hook of hooks) {
+          if (!existingCommands.has(hook.hooks?.[0]?.command)) {
+            existing.push(hook);
+          }
         }
       }
     }
@@ -543,83 +559,255 @@ async function installClaudeHooks(repoRoot: string, nonInteractive: boolean): Pr
   }
 }
 
-// ── Embedded hook templates ──────────────────────────────────────────
+// ── Embedded hook templates (production-verified, hybrid API/CLI) ────
 
-const HOOK_SESSION_START = `#!/usr/bin/env bash
-# Claude Code hook: SessionStart
-# Queries CV-Git knowledge graph for prior session knowledge.
-set -euo pipefail
-
-# ── Load CV-Hub credentials ──────────────────────────────────────────
+// Generic credential lookup pattern (no hardcoded user paths)
+const CRED_LOOKUP = `# ── Load CV-Hub credentials ──────────────────────────────────────────
 CRED_FILE=""
-for f in \\
-  "\${CLAUDE_PROJECT_DIR:-.}/.claude/cv-hub.credentials" \\
-  "/home/schmotz/.config/cv-hub/credentials" \\
-  "/root/.config/cv-hub/credentials" \\
-  "\${HOME}/.config/cv-hub/credentials"; do
-  if [[ -f "$f" ]]; then
-    CRED_FILE="$f"
+for candidate in "\${CLAUDE_PROJECT_DIR:-.}/.claude/cv-hub.credentials" \\
+                 "\${HOME}/.config/cv-hub/credentials"; do
+  if [[ -f "$candidate" ]]; then
+    CRED_FILE="$candidate"
     break
   fi
 done
+if [[ -z "$CRED_FILE" && "$HOME" != "/root" && -f "/root/.config/cv-hub/credentials" ]]; then
+  CRED_FILE="/root/.config/cv-hub/credentials"
+fi
 if [[ -n "$CRED_FILE" ]]; then
   set -a; source "$CRED_FILE"; set +a
-fi
+fi`;
 
+// Fallback cred lookup for hooks that already have env vars from session-start
+const CRED_LOOKUP_FALLBACK = `# ── Load CV-Hub credentials (fallback if env vars not propagated) ────
+if [[ -z "\${CV_HUB_API:-}" || -z "\${CV_HUB_PAT:-}" ]]; then
+  CRED_FILE=""
+  for candidate in "\${CLAUDE_PROJECT_DIR:-.}/.claude/cv-hub.credentials" \\
+                   "\${HOME}/.config/cv-hub/credentials"; do
+    if [[ -f "$candidate" ]]; then
+      CRED_FILE="$candidate"
+      break
+    fi
+  done
+  if [[ -z "$CRED_FILE" && "$HOME" != "/root" && -f "/root/.config/cv-hub/credentials" ]]; then
+    CRED_FILE="/root/.config/cv-hub/credentials"
+  fi
+  if [[ -n "$CRED_FILE" ]]; then
+    set -a; source "$CRED_FILE"; set +a
+  fi
+fi`;
+
+const HOOK_SESSION_START = `#!/usr/bin/env bash
+# Claude Code hook: SessionStart
+# Registers executor with CV-Hub and injects initial context.
+# Falls back to local cv knowledge CLI if no API credentials.
+set -euo pipefail
+
+${CRED_LOOKUP}
+
+# Read hook input from stdin
 input=$(cat)
 session_id=$(echo "$input" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+cwd=$(echo "$input" | grep -o '"cwd":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+cwd="\${cwd:-$(pwd)}"
 
-if [[ -n "$session_id" && -n "\${CLAUDE_ENV_FILE:-}" ]]; then
-  echo "CV_SESSION_ID=\${session_id}" >> "$CLAUDE_ENV_FILE"
+# Detect owner/repo from git remote
+repo_url=$(git -C "$cwd" remote get-url origin 2>/dev/null || true)
+repo_name=""
+if [[ -n "$repo_url" ]]; then
+  repo_name=$(echo "$repo_url" | sed -E 's#\\.git$##' | sed -E 's#.*[:/]([^/]+/[^/]+)$#\\1#')
 fi
 
-files_csv=""
-if git rev-parse --git-dir >/dev/null 2>&1; then
-  changed=$(git diff --name-only HEAD 2>/dev/null | head -10 | tr '\\n' ',' || true)
-  changed="\${changed%,}"
-  [[ -n "$changed" ]] && files_csv="$changed"
-fi
+# ── API path: register executor + inject context ─────────────────────
+if [[ -n "\${CV_HUB_PAT:-}" && -n "\${CV_HUB_API:-}" ]]; then
+  hostname=$(hostname -s 2>/dev/null || echo "unknown")
+  executor_name="claude-code:\${hostname}:\${session_id:0:8}"
 
-if [[ -n "$files_csv" ]]; then
-  cv knowledge query --files "$files_csv" --exclude-session "\${session_id:-}" --limit 5 2>/dev/null || true
+  payload=$(cat <<EOFPAYLOAD
+{
+  "name": "\${executor_name}",
+  "type": "claude_code",
+  "workspace_root": "\${cwd}",
+  "capabilities": {
+    "tools": ["bash", "read", "write", "edit", "glob", "grep"],
+    "maxConcurrentTasks": 1
+  }
+}
+EOFPAYLOAD
+)
+
+  resp=$(curl -sf -X POST \\
+    -H "Authorization: Bearer \${CV_HUB_PAT}" \\
+    -H "Content-Type: application/json" \\
+    -d "$payload" \\
+    "\${CV_HUB_API}/api/v1/executors" 2>/dev/null) || resp=""
+
+  executor_id=$(echo "$resp" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+
+  if [[ -n "$executor_id" && -n "\${CLAUDE_ENV_FILE:-}" ]]; then
+    echo "CV_HUB_EXECUTOR_ID=\${executor_id}" >> "$CLAUDE_ENV_FILE"
+    echo "CV_HUB_API=\${CV_HUB_API}" >> "$CLAUDE_ENV_FILE"
+    echo "CV_HUB_PAT=\${CV_HUB_PAT}" >> "$CLAUDE_ENV_FILE"
+    [[ -n "$repo_name" ]] && echo "CV_HUB_REPO=\${repo_name}" >> "$CLAUDE_ENV_FILE"
+    [[ -n "$session_id" ]] && echo "CV_HUB_SESSION_ID=\${session_id}" >> "$CLAUDE_ENV_FILE"
+    [[ -n "\${CV_HUB_ORG_OVERRIDE:-}" ]] && echo "CV_HUB_ORG_OVERRIDE=\${CV_HUB_ORG_OVERRIDE}" >> "$CLAUDE_ENV_FILE"
+  fi
+
+  # Context Engine: inject initial context
+  if [[ -n "$repo_name" && -n "$session_id" ]]; then
+    owner="\${CV_HUB_ORG_OVERRIDE:-\${repo_name%%/*}}"
+    repoSlug="\${repo_name##*/}"
+
+    ctx_resp=$(curl -sf -X POST \\
+      -H "Authorization: Bearer \${CV_HUB_PAT}" \\
+      -H "Content-Type: application/json" \\
+      -d "{\\"session_id\\":\\"\${session_id}\\",\\"executor_id\\":\\"\${executor_id:-}\\",\\"concern\\":\\"codebase\\"}" \\
+      "\${CV_HUB_API}/api/v1/repos/\${owner}/\${repoSlug}/context-engine/init" 2>/dev/null) || true
+
+    if [[ -n "$ctx_resp" ]]; then
+      ctx_md=$(python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('context_markdown',''))" <<< "$ctx_resp" 2>/dev/null || true)
+      if [[ -n "$ctx_md" ]]; then
+        echo "$ctx_md"
+      fi
+    fi
+  fi
+else
+  # ── CLI fallback: local knowledge graph ──────────────────────────────
+  if [[ -n "$session_id" && -n "\${CLAUDE_ENV_FILE:-}" ]]; then
+    echo "CV_SESSION_ID=\${session_id}" >> "$CLAUDE_ENV_FILE"
+  fi
+
+  files_csv=""
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    changed=$(git diff --name-only HEAD 2>/dev/null | head -10 | tr '\\n' ',' || true)
+    changed="\${changed%,}"
+    [[ -n "$changed" ]] && files_csv="$changed"
+  fi
+
+  if [[ -n "$files_csv" ]] && command -v cv >/dev/null 2>&1; then
+    cv knowledge query --files "$files_csv" --exclude-session "\${session_id:-}" --limit 5 2>/dev/null || true
+  fi
 fi
 `;
 
 const HOOK_CONTEXT_TURN = `#!/usr/bin/env bash
-# Claude Code hook: Stop (egress + pull)
+# Claude Code hook: Stop (context engine turn injection + egress)
+# Fires after each response cycle. Uses CV-Hub API if available, else local CLI.
 set -euo pipefail
 
-# ── Load CV-Hub credentials ──────────────────────────────────────────
-CRED_FILE=""
-for f in \\
-  "\${CLAUDE_PROJECT_DIR:-.}/.claude/cv-hub.credentials" \\
-  "/home/schmotz/.config/cv-hub/credentials" \\
-  "/root/.config/cv-hub/credentials" \\
-  "\${HOME}/.config/cv-hub/credentials"; do
-  if [[ -f "$f" ]]; then
-    CRED_FILE="$f"
-    break
+${CRED_LOOKUP_FALLBACK}
+
+# ── API path ─────────────────────────────────────────────────────────
+if [[ -n "\${CV_HUB_API:-}" && -n "\${CV_HUB_PAT:-}" && -n "\${CV_HUB_REPO:-}" && -n "\${CV_HUB_SESSION_ID:-}" ]]; then
+  owner="\${CV_HUB_ORG_OVERRIDE:-\${CV_HUB_REPO%%/*}}"
+  repoSlug="\${CV_HUB_REPO##*/}"
+
+  input=$(cat)
+
+  # Turn counter
+  turn_file="/tmp/cv-connect-turn-\${CV_HUB_SESSION_ID}"
+  if [[ -f "$turn_file" ]]; then
+    turn_number=$(( $(cat "$turn_file") + 1 ))
+  else
+    turn_number=1
   fi
-done
-if [[ -n "$CRED_FILE" ]]; then
-  set -a; source "$CRED_FILE"; set +a
-fi
+  echo "$turn_number" > "$turn_file"
 
-if [[ -z "\${CV_SESSION_ID:-}" ]]; then exit 0; fi
-
-input=$(cat)
-
-turn_file="/tmp/cv-turn-\${CV_SESSION_ID}"
-if [[ -f "$turn_file" ]]; then
-  turn_number=$(( $(cat "$turn_file") + 1 ))
-else
-  turn_number=1
-fi
-echo "$turn_number" > "$turn_file"
-
-transcript_segment=""
-if command -v python3 >/dev/null 2>&1; then
+  # Extract last assistant message
   transcript_segment=$(python3 -c "
+import sys, json
+try:
+    d = json.loads(sys.stdin.read())
+    msg = d.get('last_assistant_message', '')
+    print(msg[:2000])
+except:
+    print('')
+" <<< "$input" 2>/dev/null || true)
+
+  # Extract files touched from git changes
+  files_json="[]"
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    changed=$(git diff --name-only HEAD 2>/dev/null || true)
+    if [[ -n "$changed" ]]; then
+      files_json=$(echo "$changed" | head -20 | python3 -c "
+import sys, json
+files = [line.strip() for line in sys.stdin if line.strip()]
+print(json.dumps(files))
+" 2>/dev/null || echo "[]")
+    fi
+  fi
+
+  # Pull: call /turn for context injection
+  payload=$(python3 -c "
+import json
+print(json.dumps({
+    'session_id': '\${CV_HUB_SESSION_ID}',
+    'files_touched': \${files_json},
+    'symbols_referenced': [],
+    'turn_count': \${turn_number},
+    'estimated_tokens_used': 0,
+    'concern': 'codebase'
+}))
+" 2>/dev/null) || exit 0
+
+  resp=$(curl -sf -X POST \\
+    -H "Authorization: Bearer \${CV_HUB_PAT}" \\
+    -H "Content-Type: application/json" \\
+    -d "$payload" \\
+    "\${CV_HUB_API}/api/v1/repos/\${owner}/\${repoSlug}/context-engine/turn" 2>/dev/null) || exit 0
+
+  ctx_md=$(python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+md = d.get('data', {}).get('context_markdown', '')
+if md.strip():
+    print(md)
+" <<< "$resp" 2>/dev/null || true)
+
+  if [[ -n "$ctx_md" ]]; then
+    echo "$ctx_md"
+  fi
+
+  # Push: fire-and-forget /egress call
+  if [[ -n "$transcript_segment" ]]; then
+    egress_payload=$(python3 -c "
+import json, sys
+segment = sys.stdin.read()
+print(json.dumps({
+    'session_id': '\${CV_HUB_SESSION_ID}',
+    'turn_number': \${turn_number},
+    'transcript_segment': segment,
+    'files_touched': \${files_json},
+    'symbols_referenced': [],
+    'concern': 'codebase'
+}))
+" <<< "$transcript_segment" 2>/dev/null || true)
+
+    if [[ -n "$egress_payload" ]]; then
+      curl -sf -X POST \\
+        -H "Authorization: Bearer \${CV_HUB_PAT}" \\
+        -H "Content-Type: application/json" \\
+        -d "$egress_payload" \\
+        "\${CV_HUB_API}/api/v1/repos/\${owner}/\${repoSlug}/context-engine/egress" \\
+        >/dev/null 2>&1 &
+    fi
+  fi
+
+# ── CLI fallback ─────────────────────────────────────────────────────
+elif [[ -n "\${CV_SESSION_ID:-}" ]]; then
+  input=$(cat)
+
+  turn_file="/tmp/cv-turn-\${CV_SESSION_ID}"
+  if [[ -f "$turn_file" ]]; then
+    turn_number=$(( $(cat "$turn_file") + 1 ))
+  else
+    turn_number=1
+  fi
+  echo "$turn_number" > "$turn_file"
+
+  transcript_segment=""
+  if command -v python3 >/dev/null 2>&1; then
+    transcript_segment=$(python3 -c "
 import sys, json
 try:
     d = json.loads(sys.stdin.read())
@@ -627,56 +815,45 @@ try:
 except:
     print('')
 " <<< "$input" 2>/dev/null || true)
-fi
+  fi
 
-files_csv=""
-if git rev-parse --git-dir >/dev/null 2>&1; then
-  changed=$(git diff --name-only HEAD 2>/dev/null | head -20 | tr '\\n' ',' || true)
-  changed="\${changed%,}"
-  [[ -n "$changed" ]] && files_csv="$changed"
-fi
+  files_csv=""
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    changed=$(git diff --name-only HEAD 2>/dev/null | head -20 | tr '\\n' ',' || true)
+    changed="\${changed%,}"
+    [[ -n "$changed" ]] && files_csv="$changed"
+  fi
 
-if [[ -n "$transcript_segment" ]]; then
-  cv knowledge egress \\
-    --session-id "$CV_SESSION_ID" \\
-    --turn "$turn_number" \\
-    --transcript "$transcript_segment" \\
-    \${files_csv:+--files "$files_csv"} \\
-    --concern "codebase" \\
-    >/dev/null 2>&1 &
-fi
+  if [[ -n "$transcript_segment" ]] && command -v cv >/dev/null 2>&1; then
+    cv knowledge egress \\
+      --session-id "$CV_SESSION_ID" \\
+      --turn "$turn_number" \\
+      --transcript "$transcript_segment" \\
+      \${files_csv:+--files "$files_csv"} \\
+      --concern "codebase" \\
+      >/dev/null 2>&1 &
+  fi
 
-if [[ -n "$files_csv" ]]; then
-  cv knowledge query --files "$files_csv" --exclude-session "$CV_SESSION_ID" --limit 3 2>/dev/null || true
+  if [[ -n "$files_csv" ]] && command -v cv >/dev/null 2>&1; then
+    cv knowledge query --files "$files_csv" --exclude-session "$CV_SESSION_ID" --limit 3 2>/dev/null || true
+  fi
 fi
 `;
 
 const HOOK_CONTEXT_CHECKPOINT = `#!/usr/bin/env bash
 # Claude Code hook: PreCompact
+# Saves a checkpoint before compaction. Uses CV-Hub API if available, else local CLI.
 set -euo pipefail
 
-# ── Load CV-Hub credentials ──────────────────────────────────────────
-CRED_FILE=""
-for f in \\
-  "\${CLAUDE_PROJECT_DIR:-.}/.claude/cv-hub.credentials" \\
-  "/home/schmotz/.config/cv-hub/credentials" \\
-  "/root/.config/cv-hub/credentials" \\
-  "\${HOME}/.config/cv-hub/credentials"; do
-  if [[ -f "$f" ]]; then
-    CRED_FILE="$f"
-    break
-  fi
-done
-if [[ -n "$CRED_FILE" ]]; then
-  set -a; source "$CRED_FILE"; set +a
-fi
+${CRED_LOOKUP_FALLBACK}
 
-if [[ -z "\${CV_SESSION_ID:-}" ]]; then exit 0; fi
+# ── API path ─────────────────────────────────────────────────────────
+if [[ -n "\${CV_HUB_API:-}" && -n "\${CV_HUB_PAT:-}" && -n "\${CV_HUB_REPO:-}" && -n "\${CV_HUB_SESSION_ID:-}" ]]; then
+  owner="\${CV_HUB_ORG_OVERRIDE:-\${CV_HUB_REPO%%/*}}"
+  repoSlug="\${CV_HUB_REPO##*/}"
 
-input=$(cat)
+  input=$(cat)
 
-summary=""
-if command -v python3 >/dev/null 2>&1; then
   summary=$(python3 -c "
 import sys, json
 try:
@@ -685,51 +862,162 @@ try:
 except:
     print('')
 " <<< "$input" 2>/dev/null || true)
-fi
 
-files_csv=""
-if git rev-parse --git-dir >/dev/null 2>&1; then
-  changed=$(git diff --name-only HEAD 2>/dev/null || true)
-  staged=$(git diff --name-only --cached 2>/dev/null || true)
-  all_files=$(echo -e "\${changed}\\n\${staged}" | sort -u | head -30 | tr '\\n' ',' || true)
-  all_files="\${all_files%,}"
-  [[ -n "$all_files" ]] && files_csv="$all_files"
-fi
+  files_json="[]"
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    changed=$(git diff --name-only HEAD 2>/dev/null || true)
+    staged=$(git diff --name-only --cached 2>/dev/null || true)
+    all_files=$(echo -e "\${changed}\\n\${staged}" | sort -u)
+    if [[ -n "$all_files" ]]; then
+      files_json=$(echo "$all_files" | head -30 | python3 -c "
+import sys, json
+files = [line.strip() for line in sys.stdin if line.strip()]
+print(json.dumps(files))
+" 2>/dev/null || echo "[]")
+    fi
+  fi
 
-if [[ -n "$summary" ]]; then
-  cv knowledge egress \\
-    --session-id "$CV_SESSION_ID" \\
-    --turn 9999 \\
-    --transcript "$summary" \\
-    \${files_csv:+--files "$files_csv"} \\
-    --concern "checkpoint" \\
+  payload=$(python3 -c "
+import json, sys
+print(json.dumps({
+    'session_id': '\${CV_HUB_SESSION_ID}',
+    'transcript_summary': sys.argv[1][:5000],
+    'files_in_context': json.loads(sys.argv[2]),
+    'symbols_in_context': []
+}))
+" "$summary" "$files_json" 2>/dev/null) || exit 0
+
+  curl -sf -X POST \\
+    -H "Authorization: Bearer \${CV_HUB_PAT}" \\
+    -H "Content-Type: application/json" \\
+    -d "$payload" \\
+    "\${CV_HUB_API}/api/v1/repos/\${owner}/\${repoSlug}/context-engine/checkpoint" \\
     >/dev/null 2>&1 || true
+
+# ── CLI fallback ─────────────────────────────────────────────────────
+elif [[ -n "\${CV_SESSION_ID:-}" ]]; then
+  input=$(cat)
+
+  summary=""
+  if command -v python3 >/dev/null 2>&1; then
+    summary=$(python3 -c "
+import sys, json
+try:
+    d = json.loads(sys.stdin.read())
+    print(d.get('summary', '')[:5000])
+except:
+    print('')
+" <<< "$input" 2>/dev/null || true)
+  fi
+
+  files_csv=""
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    changed=$(git diff --name-only HEAD 2>/dev/null || true)
+    staged=$(git diff --name-only --cached 2>/dev/null || true)
+    all_files=$(echo -e "\${changed}\\n\${staged}" | sort -u | head -30 | tr '\\n' ',' || true)
+    all_files="\${all_files%,}"
+    [[ -n "$all_files" ]] && files_csv="$all_files"
+  fi
+
+  if [[ -n "$summary" ]] && command -v cv >/dev/null 2>&1; then
+    cv knowledge egress \\
+      --session-id "$CV_SESSION_ID" \\
+      --turn 9999 \\
+      --transcript "$summary" \\
+      \${files_csv:+--files "$files_csv"} \\
+      --concern "checkpoint" \\
+      >/dev/null 2>&1 || true
+  fi
 fi
 `;
 
 const HOOK_SESSION_END = `#!/usr/bin/env bash
 # Claude Code hook: SessionEnd
+# Unregisters executor from CV-Hub, or cleans up local state.
 set -euo pipefail
 
-# ── Load CV-Hub credentials ──────────────────────────────────────────
-CRED_FILE=""
-for f in \\
-  "\${CLAUDE_PROJECT_DIR:-.}/.claude/cv-hub.credentials" \\
-  "/home/schmotz/.config/cv-hub/credentials" \\
-  "/root/.config/cv-hub/credentials" \\
-  "\${HOME}/.config/cv-hub/credentials"; do
-  if [[ -f "$f" ]]; then
-    CRED_FILE="$f"
-    break
-  fi
-done
-if [[ -n "$CRED_FILE" ]]; then
-  set -a; source "$CRED_FILE"; set +a
+${CRED_LOOKUP_FALLBACK}
+
+# ── API path: unregister executor ────────────────────────────────────
+if [[ -n "\${CV_HUB_EXECUTOR_ID:-}" && -n "\${CV_HUB_API:-}" && -n "\${CV_HUB_PAT:-}" ]]; then
+  curl -sf -X DELETE \\
+    -H "Authorization: Bearer \${CV_HUB_PAT}" \\
+    "\${CV_HUB_API}/api/v1/executors/\${CV_HUB_EXECUTOR_ID}" \\
+    >/dev/null 2>&1 || true
 fi
 
-if [[ -z "\${CV_SESSION_ID:-}" ]]; then exit 0; fi
-rm -f "/tmp/cv-turn-\${CV_SESSION_ID}" 2>/dev/null || true
+# ── Cleanup turn counter files ───────────────────────────────────────
+if [[ -n "\${CV_HUB_SESSION_ID:-}" ]]; then
+  rm -f "/tmp/cv-connect-turn-\${CV_HUB_SESSION_ID}" 2>/dev/null || true
+fi
+if [[ -n "\${CV_SESSION_ID:-}" ]]; then
+  rm -f "/tmp/cv-turn-\${CV_SESSION_ID}" 2>/dev/null || true
+fi
 `;
+
+/**
+ * Validate Claude Code hook setup after installation.
+ * Prints a summary of what's working and what needs attention.
+ */
+async function validateClaudeSetup(repoRoot: string, nonInteractive: boolean): Promise<void> {
+  if (nonInteractive) return;
+
+  console.log();
+  console.log(chalk.bold('Claude Code hook validation:'));
+
+  const hooksDir = path.join(repoRoot, '.claude', 'hooks');
+  const settingsPath = path.join(repoRoot, '.claude', 'settings.json');
+
+  // Check all 4 hook scripts exist
+  const hookFiles = ['session-start.sh', 'context-turn.sh', 'context-checkpoint.sh', 'session-end.sh'];
+  const allHooksExist = hookFiles.every((f) => fs.existsSync(path.join(hooksDir, f)));
+  if (allHooksExist) {
+    console.log(chalk.green('  ✓ Hook scripts installed'));
+  } else {
+    const missing = hookFiles.filter((f) => !fs.existsSync(path.join(hooksDir, f)));
+    console.log(chalk.yellow(`  ⚠ Missing hooks: ${missing.join(', ')}`));
+  }
+
+  // Check settings.json uses $CLAUDE_PROJECT_DIR
+  if (fs.existsSync(settingsPath)) {
+    const content = fs.readFileSync(settingsPath, 'utf-8');
+    if (content.includes('$CLAUDE_PROJECT_DIR')) {
+      console.log(chalk.green('  ✓ settings.json uses $CLAUDE_PROJECT_DIR paths'));
+    } else {
+      console.log(chalk.yellow('  ⚠ settings.json may use relative paths (run cv init -y to update)'));
+    }
+  } else {
+    console.log(chalk.yellow('  ⚠ settings.json not found'));
+  }
+
+  // Check credentials and API reachability
+  const credPaths = [
+    path.join(repoRoot, '.claude', 'cv-hub.credentials'),
+    path.join(process.env.HOME || '', '.config', 'cv-hub', 'credentials'),
+    '/root/.config/cv-hub/credentials',
+  ];
+  const credPath = credPaths.find((p) => fs.existsSync(p));
+  if (credPath) {
+    console.log(chalk.green(`  ✓ Credentials found`));
+    try {
+      const creds = fs.readFileSync(credPath, 'utf-8');
+      const apiMatch = creds.match(/CV_HUB_API=(.+)/);
+      if (apiMatch) {
+        const apiUrl = apiMatch[1].trim();
+        const resp = await fetch(`${apiUrl}/health`, { signal: AbortSignal.timeout(5000) });
+        if (resp.ok) {
+          console.log(chalk.green(`  ✓ CV-Hub API reachable`));
+        } else {
+          console.log(chalk.yellow(`  ⚠ CV-Hub API returned ${resp.status}`));
+        }
+      }
+    } catch {
+      console.log(chalk.yellow('  ⚠ CV-Hub API unreachable (hooks will use CLI fallback)'));
+    }
+  } else {
+    console.log(chalk.yellow('  ⚠ No credentials (run cv auth login)'));
+  }
+}
 
 /**
  * Set up Ollama for local embeddings with smart detection

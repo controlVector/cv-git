@@ -16,7 +16,7 @@ import chalk from 'chalk';
 import inquirer from 'inquirer';
 import ora from 'ora';
 import Table from 'cli-table3';
-import { mkdirSync, writeFileSync, chmodSync } from 'fs';
+import { mkdirSync, writeFileSync, chmodSync, existsSync, readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
 import {
@@ -255,6 +255,57 @@ export function authCommand(): Command {
         spinner.succeed(chalk.green(`Removed ${type}:${name}`));
       } catch (error: any) {
         spinner.fail(chalk.red(`Failed to remove: ${error.message}`));
+      }
+    });
+
+  // cv auth login — OAuth device flow + hook credentials in one step
+  cmd
+    .command('login')
+    .description('Authenticate with CV-Hub via browser (OAuth device flow)')
+    .option('--no-browser', 'Do not open browser automatically')
+    .action(async (cmdOptions: { browser?: boolean }) => {
+      const autoBrowser = cmdOptions?.browser !== false;
+      const credentials = new CredentialManager();
+      await credentials.init();
+
+      // Run the full device flow (creates PAT, configures git, writes hook credentials)
+      await setupCVHub(credentials, autoBrowser);
+
+      // Best-effort: detect org mismatch and append override
+      try {
+        const { execSync } = await import('child_process');
+        const remoteUrl = execSync('git remote get-url origin', {
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'ignore'],
+        }).trim();
+        const remoteMatch = remoteUrl.match(/[:/]([^/]+)\/[^/]+(?:\.git)?$/);
+        const remoteOrg = remoteMatch?.[1];
+
+        if (remoteOrg) {
+          // Get the authenticated user's username from stored credentials
+          const allCreds = await credentials.list();
+          const cvHubCred = allCreds.find(
+            (c) =>
+              c.type === CredentialType.GIT_PLATFORM_TOKEN &&
+              (c as GitPlatformTokenCredential).platform === GitPlatform.CV_HUB
+          ) as GitPlatformTokenCredential | undefined;
+
+          const username = cvHubCred?.username;
+          if (username && remoteOrg.toLowerCase() !== username.toLowerCase()) {
+            // Org mismatch — append override to credentials file
+            const credPath = join(homedir(), '.config', 'cv-hub', 'credentials');
+            if (existsSync(credPath)) {
+              let content = readFileSync(credPath, 'utf-8');
+              if (!content.includes('CV_HUB_ORG_OVERRIDE')) {
+                content += `CV_HUB_ORG_OVERRIDE=${username}\n`;
+                writeFileSync(credPath, content, { mode: 0o600 });
+                console.log(chalk.green(`  ✓ Set org override: ${remoteOrg} → ${username}`));
+              }
+            }
+          }
+        }
+      } catch {
+        // Not in a git repo or no remote — skip org detection
       }
     });
 

@@ -128,6 +128,120 @@ export function doctorCommand(): Command {
       results.push(await checkOllama());
       results.push(await checkDiskSpace());
       results.push(await checkNetworkConnectivity());
+      results.push(await checkCVHubAuth());
+      results.push(await checkCVHubAPI());
+      results.push(await checkClaudeHooks());
+      results.push(await checkHookDryRun());
+      results.push(await checkOrgMismatch());
+
+      // Auto-fix mode
+      if (options.fix) {
+        const fixed: string[] = [];
+
+        // Fix hook permissions
+        const hooksDir = path.join(process.cwd(), '.claude', 'hooks');
+        for (const f of ['session-start.sh', 'context-turn.sh', 'context-checkpoint.sh', 'session-end.sh']) {
+          const hookPath = path.join(hooksDir, f);
+          try {
+            await fs.chmod(hookPath, 0o755);
+            fixed.push(`chmod 755 ${f}`);
+          } catch { /* skip */ }
+        }
+
+        // Copy credentials to /root if running as sudo
+        if (process.env.SUDO_USER && process.env.HOME !== '/root') {
+          const userCredPath = path.join(process.env.HOME || '', '.config', 'cv-hub', 'credentials');
+          const rootCredPath = '/root/.config/cv-hub/credentials';
+          try {
+            const content = await fs.readFile(userCredPath, 'utf-8');
+            await fs.mkdir('/root/.config/cv-hub', { recursive: true });
+            await fs.writeFile(rootCredPath, content, { mode: 0o600 });
+            fixed.push('Copied credentials to /root');
+          } catch { /* skip */ }
+        }
+
+        // Fix settings.json format (old flat format → new nested, add $CLAUDE_PROJECT_DIR)
+        const settingsPath = path.join(process.cwd(), '.claude', 'settings.json');
+        try {
+          const content = await fs.readFile(settingsPath, 'utf-8');
+          const settings = JSON.parse(content);
+          let needsUpdate = false;
+
+          if (settings.hooks) {
+            for (const [_event, hooks] of Object.entries(settings.hooks as Record<string, any[]>)) {
+              if (Array.isArray(hooks)) {
+                for (let i = 0; i < hooks.length; i++) {
+                  // Fix old flat format
+                  if (hooks[i].type === 'command' && hooks[i].command && !hooks[i].hooks) {
+                    hooks[i] = { hooks: [{ type: hooks[i].type, command: hooks[i].command }] };
+                    needsUpdate = true;
+                  }
+                  // Fix old paths without $CLAUDE_PROJECT_DIR
+                  const cmd = hooks[i].hooks?.[0]?.command || '';
+                  if (cmd.includes('.claude/hooks/') && !cmd.includes('$CLAUDE_PROJECT_DIR')) {
+                    hooks[i].hooks[0].command = cmd.replace(
+                      /bash\s+(?:["'])?\.claude\/hooks\//,
+                      'bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/'
+                    );
+                    needsUpdate = true;
+                  }
+                }
+              }
+            }
+          }
+
+          if (needsUpdate) {
+            await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+            fixed.push('Updated settings.json format');
+          }
+        } catch { /* skip */ }
+
+        // Add org override if mismatch detected
+        try {
+          const { stdout: remoteUrl } = await execAsync('git remote get-url origin 2>/dev/null');
+          const remoteMatch = remoteUrl.trim().match(/[:/]([^/]+)\/[^/]+(?:\.git)?$/);
+          const remoteOrg = remoteMatch?.[1];
+
+          if (remoteOrg) {
+            const credPaths = [
+              path.join(process.env.HOME || '', '.config', 'cv-hub', 'credentials'),
+              '/root/.config/cv-hub/credentials',
+            ];
+            for (const cp of credPaths) {
+              try {
+                let credContent = await fs.readFile(cp, 'utf-8');
+                const pat = credContent.match(/CV_HUB_PAT=(.+)/)?.[1]?.trim();
+                const apiUrl = credContent.match(/CV_HUB_API=(.+)/)?.[1]?.trim();
+
+                if (pat && apiUrl && !credContent.includes('CV_HUB_ORG_OVERRIDE')) {
+                  const resp = await fetch(`${apiUrl}/oauth/userinfo`, {
+                    headers: { Authorization: `Bearer ${pat}` },
+                    signal: AbortSignal.timeout(5000),
+                  });
+                  if (resp.ok) {
+                    const info = await resp.json() as { preferred_username?: string };
+                    const username = info.preferred_username;
+                    if (username && remoteOrg.toLowerCase() !== username.toLowerCase()) {
+                      credContent += `CV_HUB_ORG_OVERRIDE=${username}\n`;
+                      await fs.writeFile(cp, credContent, { mode: 0o600 });
+                      fixed.push(`Added CV_HUB_ORG_OVERRIDE=${username} to ${cp}`);
+                    }
+                  }
+                }
+                break; // Only fix first found credentials file
+              } catch { continue; }
+            }
+          }
+        } catch { /* skip */ }
+
+        if (fixed.length > 0) {
+          console.log(chalk.bold('\nAuto-fixes applied:'));
+          for (const f of fixed) {
+            console.log(chalk.green(`  ✓ ${f}`));
+          }
+          console.log();
+        }
+      }
 
       if (options.json) {
         console.log(JSON.stringify({ results }, null, 2));
@@ -755,4 +869,358 @@ async function checkNetworkConnectivity(): Promise<DiagnosticResult> {
     status: 'warn',
     message: 'Limited connectivity (API calls may fail)',
   };
+}
+
+/**
+ * Check CV-Hub authentication (credentials file + PAT validation)
+ */
+async function checkCVHubAuth(): Promise<DiagnosticResult> {
+  const credPaths = [
+    path.join(process.env.HOME || '', '.config', 'cv-hub', 'credentials'),
+    '/root/.config/cv-hub/credentials',
+    path.join(process.cwd(), '.claude', 'cv-hub.credentials'),
+  ];
+
+  let credPath: string | null = null;
+  for (const p of credPaths) {
+    try {
+      await fs.access(p);
+      credPath = p;
+      break;
+    } catch {
+      continue;
+    }
+  }
+
+  if (!credPath) {
+    return {
+      name: 'CV-Hub Authentication',
+      status: 'warn',
+      message: 'No credentials file found',
+      fix: 'Run "cv auth login" to authenticate with CV-Hub',
+    };
+  }
+
+  try {
+    const content = await fs.readFile(credPath, 'utf-8');
+    const patMatch = content.match(/CV_HUB_PAT=(.+)/);
+    const apiMatch = content.match(/CV_HUB_API=(.+)/);
+
+    if (!patMatch || !apiMatch) {
+      return {
+        name: 'CV-Hub Authentication',
+        status: 'warn',
+        message: `Credentials file incomplete (${credPath})`,
+        fix: 'Run "cv auth login" to reconfigure',
+      };
+    }
+
+    const apiUrl = apiMatch[1].trim();
+    const pat = patMatch[1].trim();
+
+    try {
+      const resp = await fetch(`${apiUrl}/oauth/userinfo`, {
+        headers: { Authorization: `Bearer ${pat}` },
+        signal: AbortSignal.timeout(5000),
+      });
+
+      if (resp.ok) {
+        const userInfo = (await resp.json()) as { preferred_username?: string };
+        const orgMatch = content.match(/CV_HUB_ORG_OVERRIDE=(.+)/);
+        const org = orgMatch ? orgMatch[1].trim() : '';
+        const parts = [`User: ${userInfo.preferred_username || 'unknown'}`];
+        if (org) parts.push(`Org: ${org}`);
+        return {
+          name: 'CV-Hub Authentication',
+          status: 'pass',
+          message: parts.join(', '),
+        };
+      } else {
+        return {
+          name: 'CV-Hub Authentication',
+          status: 'warn',
+          message: `PAT validation failed (HTTP ${resp.status})`,
+          fix: 'Run "cv auth login" to re-authenticate',
+        };
+      }
+    } catch {
+      return {
+        name: 'CV-Hub Authentication',
+        status: 'warn',
+        message: 'Could not validate PAT (API unreachable)',
+        fix: 'Check network connectivity to CV-Hub',
+      };
+    }
+  } catch (error: any) {
+    return {
+      name: 'CV-Hub Authentication',
+      status: 'warn',
+      message: `Could not read credentials: ${error.message}`,
+    };
+  }
+}
+
+/**
+ * Check CV-Hub API connectivity and latency
+ */
+async function checkCVHubAPI(): Promise<DiagnosticResult> {
+  const credPaths = [
+    path.join(process.env.HOME || '', '.config', 'cv-hub', 'credentials'),
+    '/root/.config/cv-hub/credentials',
+    path.join(process.cwd(), '.claude', 'cv-hub.credentials'),
+  ];
+
+  let apiUrl = 'https://api.hub.controlvector.io';
+  for (const p of credPaths) {
+    try {
+      const content = await fs.readFile(p, 'utf-8');
+      const match = content.match(/CV_HUB_API=(.+)/);
+      if (match) {
+        apiUrl = match[1].trim();
+        break;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  try {
+    const start = Date.now();
+    const resp = await fetch(`${apiUrl}/health`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    const latency = Date.now() - start;
+
+    if (resp.ok) {
+      return {
+        name: 'CV-Hub API',
+        status: 'pass',
+        message: `Reachable at ${apiUrl} (${latency}ms)`,
+      };
+    } else {
+      return {
+        name: 'CV-Hub API',
+        status: 'warn',
+        message: `Returned HTTP ${resp.status} at ${apiUrl}`,
+      };
+    }
+  } catch {
+    return {
+      name: 'CV-Hub API',
+      status: 'warn',
+      message: `Unreachable at ${apiUrl}`,
+      fix: 'Check network connectivity or CV_HUB_API in credentials',
+    };
+  }
+}
+
+/**
+ * Check Claude Code hooks installation and settings.json format
+ */
+async function checkClaudeHooks(): Promise<DiagnosticResult> {
+  const hooksDir = path.join(process.cwd(), '.claude', 'hooks');
+  const settingsPath = path.join(process.cwd(), '.claude', 'settings.json');
+
+  const hookFiles = ['session-start.sh', 'context-turn.sh', 'context-checkpoint.sh', 'session-end.sh'];
+  const missing: string[] = [];
+  const present: string[] = [];
+
+  for (const f of hookFiles) {
+    try {
+      await fs.access(path.join(hooksDir, f));
+      present.push(f);
+    } catch {
+      missing.push(f);
+    }
+  }
+
+  if (missing.length === hookFiles.length) {
+    return {
+      name: 'Claude Code Hooks',
+      status: 'warn',
+      message: 'No hook scripts found',
+      fix: 'Run "cv init -y" to install hooks',
+    };
+  }
+
+  let settingsOk = false;
+  let usesProjectDir = false;
+  try {
+    const content = await fs.readFile(settingsPath, 'utf-8');
+    JSON.parse(content);
+    settingsOk = true;
+    usesProjectDir = content.includes('$CLAUDE_PROJECT_DIR');
+  } catch {
+    // settings.json missing or invalid
+  }
+
+  if (missing.length > 0) {
+    return {
+      name: 'Claude Code Hooks',
+      status: 'warn',
+      message: `Missing hooks: ${missing.join(', ')}`,
+      fix: 'Run "cv init -y" to reinstall hooks',
+    };
+  }
+
+  if (!settingsOk) {
+    return {
+      name: 'Claude Code Hooks',
+      status: 'warn',
+      message: `${present.length}/4 hooks installed, settings.json invalid`,
+      fix: 'Run "cv init -y" to regenerate settings.json',
+    };
+  }
+
+  if (!usesProjectDir) {
+    return {
+      name: 'Claude Code Hooks',
+      status: 'warn',
+      message: 'Hooks installed but settings.json uses relative paths',
+      fix: 'Run "cv init -y" to update to $CLAUDE_PROJECT_DIR paths',
+    };
+  }
+
+  return {
+    name: 'Claude Code Hooks',
+    status: 'pass',
+    message: `${present.length}/4 hooks installed, settings.json valid`,
+  };
+}
+
+/**
+ * Dry-run session-start.sh to check it executes without error
+ */
+async function checkHookDryRun(): Promise<DiagnosticResult> {
+  const hookPath = path.join(process.cwd(), '.claude', 'hooks', 'session-start.sh');
+
+  try {
+    await fs.access(hookPath);
+  } catch {
+    return {
+      name: 'Hook Dry Run',
+      status: 'warn',
+      message: 'session-start.sh not found, skipping dry run',
+    };
+  }
+
+  try {
+    const testInput = JSON.stringify({
+      session_id: 'doctor-test',
+      cwd: process.cwd(),
+      hook_event_name: 'SessionStart',
+      source: 'doctor',
+    });
+
+    await execAsync(
+      `echo '${testInput.replace(/'/g, "'\\''")}' | bash "${hookPath}" 2>&1`,
+      { timeout: 10000 }
+    );
+
+    return {
+      name: 'Hook Dry Run',
+      status: 'pass',
+      message: 'session-start.sh executed successfully',
+    };
+  } catch (error: any) {
+    return {
+      name: 'Hook Dry Run',
+      status: 'warn',
+      message: `session-start.sh failed: ${(error.message || '').slice(0, 100)}`,
+      fix: 'Check hook script for errors or missing dependencies',
+    };
+  }
+}
+
+/**
+ * Check for org mismatch between git remote and CV-Hub credentials
+ */
+async function checkOrgMismatch(): Promise<DiagnosticResult> {
+  try {
+    const { stdout: remoteUrl } = await execAsync('git remote get-url origin 2>/dev/null');
+    const remoteMatch = remoteUrl.trim().match(/[:/]([^/]+)\/[^/]+(?:\.git)?$/);
+    const remoteOrg = remoteMatch?.[1];
+
+    if (!remoteOrg) {
+      return {
+        name: 'Org Mismatch Check',
+        status: 'pass',
+        message: 'No git remote configured, skipping',
+      };
+    }
+
+    const credPaths = [
+      path.join(process.env.HOME || '', '.config', 'cv-hub', 'credentials'),
+      '/root/.config/cv-hub/credentials',
+      path.join(process.cwd(), '.claude', 'cv-hub.credentials'),
+    ];
+
+    let credContent = '';
+    for (const p of credPaths) {
+      try {
+        credContent = await fs.readFile(p, 'utf-8');
+        break;
+      } catch {
+        continue;
+      }
+    }
+
+    if (!credContent) {
+      return {
+        name: 'Org Mismatch Check',
+        status: 'pass',
+        message: 'No credentials found, skipping',
+      };
+    }
+
+    const orgOverride = credContent.match(/CV_HUB_ORG_OVERRIDE=(.+)/)?.[1]?.trim();
+
+    if (orgOverride) {
+      return {
+        name: 'Org Mismatch Check',
+        status: 'pass',
+        message: `Org override set: ${orgOverride} (remote: ${remoteOrg})`,
+      };
+    }
+
+    // Try to get username from API
+    const pat = credContent.match(/CV_HUB_PAT=(.+)/)?.[1]?.trim();
+    const apiUrl = credContent.match(/CV_HUB_API=(.+)/)?.[1]?.trim();
+
+    if (pat && apiUrl) {
+      try {
+        const resp = await fetch(`${apiUrl}/oauth/userinfo`, {
+          headers: { Authorization: `Bearer ${pat}` },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (resp.ok) {
+          const info = (await resp.json()) as { preferred_username?: string };
+          const username = info.preferred_username;
+
+          if (username && remoteOrg.toLowerCase() !== username.toLowerCase()) {
+            return {
+              name: 'Org Mismatch Check',
+              status: 'warn',
+              message: `Git remote org "${remoteOrg}" differs from CV-Hub user "${username}"`,
+              fix: `Run "cv auth add-hub --org ${username}" or set CV_HUB_ORG_OVERRIDE=${username} in credentials`,
+            };
+          }
+        }
+      } catch {
+        // Can't reach API — skip check
+      }
+    }
+
+    return {
+      name: 'Org Mismatch Check',
+      status: 'pass',
+      message: `Git remote org: ${remoteOrg}`,
+    };
+  } catch {
+    return {
+      name: 'Org Mismatch Check',
+      status: 'pass',
+      message: 'Not in a git repo, skipping',
+    };
+  }
 }

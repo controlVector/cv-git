@@ -259,6 +259,55 @@ async function postAuthSetup(
   } catch {
     // Not in a git repo — skip MCP setup silently
   }
+
+  // Step 4: Write flat credentials file for hooks
+  const credPaths = writeHookCredentials(config.apiUrl, pat);
+  for (const p of credPaths) {
+    console.log(chalk.green(`  ✓ Hook credentials written to ${p}`));
+  }
+}
+
+// ==================== Hook Credentials ====================
+
+/**
+ * Write flat credentials file for Claude Code hooks.
+ * Writes to ~/.config/cv-hub/credentials (and /root/ if running as sudo).
+ * Returns the paths that were successfully written.
+ */
+export function writeHookCredentials(apiUrl: string, pat: string, orgOverride?: string): string[] {
+  const lines = [
+    `CV_HUB_PAT=${pat}`,
+    `CV_HUB_API=${apiUrl}`,
+  ];
+  if (orgOverride) {
+    lines.push(`CV_HUB_ORG_OVERRIDE=${orgOverride}`);
+  }
+  const credContent = lines.join('\n') + '\n';
+  const writtenPaths: string[] = [];
+
+  // Write to user's home
+  const homeCredDir = join(homedir(), '.config', 'cv-hub');
+  const homeCredPath = join(homeCredDir, 'credentials');
+  try {
+    mkdirSync(homeCredDir, { recursive: true });
+    writeFileSync(homeCredPath, credContent, { mode: 0o600 });
+    writtenPaths.push(homeCredPath);
+  } catch {
+    // Best-effort
+  }
+
+  // If running as sudo, also write to /root
+  if (process.env.SUDO_USER && homedir() !== '/root') {
+    try {
+      mkdirSync('/root/.config/cv-hub', { recursive: true });
+      writeFileSync('/root/.config/cv-hub/credentials', credContent, { mode: 0o600 });
+      writtenPaths.push('/root/.config/cv-hub/credentials');
+    } catch {
+      // May not have root write access
+    }
+  }
+
+  return writtenPaths;
 }
 
 // ==================== Device Authorization Flow ====================
