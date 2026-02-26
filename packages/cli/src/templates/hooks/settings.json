@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "command": "bash .claude/hooks/session-start.sh",
+        "timeout": 10000
+      }
+    ],
+    "SessionEnd": [
+      {
+        "command": "bash .claude/hooks/session-end.sh",
+        "timeout": 5000
+      }
+    ],
+    "PreCompact": [
+      {
+        "command": "bash .claude/hooks/context-checkpoint.sh",
+        "timeout": 5000
+      }
+    ],
+    "Stop": [
+      {
+        "command": "bash .claude/hooks/context-turn.sh",
+        "timeout": 8000
+      }
+    ]
+  }
+}

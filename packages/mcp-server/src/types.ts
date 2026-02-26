@@ -187,3 +187,25 @@ export interface ReasonArgs {
   maxDepth?: number;   // Maximum recursion depth (default: 5)
   showTrace?: boolean; // Include reasoning trace in output
 }
+
+/**
+ * Tool arguments for cv_session_knowledge
+ */
+export interface SessionKnowledgeArgs {
+  files?: string[];           // Filter by file paths
+  symbols?: string[];         // Filter by qualified symbol names
+  excludeSessionId?: string;  // Exclude a specific session
+  limit?: number;             // Max results (default: 10)
+}
+
+/**
+ * Tool arguments for cv_session_egress
+ */
+export interface SessionEgressArgs {
+  sessionId: string;
+  turnNumber: number;
+  transcript_segment: string;
+  files_touched?: string[];
+  symbols_referenced?: string[];
+  concern?: string;
+}

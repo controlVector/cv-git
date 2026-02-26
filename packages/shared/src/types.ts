@@ -287,6 +287,25 @@ export interface TouchesEdge {
   lineDelta: number;
 }
 
+// ========== Session Knowledge Types ==========
+
+export interface SessionKnowledgeNode {
+  sessionId: string;
+  turnNumber: number;
+  timestamp: number;
+  summary: string;
+  concern: string;
+  source: string;
+  filesTouched: string[];
+  symbolsReferenced: string[];
+}
+
+export interface AboutEdge {
+  role: 'touched' | 'referenced';
+}
+
+export interface FollowsEdge {}
+
 // ========== AST/Parser Types ==========
 
 export interface ParsedFile {

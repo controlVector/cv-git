@@ -8,6 +8,7 @@ import chalk from 'chalk';
 import * as path from 'path';
 import inquirer from 'inquirer';
 import { configManager } from '@cv-git/core';
+import * as fs from 'fs';
 import {
   ensureDir,
   getCVDir,
@@ -283,6 +284,9 @@ export function initCommand(): Command {
           await initSingleRepo(currentDir, projectName, spinner, output);
         }
 
+        // Install Claude Code hooks for session knowledge
+        await installClaudeHooks(currentDir, nonInteractive);
+
         spinner.succeed(`CV-Git ${mode === 'workspace' ? 'workspace' : 'repository'} initialized successfully!`);
 
         if (output.isJson) {
@@ -451,6 +455,201 @@ async function checkGlobalCredentials(services: string[]): Promise<{
 
   return { configured, missing };
 }
+
+/**
+ * Install Claude Code hooks for session knowledge bidirectional flow.
+ * Writes hook scripts into .claude/hooks/ and merges hook config into .claude/settings.json.
+ */
+async function installClaudeHooks(repoRoot: string, nonInteractive: boolean): Promise<void> {
+  const claudeDir = path.join(repoRoot, '.claude');
+  const hooksDir = path.join(claudeDir, 'hooks');
+  const settingsPath = path.join(claudeDir, 'settings.json');
+
+  await ensureDir(claudeDir);
+  await ensureDir(hooksDir);
+
+  // Hook templates (embedded to survive esbuild bundling)
+  const hookTemplates: Record<string, string> = {
+    'session-start.sh': HOOK_SESSION_START,
+    'context-turn.sh': HOOK_CONTEXT_TURN,
+    'context-checkpoint.sh': HOOK_CONTEXT_CHECKPOINT,
+    'session-end.sh': HOOK_SESSION_END,
+  };
+
+  for (const [filename, content] of Object.entries(hookTemplates)) {
+    const dest = path.join(hooksDir, filename);
+
+    // Don't overwrite existing hooks (user may have customized)
+    if (fs.existsSync(dest)) continue;
+
+    fs.writeFileSync(dest, content, { mode: 0o755 });
+  }
+
+  // Merge settings.json
+  const hooksConfig: Record<string, any[]> = {
+    SessionStart: [{ command: 'bash .claude/hooks/session-start.sh', timeout: 10000 }],
+    SessionEnd: [{ command: 'bash .claude/hooks/session-end.sh', timeout: 5000 }],
+    PreCompact: [{ command: 'bash .claude/hooks/context-checkpoint.sh', timeout: 5000 }],
+    Stop: [{ command: 'bash .claude/hooks/context-turn.sh', timeout: 8000 }],
+  };
+
+  let existingSettings: any = {};
+  if (fs.existsSync(settingsPath)) {
+    try {
+      existingSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    } catch {
+      existingSettings = {};
+    }
+  }
+
+  if (!existingSettings.hooks) {
+    existingSettings.hooks = {};
+  }
+
+  for (const [event, hooks] of Object.entries(hooksConfig)) {
+    if (!existingSettings.hooks[event]) {
+      existingSettings.hooks[event] = hooks;
+    } else {
+      const existing = existingSettings.hooks[event] as any[];
+      const existingCommands = new Set(existing.map((h: any) => h.command));
+      for (const hook of hooks) {
+        if (!existingCommands.has(hook.command)) {
+          existing.push(hook);
+        }
+      }
+    }
+  }
+
+  fs.writeFileSync(settingsPath, JSON.stringify(existingSettings, null, 2) + '\n');
+
+  if (!nonInteractive) {
+    console.log(chalk.green('  ✓ Claude Code hooks installed (.claude/hooks/)'));
+  }
+}
+
+// ── Embedded hook templates ──────────────────────────────────────────
+
+const HOOK_SESSION_START = `#!/usr/bin/env bash
+# Claude Code hook: SessionStart
+# Queries CV-Git knowledge graph for prior session knowledge.
+set -euo pipefail
+
+input=$(cat)
+session_id=$(echo "$input" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+
+if [[ -n "$session_id" && -n "\${CLAUDE_ENV_FILE:-}" ]]; then
+  echo "CV_SESSION_ID=\${session_id}" >> "$CLAUDE_ENV_FILE"
+fi
+
+files_csv=""
+if git rev-parse --git-dir >/dev/null 2>&1; then
+  changed=$(git diff --name-only HEAD 2>/dev/null | head -10 | tr '\\n' ',' || true)
+  changed="\${changed%,}"
+  [[ -n "$changed" ]] && files_csv="$changed"
+fi
+
+if [[ -n "$files_csv" ]]; then
+  cv knowledge query --files "$files_csv" --exclude-session "\${session_id:-}" --limit 5 2>/dev/null || true
+fi
+`;
+
+const HOOK_CONTEXT_TURN = `#!/usr/bin/env bash
+# Claude Code hook: Stop (egress + pull)
+set -euo pipefail
+
+if [[ -z "\${CV_SESSION_ID:-}" ]]; then exit 0; fi
+
+input=$(cat)
+
+turn_file="/tmp/cv-turn-\${CV_SESSION_ID}"
+if [[ -f "$turn_file" ]]; then
+  turn_number=$(( $(cat "$turn_file") + 1 ))
+else
+  turn_number=1
+fi
+echo "$turn_number" > "$turn_file"
+
+transcript_segment=""
+if command -v python3 >/dev/null 2>&1; then
+  transcript_segment=$(python3 -c "
+import sys, json
+try:
+    d = json.loads(sys.stdin.read())
+    print(d.get('last_assistant_message', '')[:2000])
+except:
+    print('')
+" <<< "$input" 2>/dev/null || true)
+fi
+
+files_csv=""
+if git rev-parse --git-dir >/dev/null 2>&1; then
+  changed=$(git diff --name-only HEAD 2>/dev/null | head -20 | tr '\\n' ',' || true)
+  changed="\${changed%,}"
+  [[ -n "$changed" ]] && files_csv="$changed"
+fi
+
+if [[ -n "$transcript_segment" ]]; then
+  cv knowledge egress \\
+    --session-id "$CV_SESSION_ID" \\
+    --turn "$turn_number" \\
+    --transcript "$transcript_segment" \\
+    \${files_csv:+--files "$files_csv"} \\
+    --concern "codebase" \\
+    >/dev/null 2>&1 &
+fi
+
+if [[ -n "$files_csv" ]]; then
+  cv knowledge query --files "$files_csv" --exclude-session "$CV_SESSION_ID" --limit 3 2>/dev/null || true
+fi
+`;
+
+const HOOK_CONTEXT_CHECKPOINT = `#!/usr/bin/env bash
+# Claude Code hook: PreCompact
+set -euo pipefail
+
+if [[ -z "\${CV_SESSION_ID:-}" ]]; then exit 0; fi
+
+input=$(cat)
+
+summary=""
+if command -v python3 >/dev/null 2>&1; then
+  summary=$(python3 -c "
+import sys, json
+try:
+    d = json.loads(sys.stdin.read())
+    print(d.get('summary', '')[:5000])
+except:
+    print('')
+" <<< "$input" 2>/dev/null || true)
+fi
+
+files_csv=""
+if git rev-parse --git-dir >/dev/null 2>&1; then
+  changed=$(git diff --name-only HEAD 2>/dev/null || true)
+  staged=$(git diff --name-only --cached 2>/dev/null || true)
+  all_files=$(echo -e "\${changed}\\n\${staged}" | sort -u | head -30 | tr '\\n' ',' || true)
+  all_files="\${all_files%,}"
+  [[ -n "$all_files" ]] && files_csv="$all_files"
+fi
+
+if [[ -n "$summary" ]]; then
+  cv knowledge egress \\
+    --session-id "$CV_SESSION_ID" \\
+    --turn 9999 \\
+    --transcript "$summary" \\
+    \${files_csv:+--files "$files_csv"} \\
+    --concern "checkpoint" \\
+    >/dev/null 2>&1 || true
+fi
+`;
+
+const HOOK_SESSION_END = `#!/usr/bin/env bash
+# Claude Code hook: SessionEnd
+set -euo pipefail
+
+if [[ -z "\${CV_SESSION_ID:-}" ]]; then exit 0; fi
+rm -f "/tmp/cv-turn-\${CV_SESSION_ID}" 2>/dev/null || true
+`;
 
 /**
  * Set up Ollama for local embeddings with smart detection

@@ -29,6 +29,8 @@ import {
   FileHistoryArgs,
   BlameArgs,
   ToolResult,
+  SessionKnowledgeArgs,
+  SessionEgressArgs,
 } from './types.js';
 
 import {
@@ -97,6 +99,7 @@ import {
 import { handleReason, ReasonArgs } from './tools/reason.js';
 import { handleTraverseContext, TraverseContextToolArgs } from './tools/traverse-context.js';
 import { handleManifoldStatus, ManifoldStatusArgs } from './tools/manifold-status.js';
+import { handleSessionKnowledge, handleSessionEgress } from './tools/session-knowledge.js';
 
 /**
  * Tool definitions
@@ -1023,6 +1026,83 @@ The tool maintains session state across calls for continuous navigation.`,
       },
     },
   },
+
+  // ========== Session Knowledge Tools ==========
+  {
+    name: 'cv_session_knowledge',
+    description: `Query session knowledge from the knowledge graph. Returns past session knowledge nodes that touched specific files or symbols.
+
+USE THIS TOOL when:
+- You want to know what previous sessions did with certain files
+- You want cross-session context about files you're working on
+- You need to understand prior work on a symbol or module`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        files: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'File paths to search for in session knowledge',
+        },
+        symbols: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Qualified symbol names to search for',
+        },
+        excludeSessionId: {
+          type: 'string',
+          description: 'Session ID to exclude (avoid echo from current session)',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum results (default: 10)',
+          default: 10,
+        },
+      },
+    },
+  },
+  {
+    name: 'cv_session_egress',
+    description: `Write session knowledge to the knowledge graph. Creates a SessionKnowledge node with ABOUT edges to files/symbols and FOLLOWS edge to the previous turn.
+
+USE THIS TOOL when:
+- You want to persist what you learned during a session turn
+- You want to record which files and symbols were relevant
+- Called automatically by hooks after each turn`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: {
+          type: 'string',
+          description: 'Session identifier',
+        },
+        turnNumber: {
+          type: 'number',
+          description: 'Turn number within the session',
+        },
+        transcript_segment: {
+          type: 'string',
+          description: 'The transcript/summary text for this turn',
+        },
+        files_touched: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'File paths touched during this turn',
+        },
+        symbols_referenced: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Qualified symbol names referenced',
+        },
+        concern: {
+          type: 'string',
+          description: 'Context concern (codebase, deployment, etc.)',
+          default: 'codebase',
+        },
+      },
+      required: ['sessionId', 'turnNumber', 'transcript_segment'],
+    },
+  },
 ];
 
 /**
@@ -1293,6 +1373,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // Traversal-Aware Context
       case 'cv_traverse_context':
         result = await handleTraverseContext(args as unknown as TraverseContextToolArgs);
+        break;
+
+      // Session Knowledge
+      case 'cv_session_knowledge':
+        result = await handleSessionKnowledge(args as unknown as SessionKnowledgeArgs);
+        break;
+
+      case 'cv_session_egress':
+        result = await handleSessionEgress(args as unknown as SessionEgressArgs);
         break;
 
       default:

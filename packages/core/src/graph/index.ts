@@ -17,7 +17,9 @@ import {
   CallsEdge,
   InheritsEdge,
   ModifiesEdge,
-  TouchesEdge
+  TouchesEdge,
+  SessionKnowledgeNode,
+  AboutEdge,
 } from '@cv-git/shared';
 import { compareVersions } from '../storage/manifest.js';
 import { getGraphDatabaseName } from '../storage/repo-id.js';
@@ -211,6 +213,10 @@ export class GraphManager {
       await this.safeCreateIndex('Document', 'type');
       await this.safeCreateIndex('Document', 'status');
       await this.safeCreateIndex('Document', 'title');
+
+      // SessionKnowledge indexes
+      await this.safeCreateIndex('SessionKnowledge', 'sessionId');
+      await this.safeCreateIndex('SessionKnowledge', 'timestamp');
 
     } catch (error: any) {
       // Only log unexpected errors (not "already indexed" which is handled by safeCreateIndex)
@@ -987,6 +993,195 @@ export class GraphManager {
     await this.query('MATCH (d:Document {path: $path}) DETACH DELETE d', { path });
   }
 
+  // ========== SessionKnowledge Operations ==========
+
+  /**
+   * Upsert a SessionKnowledge node (MERGE on sessionId + turnNumber)
+   */
+  async upsertSessionKnowledgeNode(sk: SessionKnowledgeNode): Promise<void> {
+    const cypher = `
+      MERGE (sk:SessionKnowledge {sessionId: $sessionId, turnNumber: $turnNumber})
+      SET sk.timestamp = $timestamp,
+          sk.summary = $summary,
+          sk.concern = $concern,
+          sk.source = $source,
+          sk.filesTouched = $filesTouched,
+          sk.symbolsReferenced = $symbolsReferenced,
+          sk.updatedAt = $updatedAt
+      RETURN sk
+    `;
+
+    await this.query(cypher, {
+      ...sk,
+      updatedAt: Date.now(),
+    });
+  }
+
+  /**
+   * Create ABOUT edge from SessionKnowledge to a File node
+   */
+  async createAboutFileEdge(
+    sessionId: string,
+    turnNumber: number,
+    filePath: string,
+    edge: AboutEdge,
+  ): Promise<void> {
+    const cypher = `
+      MATCH (sk:SessionKnowledge {sessionId: $sessionId, turnNumber: $turnNumber})
+      MATCH (f:File {path: $filePath})
+      MERGE (sk)-[r:ABOUT]->(f)
+      SET r.role = $role
+      RETURN r
+    `;
+
+    await this.query(cypher, { sessionId, turnNumber, filePath, role: edge.role });
+  }
+
+  /**
+   * Create ABOUT edge from SessionKnowledge to a Symbol node
+   */
+  async createAboutSymbolEdge(
+    sessionId: string,
+    turnNumber: number,
+    qualifiedName: string,
+    edge: AboutEdge,
+  ): Promise<void> {
+    const cypher = `
+      MATCH (sk:SessionKnowledge {sessionId: $sessionId, turnNumber: $turnNumber})
+      MATCH (s:Symbol {qualifiedName: $qualifiedName})
+      MERGE (sk)-[r:ABOUT]->(s)
+      SET r.role = $role
+      RETURN r
+    `;
+
+    await this.query(cypher, { sessionId, turnNumber, qualifiedName, role: edge.role });
+  }
+
+  /**
+   * Create FOLLOWS edge between SessionKnowledge turns (current -> previous)
+   */
+  async createFollowsEdge(
+    sessionId: string,
+    currentTurn: number,
+    previousTurn: number,
+  ): Promise<void> {
+    const cypher = `
+      MATCH (curr:SessionKnowledge {sessionId: $sessionId, turnNumber: $currentTurn})
+      MATCH (prev:SessionKnowledge {sessionId: $sessionId, turnNumber: $previousTurn})
+      MERGE (curr)-[r:FOLLOWS]->(prev)
+      RETURN r
+    `;
+
+    await this.query(cypher, { sessionId, currentTurn, previousTurn });
+  }
+
+  /**
+   * Get a single SessionKnowledge node
+   */
+  async getSessionKnowledgeNode(
+    sessionId: string,
+    turnNumber: number,
+  ): Promise<SessionKnowledgeNode | null> {
+    const result = await this.query(
+      `MATCH (sk:SessionKnowledge {sessionId: $sessionId, turnNumber: $turnNumber})
+       RETURN sk.sessionId AS sessionId, sk.turnNumber AS turnNumber,
+              sk.timestamp AS timestamp, sk.summary AS summary,
+              sk.concern AS concern, sk.source AS source,
+              sk.filesTouched AS filesTouched, sk.symbolsReferenced AS symbolsReferenced`,
+      { sessionId, turnNumber },
+    );
+    if (result.length === 0) return null;
+    const r = result[0] as any;
+    return {
+      sessionId: r.sessionId,
+      turnNumber: r.turnNumber,
+      timestamp: r.timestamp,
+      summary: r.summary || '',
+      concern: r.concern || '',
+      source: r.source || '',
+      filesTouched: r.filesTouched || [],
+      symbolsReferenced: r.symbolsReferenced || [],
+    };
+  }
+
+  /**
+   * Find SessionKnowledge nodes whose filesTouched overlap with given paths
+   */
+  async getSessionKnowledgeByFiles(
+    filePaths: string[],
+    excludeSessionId?: string,
+    limit = 10,
+  ): Promise<SessionKnowledgeNode[]> {
+    if (filePaths.length === 0) return [];
+
+    const excludeClause = excludeSessionId
+      ? 'AND sk.sessionId <> $excludeSessionId'
+      : '';
+
+    const results = await this.query(
+      `MATCH (sk:SessionKnowledge)
+       WHERE ANY(f IN sk.filesTouched WHERE f IN $filePaths)
+         ${excludeClause}
+       RETURN sk.sessionId AS sessionId, sk.turnNumber AS turnNumber,
+              sk.timestamp AS timestamp, sk.summary AS summary,
+              sk.concern AS concern, sk.source AS source,
+              sk.filesTouched AS filesTouched, sk.symbolsReferenced AS symbolsReferenced
+       ORDER BY sk.timestamp DESC
+       LIMIT $limit`,
+      { filePaths, excludeSessionId: excludeSessionId || '', limit },
+    );
+
+    return results.map((r: any) => ({
+      sessionId: r.sessionId || '',
+      turnNumber: r.turnNumber || 0,
+      timestamp: r.timestamp || 0,
+      summary: r.summary || '',
+      concern: r.concern || '',
+      source: r.source || '',
+      filesTouched: r.filesTouched || [],
+      symbolsReferenced: r.symbolsReferenced || [],
+    }));
+  }
+
+  /**
+   * Find SessionKnowledge nodes whose symbolsReferenced overlap with given names
+   */
+  async getSessionKnowledgeBySymbols(
+    qualifiedNames: string[],
+    excludeSessionId?: string,
+    limit = 10,
+  ): Promise<SessionKnowledgeNode[]> {
+    if (qualifiedNames.length === 0) return [];
+
+    const excludeClause = excludeSessionId
+      ? 'AND sk.sessionId <> $excludeSessionId'
+      : '';
+
+    const results = await this.query(
+      `MATCH (sk:SessionKnowledge)
+       WHERE ANY(s IN sk.symbolsReferenced WHERE s IN $qualifiedNames)
+         ${excludeClause}
+       RETURN sk.sessionId AS sessionId, sk.turnNumber AS turnNumber,
+              sk.timestamp AS timestamp, sk.summary AS summary,
+              sk.concern AS concern, sk.source AS source,
+              sk.filesTouched AS filesTouched, sk.symbolsReferenced AS symbolsReferenced
+       ORDER BY sk.timestamp DESC
+       LIMIT $limit`,
+      { qualifiedNames, excludeSessionId: excludeSessionId || '', limit },
+    );
+
+    return results.map((r: any) => ({
+      sessionId: r.sessionId || '',
+      turnNumber: r.turnNumber || 0,
+      timestamp: r.timestamp || 0,
+      summary: r.summary || '',
+      concern: r.concern || '',
+      source: r.source || '',
+      filesTouched: r.filesTouched || [],
+      symbolsReferenced: r.symbolsReferenced || [],
+    }));
+  }
+
   /**
    * Create IMPORTS relationship
    */
@@ -1327,6 +1522,7 @@ export class GraphManager {
     commitCount: number;
     moduleCount: number;
     documentCount: number;
+    sessionKnowledgeCount: number;
     relationshipCount: number;
     nodesByLabel?: Record<string, number>;
     relationshipsByType?: Record<string, number>;
@@ -1338,6 +1534,7 @@ export class GraphManager {
     const commitCount = await this.query('MATCH (c:Commit) RETURN count(c) as count');
     const moduleCount = await this.query('MATCH (m:Module) RETURN count(m) as count');
     const documentCount = await this.query('MATCH (d:Document) RETURN count(d) as count');
+    const sessionKnowledgeCount = await this.query('MATCH (sk:SessionKnowledge) RETURN count(sk) as count');
     const relationshipCount = await this.query('MATCH ()-[r]->() RETURN count(r) as count');
 
     // FalkorDB pattern: Get detailed breakdown
@@ -1352,6 +1549,7 @@ export class GraphManager {
       commitCount: commitCount[0]?.count || 0,
       moduleCount: moduleCount[0]?.count || 0,
       documentCount: documentCount[0]?.count || 0,
+      sessionKnowledgeCount: sessionKnowledgeCount[0]?.count || 0,
       relationshipCount: relationshipCount[0]?.count || 0,
       nodesByLabel: this.parseBreakdown(nodesByLabel, 'label'),
       relationshipsByType: this.parseBreakdown(relationshipsByType, 'type')

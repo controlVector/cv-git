@@ -59,6 +59,7 @@ import { splitCommand } from './commands/split.js';
 import { bugreportCommand } from './commands/bugreport.js';
 import { depsCommand } from './commands/deps.js';
 import { summaryCommand } from './commands/summary.js';
+import { knowledgeCommand } from './commands/knowledge.js';
 
 const program = new Command();
 
@@ -121,6 +122,7 @@ program.addCommand(createCacheCommand());   // Embedding cache management (cv ca
 program.addCommand(verifyCommand());        // CLI verification (cv verify)
 program.addCommand(bugreportCommand());     // Bug reporting (cv bugreport)
 program.addCommand(depsCommand());          // Dependency analysis (cv deps)
+program.addCommand(knowledgeCommand());     // Session knowledge queries (cv knowledge)
 
 // Error handler
 program.exitOverride((err) => {
