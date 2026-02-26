@@ -487,10 +487,10 @@ async function installClaudeHooks(repoRoot: string, nonInteractive: boolean): Pr
 
   // Merge settings.json
   const hooksConfig: Record<string, any[]> = {
-    SessionStart: [{ command: 'bash .claude/hooks/session-start.sh', timeout: 10000 }],
-    SessionEnd: [{ command: 'bash .claude/hooks/session-end.sh', timeout: 5000 }],
-    PreCompact: [{ command: 'bash .claude/hooks/context-checkpoint.sh', timeout: 5000 }],
-    Stop: [{ command: 'bash .claude/hooks/context-turn.sh', timeout: 8000 }],
+    SessionStart: [{ matcher: {}, hooks: [{ type: 'command', command: 'bash .claude/hooks/session-start.sh' }] }],
+    SessionEnd: [{ matcher: {}, hooks: [{ type: 'command', command: 'bash .claude/hooks/session-end.sh' }] }],
+    PreCompact: [{ matcher: {}, hooks: [{ type: 'command', command: 'bash .claude/hooks/context-checkpoint.sh' }] }],
+    Stop: [{ matcher: {}, hooks: [{ type: 'command', command: 'bash .claude/hooks/context-turn.sh' }] }],
   };
 
   let existingSettings: any = {};
@@ -511,9 +511,9 @@ async function installClaudeHooks(repoRoot: string, nonInteractive: boolean): Pr
       existingSettings.hooks[event] = hooks;
     } else {
       const existing = existingSettings.hooks[event] as any[];
-      const existingCommands = new Set(existing.map((h: any) => h.command));
+      const existingCommands = new Set(existing.map((h: any) => h.hooks?.[0]?.command));
       for (const hook of hooks) {
-        if (!existingCommands.has(hook.command)) {
+        if (!existingCommands.has(hook.hooks?.[0]?.command)) {
           existing.push(hook);
         }
       }

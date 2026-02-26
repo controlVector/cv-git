@@ -3,7 +3,8 @@
   "repository": {
     "root": "/home/schmotz/project/cv-git",
     "name": "cv-git",
-    "initDate": "2025-12-10T23:00:35.236Z"
+    "initDate": "2025-12-10T23:00:35.236Z",
+    "repoId": "d8cb6fc6bb1b40ee"
   },
   "llm": {
     "provider": "anthropic",
@@ -27,7 +28,7 @@
     "provider": "falkordb",
     "url": "redis://localhost:6379",
     "embedded": true,
-    "database": "cv-git"
+    "database": "cv_d8cb6fc6bb1b40ee"
   },
   "vector": {
     "provider": "qdrant",

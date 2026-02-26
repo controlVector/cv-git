@@ -1,18 +1,18 @@
 {
-  "timestamp": 1768234860872,
-  "duration": 59.436,
-  "type": "full",
+  "timestamp": 1769378208472,
+  "duration": 25.963,
+  "type": "delta",
   "success": true,
   "stats": {
-    "filesProcessed": 191,
+    "filesProcessed": 83,
     "filesFailed": 0,
-    "symbolsCreated": 5754,
-    "vectorsCreated": 1603
+    "symbolsCreated": 2704,
+    "vectorsCreated": 39038
   },
   "errors": [],
   "systemInfo": {
     "nodeVersion": "v18.19.1",
     "platform": "linux",
-    "cvVersion": "0.4.17"
+    "cvVersion": "0.4.24"
   }
 }

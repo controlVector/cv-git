@@ -2,7 +2,7 @@
   "version": "1.0.0",
   "format": "cv-git-storage",
   "created": "2025-12-11T16:05:02.315Z",
-  "updated": "2026-01-12T15:59:35.948Z",
+  "updated": "2026-01-25T21:57:03.232Z",
   "repository": {
     "id": "d8cb6fc6bb1b",
     "name": "cv-git",
@@ -10,12 +10,12 @@
     "remote": "https://github.com/controlVector/cv-git.git"
   },
   "stats": {
-    "files": 191,
-    "symbols": 5747,
-    "relationships": 7272,
-    "vectors": 1282,
-    "lastSync": "2026-01-12T15:59:35.948Z",
-    "syncDuration": 0.825
+    "files": 83,
+    "symbols": 2704,
+    "relationships": 3284,
+    "vectors": 39038,
+    "lastSync": "2026-01-25T21:57:03.231Z",
+    "syncDuration": 14.757
   },
   "embedding": {
     "provider": "openai",

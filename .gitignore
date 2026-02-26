@@ -75,3 +75,6 @@ benchmark-results.json
 # Temporary files
 tmp/
 temp/
+.cv/vectors/
+.cv/codebase-summary.json
+.cv/manifold/
