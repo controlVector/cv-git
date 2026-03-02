@@ -1,6 +1,6 @@
 {
   "name": "@controlvector/cv-git",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "AI-Native Paired-Programming + Knowledge-Graph Version Control Layer",
   "type": "module",
   "engines": {
@@ -42,16 +42,21 @@
     "start": "node dist/bundle.js",
     "test": "vitest"
   },
-  "dependencies": {
+  "dependencies": {},
+  "devDependencies": {
     "@cv-git/core": "workspace:*",
     "@cv-git/credentials": "workspace:*",
     "@cv-git/platform": "workspace:*",
     "@cv-git/prd-client": "workspace:*",
     "@cv-git/shared": "workspace:*",
+    "@types/glob": "^9.0.0",
+    "@types/inquirer": "^9.0.7",
+    "@types/node": "^20.19.25",
     "chalk": "^5.3.0",
     "chokidar": "^5.0.0",
     "cli-table3": "^0.6.3",
     "commander": "^11.1.0",
+    "esbuild": "^0.27.0",
     "glob": "^13.0.0",
     "ignore": "^7.0.5",
     "inquirer": "^9.2.12",
@@ -59,13 +64,7 @@
     "marked-terminal": "^7.0.0",
     "ora": "^8.2.0",
     "redis": "^4.7.1",
-    "simple-git": "^3.22.0"
-  },
-  "devDependencies": {
-    "@types/glob": "^9.0.0",
-    "@types/inquirer": "^9.0.7",
-    "@types/node": "^20.19.25",
-    "esbuild": "^0.27.0",
+    "simple-git": "^3.22.0",
     "typescript": "^5.3.3"
   }
 }
