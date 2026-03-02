@@ -508,8 +508,9 @@ async function installClaudeHooks(repoRoot: string, nonInteractive: boolean): Pr
   for (const [filename, content] of Object.entries(hookTemplates)) {
     const dest = path.join(hooksDir, filename);
 
-    // Don't overwrite existing hooks (user may have customized)
-    if (fs.existsSync(dest)) continue;
+    // In non-interactive mode (-y), always overwrite to ensure hooks are current.
+    // In interactive mode, skip existing hooks (user may have customized).
+    if (fs.existsSync(dest) && !nonInteractive) continue;
 
     fs.writeFileSync(dest, content, { mode: 0o755 });
   }
@@ -675,6 +676,14 @@ if [[ -z "\${CV_HUB_SESSION_ID:-}" ]]; then
   CV_HUB_SESSION_ID="adhoc-$(date +%s)-$$"
   export CV_HUB_SESSION_ID
 fi`;
+
+/** Hook templates — exported so doctor --fix can rewrite stale hooks */
+export const HOOK_TEMPLATES: Record<string, () => string> = {
+  'session-start.sh': () => HOOK_SESSION_START,
+  'context-turn.sh': () => HOOK_CONTEXT_TURN,
+  'context-checkpoint.sh': () => HOOK_CONTEXT_CHECKPOINT,
+  'session-end.sh': () => HOOK_SESSION_END,
+};
 
 const HOOK_SESSION_START = `#!/usr/bin/env bash
 if [[ "\${CV_HUB_DEBUG:-}" == "1" ]]; then

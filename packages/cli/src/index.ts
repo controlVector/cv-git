@@ -5,9 +5,27 @@
  * Main entry point for the cv command
  */
 
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { applyOptionsInterceptor } from './utils/options-interceptor.js';
+
+// Read version from package.json — works in both ESM (tsc) and CJS (esbuild bundle)
+const CLI_VERSION: string = (() => {
+  try {
+    // CJS bundle: __dirname is available
+    if (typeof __dirname !== 'undefined') {
+      return JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8')).version;
+    }
+    // ESM: use import.meta.url
+    const dir = dirname(fileURLToPath(import.meta.url));
+    return JSON.parse(readFileSync(join(dir, '..', 'package.json'), 'utf-8')).version;
+  } catch {
+    return '0.0.0-unknown';
+  }
+})();
 import { initCommand } from './commands/init.js';
 import { syncCommand } from './commands/sync.js';
 import { doCommand } from './commands/do.js';
@@ -67,7 +85,7 @@ const program = new Command();
 program
   .name('cv')
   .description('AI-Native Version Control with Knowledge Graph & Secure Credentials')
-  .version('0.7.5');
+  .version(CLI_VERSION);
 
 // Add commands
 program.addCommand(configCommand());        // Configuration management
