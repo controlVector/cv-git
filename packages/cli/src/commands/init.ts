@@ -39,6 +39,12 @@ import {
   installOllamaNative,
   ensureOllamaModel,
 } from '../utils/infrastructure.js';
+import {
+  readCredentials,
+  writeCredentialField,
+  getMachineName,
+  cleanMachineName,
+} from '../utils/cv-hub-credentials.js';
 
 export function initCommand(): Command {
   const cmd = new Command('init');
@@ -302,6 +308,11 @@ export function initCommand(): Command {
           }
         }
 
+        // Machine name setup (for Chat-to-Code bridge)
+        if (hasHubCreds) {
+          await setupMachineName(nonInteractive);
+        }
+
         // Post-install validation
         await validateClaudeSetup(currentDir, nonInteractive);
 
@@ -559,6 +570,52 @@ async function installClaudeHooks(repoRoot: string, nonInteractive: boolean): Pr
   }
 }
 
+/**
+ * Set up machine name for Chat-to-Code bridge.
+ * In interactive mode, prompts the user if no name is set.
+ * In non-interactive mode, uses hostname silently.
+ */
+async function setupMachineName(nonInteractive: boolean): Promise<void> {
+  const creds = await readCredentials();
+  const existing = creds.CV_HUB_MACHINE_NAME;
+
+  if (existing) {
+    if (!nonInteractive) {
+      console.log(chalk.green(`  ✓ Machine name: ${existing}`));
+    }
+    return;
+  }
+
+  const hostname = cleanMachineName(
+    (await import('os')).hostname()
+  );
+
+  if (nonInteractive) {
+    await writeCredentialField('CV_HUB_MACHINE_NAME', hostname);
+    console.log(chalk.gray(`  ℹ Machine name set to ${hostname} (from hostname)`));
+    console.log(chalk.gray('    To customize: add CV_HUB_MACHINE_NAME=your-name to ~/.config/cv-hub/credentials'));
+    return;
+  }
+
+  console.log();
+  console.log(chalk.yellow('  No machine name configured.'));
+  console.log(chalk.gray('  This name identifies your machine when connecting from Claude.ai.'));
+
+  const { machineName } = await inquirer.prompt([
+    {
+      type: 'input',
+      name: 'machineName',
+      message: 'Machine name',
+      default: hostname,
+      filter: (input: string) => cleanMachineName(input),
+    },
+  ]);
+
+  await writeCredentialField('CV_HUB_MACHINE_NAME', machineName);
+  console.log(chalk.green(`  ✓ Saved CV_HUB_MACHINE_NAME=${machineName} to credentials`));
+  console.log(chalk.cyan(`  💡 In Claude.ai, say: "Connect me to ${machineName}"`));
+}
+
 // ── Embedded hook templates (production-verified, hybrid API/CLI) ────
 
 // Generic credential lookup pattern (no hardcoded user paths)
@@ -646,15 +703,30 @@ if [[ -z "$repo_name" && -n "$repo_url" ]]; then
   repo_name=$(echo "$repo_url" | sed -E 's#\\.git$##' | sed -E 's#.*[:/]([^/]+/[^/]+)$#\\1#')
 fi
 
+# ── Resolve machine name and repos ────────────────────────────────────
+machine_name="\${CV_HUB_MACHINE_NAME:-}"
+if [[ -z "$machine_name" ]]; then
+  machine_name=$(hostname -s 2>/dev/null || echo "unknown")
+fi
+
+# Collect repos from git remotes in cwd
+repos_json="[]"
+if [[ -n "$repo_name" ]]; then
+  repo_slug="\${repo_name##*/}"
+  repos_json="[\\"$repo_slug\\"]"
+fi
+
 # ── API path: register executor + inject context ─────────────────────
 if [[ -n "\${CV_HUB_PAT:-}" && -n "\${CV_HUB_API:-}" ]]; then
-  hostname=$(hostname -s 2>/dev/null || echo "unknown")
-  executor_name="claude-code:\${hostname}:\${session_id:0:8}"
+  hostname_short=$(hostname -s 2>/dev/null || echo "unknown")
+  executor_name="claude-code:\${hostname_short}:\${session_id:0:8}"
 
   payload=$(cat <<EOFPAYLOAD
 {
   "name": "\${executor_name}",
   "type": "claude_code",
+  "machine_name": "\${machine_name}",
+  "repos": $repos_json,
   "workspace_root": "\${cwd}",
   "capabilities": {
     "tools": ["bash", "read", "write", "edit", "glob", "grep"],
