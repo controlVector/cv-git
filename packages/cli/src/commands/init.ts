@@ -1058,16 +1058,16 @@ fi
 
 const HOOK_SESSION_END = `#!/usr/bin/env bash
 # Claude Code hook: SessionEnd
-# Unregisters executor from CV-Hub, or cleans up local state.
+# Marks executor offline in CV-Hub and cleans up local state.
 set -euo pipefail
 
 ${CRED_LOOKUP_FALLBACK}
 
-# ── API path: unregister executor ────────────────────────────────────
+# ── API path: mark executor offline ──────────────────────────────────
 if [[ -n "\${CV_HUB_EXECUTOR_ID:-}" && -n "\${CV_HUB_API:-}" && -n "\${CV_HUB_PAT:-}" ]]; then
-  curl -sf -X DELETE \\
+  curl -sf -X POST \\
     -H "Authorization: Bearer \${CV_HUB_PAT}" \\
-    "\${CV_HUB_API}/api/v1/executors/\${CV_HUB_EXECUTOR_ID}" \\
+    "\${CV_HUB_API}/api/v1/executors/\${CV_HUB_EXECUTOR_ID}/offline" \\
     >/dev/null 2>&1 || true
 fi
 
