@@ -67,7 +67,7 @@ const program = new Command();
 program
   .name('cv')
   .description('AI-Native Version Control with Knowledge Graph & Secure Credentials')
-  .version('0.7.2');
+  .version('0.7.3');
 
 // Add commands
 program.addCommand(configCommand());        // Configuration management
@@ -128,11 +128,11 @@ program.addCommand(connectCommand());       // Connection instructions (cv conne
 
 // Error handler
 program.exitOverride((err) => {
-  if (err.code === 'commander.help' || err.code === 'commander.version') {
+  if (err.exitCode === 0) {
     process.exit(0);
   }
   console.error(chalk.red('Error:'), err.message);
-  process.exit(1);
+  process.exit(err.exitCode || 1);
 });
 
 // Apply options interceptor to all commands
