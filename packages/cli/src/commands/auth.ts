@@ -50,6 +50,7 @@ import {
 import { setupNPM, testNPM, configureNPMCLI } from './auth/publish/npm.js';
 import { setupCVHub, testCVHub, setupControlfab, testControlfab } from './auth/git/cv-hub.js';
 import { addGlobalOptions } from '../utils/output.js';
+import { readCredentials, getMachineName, findCredentialFile } from '../utils/cv-hub-credentials.js';
 
 export function authCommand(): Command {
   const cmd = new Command('auth').description(
@@ -212,6 +213,63 @@ export function authCommand(): Command {
       }
 
       console.log(table.toString());
+      console.log();
+    });
+
+  // cv auth status — Show CV-Hub connection info
+  cmd
+    .command('status')
+    .description('Show CV-Hub authentication status and machine info')
+    .action(async () => {
+      console.log(chalk.bold('\n🔐 CV-Hub Authentication Status\n'));
+
+      const creds = await readCredentials();
+      const credFile = await findCredentialFile();
+
+      if (!credFile) {
+        console.log(chalk.yellow('  ⚠ No credentials file found'));
+        console.log(chalk.gray('    Run: cv auth login'));
+        console.log();
+        return;
+      }
+
+      // PAT
+      if (creds.CV_HUB_PAT) {
+        const masked = creds.CV_HUB_PAT.slice(0, 10) + '...';
+        console.log(chalk.green(`  ✓ PAT: ${masked}`));
+      } else {
+        console.log(chalk.yellow('  ⚠ PAT: not set'));
+        console.log(chalk.gray('    Run: cv auth login'));
+      }
+
+      // API
+      if (creds.CV_HUB_API) {
+        console.log(chalk.green(`  ✓ API: ${creds.CV_HUB_API}`));
+      } else {
+        console.log(chalk.yellow('  ⚠ API: not set'));
+      }
+
+      // Organization
+      if (creds.CV_HUB_ORG_OVERRIDE) {
+        console.log(chalk.green(`  ✓ Organization: ${creds.CV_HUB_ORG_OVERRIDE}`));
+      }
+
+      // Machine name
+      const machineName = await getMachineName();
+      if (creds.CV_HUB_MACHINE_NAME) {
+        console.log(chalk.green(`  ✓ Machine name: ${creds.CV_HUB_MACHINE_NAME}`));
+      } else {
+        console.log(chalk.yellow(`  ⚠ Machine name: not set (will use hostname: ${machineName})`));
+        console.log(chalk.gray('    Set it with: cv init (or add CV_HUB_MACHINE_NAME to credentials)'));
+      }
+
+      console.log();
+      console.log(chalk.gray(`  Credentials file: ${credFile}`));
+
+      // Connection hint
+      console.log();
+      const displayName = creds.CV_HUB_MACHINE_NAME || machineName;
+      console.log(chalk.cyan(`  To connect from Claude.ai: "Connect me to ${displayName}"`));
       console.log();
     });
 
