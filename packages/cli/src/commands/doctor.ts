@@ -23,6 +23,13 @@ import {
   getOllamaUrl,
 } from '@cv-git/core';
 import { loadServicesFile } from '../utils/services.js';
+import {
+  readCredentials,
+  getMachineName,
+  writeCredentialField,
+  cleanMachineName,
+} from '../utils/cv-hub-credentials.js';
+import { createHash } from 'crypto';
 
 /**
  * Discover FalkorDB port from running cv-git-falkordb container
@@ -132,6 +139,9 @@ export function doctorCommand(): Command {
       results.push(await checkCVHubAPI());
       results.push(await checkClaudeHooks());
       results.push(await checkHookDryRun());
+      results.push(await checkMachineName());
+      results.push(await checkExecutorStatus());
+      results.push(await checkHookVersion());
       results.push(await checkOrgMismatch());
 
       // Auto-fix mode
@@ -193,6 +203,16 @@ export function doctorCommand(): Command {
           if (needsUpdate) {
             await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2) + '\n');
             fixed.push('Updated settings.json format');
+          }
+        } catch { /* skip */ }
+
+        // Auto-set machine name if missing
+        try {
+          const creds = await readCredentials();
+          if (!creds.CV_HUB_MACHINE_NAME) {
+            const fallbackName = await getMachineName();
+            await writeCredentialField('CV_HUB_MACHINE_NAME', fallbackName);
+            fixed.push(`Set CV_HUB_MACHINE_NAME=${fallbackName}`);
           }
         } catch { /* skip */ }
 
@@ -1180,6 +1200,220 @@ async function checkHookDryRun(): Promise<DiagnosticResult> {
       status: 'warn',
       message: `session-start.sh failed: ${(error.message || '').slice(0, 100)}`,
       fix: 'Check hook script for errors or missing dependencies',
+    };
+  }
+}
+
+/**
+ * Check CV_HUB_MACHINE_NAME is set in credentials
+ */
+async function checkMachineName(): Promise<DiagnosticResult> {
+  try {
+    const creds = await readCredentials();
+
+    if (creds.CV_HUB_MACHINE_NAME) {
+      return {
+        name: 'Machine Name',
+        status: 'pass',
+        message: `CV_HUB_MACHINE_NAME=${creds.CV_HUB_MACHINE_NAME}`,
+      };
+    }
+
+    // Not set — warn with fallback info
+    const fallback = await getMachineName();
+    return {
+      name: 'Machine Name',
+      status: 'warn',
+      message: `CV_HUB_MACHINE_NAME not set (falling back to hostname: ${fallback})`,
+      fix: 'Run "cv init" to set a machine name, or "cv doctor --fix" to auto-set from hostname',
+    };
+  } catch (error: any) {
+    return {
+      name: 'Machine Name',
+      status: 'warn',
+      message: `Could not check machine name: ${error.message}`,
+      fix: 'Run "cv init" to configure credentials',
+    };
+  }
+}
+
+/**
+ * Check executor registration status with CV-Hub API
+ */
+async function checkExecutorStatus(): Promise<DiagnosticResult> {
+  try {
+    const creds = await readCredentials();
+    if (!creds.CV_HUB_PAT || !creds.CV_HUB_API) {
+      return {
+        name: 'Executor Status',
+        status: 'warn',
+        message: 'No CV-Hub credentials — cannot check executor status',
+        fix: 'Run "cv auth login" to authenticate',
+      };
+    }
+
+    const machineName = await getMachineName();
+    const resp = await fetch(
+      `${creds.CV_HUB_API}/api/v1/executors?machine_name=${encodeURIComponent(machineName)}`,
+      {
+        headers: { Authorization: `Bearer ${creds.CV_HUB_PAT}` },
+        signal: AbortSignal.timeout(5000),
+      }
+    );
+
+    if (!resp.ok) {
+      return {
+        name: 'Executor Status',
+        status: 'warn',
+        message: `API returned HTTP ${resp.status}`,
+        fix: 'Check CV-Hub credentials and API connectivity',
+      };
+    }
+
+    const data = (await resp.json()) as { executors?: Array<{ last_seen_at?: string; name?: string }> };
+    const executors = data.executors || [];
+
+    if (executors.length === 0) {
+      return {
+        name: 'Executor Status',
+        status: 'warn',
+        message: `No executors registered for machine "${machineName}"`,
+        fix: 'Start a Claude Code session to register an executor',
+      };
+    }
+
+    // Find most recently seen executor
+    const latest = executors.reduce((a, b) => {
+      const aTime = a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0;
+      const bTime = b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0;
+      return bTime > aTime ? b : a;
+    });
+
+    if (!latest.last_seen_at) {
+      return {
+        name: 'Executor Status',
+        status: 'pass',
+        message: `${executors.length} executor(s) registered for "${machineName}"`,
+      };
+    }
+
+    const lastSeen = new Date(latest.last_seen_at);
+    const ageMs = Date.now() - lastSeen.getTime();
+    const ageMin = Math.round(ageMs / 60000);
+
+    if (ageMin <= 5) {
+      return {
+        name: 'Executor Status',
+        status: 'pass',
+        message: `Executor "${latest.name}" active (last seen ${ageMin}m ago)`,
+      };
+    }
+
+    return {
+      name: 'Executor Status',
+      status: 'warn',
+      message: `Executor "${latest.name}" stale (last seen ${ageMin}m ago)`,
+      fix: 'Start a new Claude Code session to refresh',
+    };
+  } catch (error: any) {
+    return {
+      name: 'Executor Status',
+      status: 'warn',
+      message: `Could not check executor status: ${error.message}`,
+    };
+  }
+}
+
+/**
+ * Check installed session-start.sh matches the expected hook template version.
+ * Compares SHA-256 hashes to detect stale hooks.
+ */
+async function checkHookVersion(): Promise<DiagnosticResult> {
+  const hookPath = path.join(process.cwd(), '.claude', 'hooks', 'session-start.sh');
+
+  try {
+    await fs.access(hookPath);
+  } catch {
+    return {
+      name: 'Hook Version',
+      status: 'warn',
+      message: 'session-start.sh not found',
+      fix: 'Run "cv init -y" to install hooks',
+    };
+  }
+
+  try {
+    const installedContent = await fs.readFile(hookPath, 'utf-8');
+    const installedHash = createHash('sha256').update(installedContent).digest('hex').slice(0, 12);
+
+    // Read the template from init.ts to get expected hash
+    const initPath = path.join(__dirname, 'init.ts');
+    let expectedHash: string | null = null;
+
+    try {
+      const initContent = await fs.readFile(initPath, 'utf-8');
+
+      // Extract the HOOK_SESSION_START template string from init.ts
+      const templateMatch = initContent.match(/const HOOK_SESSION_START = `([\s\S]*?)`;/);
+      if (templateMatch) {
+        // The template has ${CRED_LOOKUP} interpolation — extract that too
+        const credLookupMatch = initContent.match(/const CRED_LOOKUP = `([\s\S]*?)`;/);
+        let templateContent = templateMatch[1];
+        if (credLookupMatch) {
+          templateContent = templateContent.replace('${CRED_LOOKUP}', credLookupMatch[1]);
+        }
+        expectedHash = createHash('sha256').update(templateContent).digest('hex').slice(0, 12);
+      }
+    } catch {
+      // Can't read init.ts — likely running from compiled JS
+    }
+
+    if (!expectedHash) {
+      // Can't determine expected hash — check for key markers instead
+      const hasSessionEnv = installedContent.includes('SESSION_ENV=');
+      const hasMachineName = installedContent.includes('machine_name');
+      const hasRepos = installedContent.includes('repos_json');
+
+      if (hasSessionEnv && hasMachineName && hasRepos) {
+        return {
+          name: 'Hook Version',
+          status: 'pass',
+          message: `session-start.sh has all required markers (hash: ${installedHash})`,
+        };
+      }
+
+      const missing: string[] = [];
+      if (!hasSessionEnv) missing.push('SESSION_ENV');
+      if (!hasMachineName) missing.push('machine_name');
+      if (!hasRepos) missing.push('repos');
+
+      return {
+        name: 'Hook Version',
+        status: 'warn',
+        message: `session-start.sh missing markers: ${missing.join(', ')} (hash: ${installedHash})`,
+        fix: 'Run "cv init -y" to update hooks',
+      };
+    }
+
+    if (installedHash === expectedHash) {
+      return {
+        name: 'Hook Version',
+        status: 'pass',
+        message: `session-start.sh up to date (hash: ${installedHash})`,
+      };
+    }
+
+    return {
+      name: 'Hook Version',
+      status: 'warn',
+      message: `session-start.sh outdated (installed: ${installedHash}, expected: ${expectedHash})`,
+      fix: 'Run "cv init -y" to update hooks to the latest version',
+    };
+  } catch (error: any) {
+    return {
+      name: 'Hook Version',
+      status: 'warn',
+      message: `Could not check hook version: ${error.message}`,
     };
   }
 }
