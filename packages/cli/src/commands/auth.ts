@@ -16,8 +16,8 @@ import chalk from 'chalk';
 import inquirer from 'inquirer';
 import ora from 'ora';
 import Table from 'cli-table3';
-import { mkdirSync, writeFileSync, chmodSync, existsSync, readFileSync } from 'fs';
-import { homedir } from 'os';
+import { mkdirSync, writeFileSync, chmodSync, existsSync, readFileSync, unlinkSync } from 'fs';
+import { homedir, hostname } from 'os';
 import { join, dirname } from 'path';
 import {
   CredentialManager,
@@ -48,9 +48,9 @@ import {
   testDigitalOceanSpaces,
 } from './auth/devops/digitalocean.js';
 import { setupNPM, testNPM, configureNPMCLI } from './auth/publish/npm.js';
-import { setupCVHub, testCVHub, setupControlfab, testControlfab } from './auth/git/cv-hub.js';
+import { setupCVHub, testCVHub, setupControlfab, testControlfab, writeHookCredentials, CV_HUB_CONFIG } from './auth/git/cv-hub.js';
 import { addGlobalOptions } from '../utils/output.js';
-import { readCredentials, getMachineName, findCredentialFile } from '../utils/cv-hub-credentials.js';
+import { readCredentials, getMachineName, findCredentialFile, writeCredentialField } from '../utils/cv-hub-credentials.js';
 
 export function authCommand(): Command {
   const cmd = new Command('auth').description(
@@ -234,25 +234,37 @@ export function authCommand(): Command {
       }
 
       // PAT
+      const apiUrl = creds.CV_HUB_API || CV_HUB_CONFIG.apiUrl;
       if (creds.CV_HUB_PAT) {
-        const masked = creds.CV_HUB_PAT.slice(0, 10) + '...';
+        const masked = creds.CV_HUB_PAT.startsWith('cv_pat_')
+          ? creds.CV_HUB_PAT.slice(0, 12) + '...'
+          : creds.CV_HUB_PAT.slice(0, 10) + '...';
         console.log(chalk.green(`  ✓ PAT: ${masked}`));
+
+        // Validate token against API
+        try {
+          const res = await fetch(`${apiUrl}/api/auth/me`, {
+            headers: { 'Authorization': `Bearer ${creds.CV_HUB_PAT}` },
+          });
+          if (res.ok) {
+            const data = await res.json() as any;
+            const email = data.user?.email || data.user?.username;
+            const org = data.organizations?.[0];
+            if (email) console.log(chalk.green(`  ✓ Authenticated as ${email}`));
+            if (org) console.log(chalk.green(`  ✓ Organization: ${org.name || org.slug}`));
+          } else {
+            console.log(chalk.yellow('  ⚠ Token may be expired or invalid'));
+          }
+        } catch {
+          console.log(chalk.gray('    (could not reach API to validate token)'));
+        }
       } else {
         console.log(chalk.yellow('  ⚠ PAT: not set'));
         console.log(chalk.gray('    Run: cv auth login'));
       }
 
       // API
-      if (creds.CV_HUB_API) {
-        console.log(chalk.green(`  ✓ API: ${creds.CV_HUB_API}`));
-      } else {
-        console.log(chalk.yellow('  ⚠ API: not set'));
-      }
-
-      // Organization
-      if (creds.CV_HUB_ORG_OVERRIDE) {
-        console.log(chalk.green(`  ✓ Organization: ${creds.CV_HUB_ORG_OVERRIDE}`));
-      }
+      console.log(chalk.green(`  ✓ API: ${apiUrl}`));
 
       // Machine name
       const machineName = await getMachineName();
@@ -316,54 +328,85 @@ export function authCommand(): Command {
       }
     });
 
-  // cv auth login — OAuth device flow + hook credentials in one step
+  // cv auth login — OAuth device flow with PAT fallback
   cmd
     .command('login')
-    .description('Authenticate with CV-Hub via browser (OAuth device flow)')
+    .description('Authenticate with CV-Hub (browser auth or token paste)')
     .option('--no-browser', 'Do not open browser automatically')
-    .action(async (cmdOptions: { browser?: boolean }) => {
+    .option('--force', 'Re-authenticate even if already logged in')
+    .option('--token', 'Skip browser auth, paste a Personal Access Token instead')
+    .action(async (cmdOptions: { browser?: boolean; force?: boolean; token?: boolean }) => {
+      const apiUrl = CV_HUB_CONFIG.apiUrl;
+
+      // Check if already authenticated
+      if (!cmdOptions.force) {
+        const existing = await readCredentials();
+        if (existing.CV_HUB_PAT) {
+          // Validate the existing token
+          try {
+            const res = await fetch(`${existing.CV_HUB_API || apiUrl}/api/auth/me`, {
+              headers: { 'Authorization': `Bearer ${existing.CV_HUB_PAT}` },
+            });
+            if (res.ok) {
+              const data = await res.json() as any;
+              const email = data.user?.email || data.user?.username || 'unknown';
+              const org = data.organizations?.[0]?.name || data.organizations?.[0]?.slug;
+              console.log();
+              console.log(chalk.green(`  ✓ Already authenticated as ${chalk.bold(email)}`));
+              if (org) console.log(chalk.green(`  ✓ Organization: ${org}`));
+              console.log(chalk.gray(`    Use ${chalk.cyan('--force')} to re-authenticate.`));
+              console.log();
+              return;
+            }
+          } catch {
+            // Token invalid or API unreachable — proceed with login
+          }
+        }
+      }
+
+      // PAT paste flow — direct token entry
+      if (cmdOptions.token) {
+        await loginWithPAT(apiUrl);
+        return;
+      }
+
+      // Try device code flow first
       const autoBrowser = cmdOptions?.browser !== false;
       const credentials = new CredentialManager();
       await credentials.init();
 
-      // Run the full device flow (creates PAT, configures git, writes hook credentials)
-      await setupCVHub(credentials, autoBrowser);
-
-      // Best-effort: detect org mismatch and append override
       try {
-        const { execSync } = await import('child_process');
-        const remoteUrl = execSync('git remote get-url origin', {
-          encoding: 'utf-8',
-          stdio: ['pipe', 'pipe', 'ignore'],
-        }).trim();
-        const remoteMatch = remoteUrl.match(/[:/]([^/]+)\/[^/]+(?:\.git)?$/);
-        const remoteOrg = remoteMatch?.[1];
+        await setupCVHub(credentials, autoBrowser);
 
-        if (remoteOrg) {
-          // Get the authenticated user's username from stored credentials
-          const allCreds = await credentials.list();
-          const cvHubCred = allCreds.find(
-            (c) =>
-              c.type === CredentialType.GIT_PLATFORM_TOKEN &&
-              (c as GitPlatformTokenCredential).platform === GitPlatform.CV_HUB
-          ) as GitPlatformTokenCredential | undefined;
+        // Best-effort: detect org mismatch and append override
+        detectOrgMismatch(credentials);
+      } catch (err: any) {
+        // Device flow failed — fall back to PAT paste
+        console.log();
+        console.log(chalk.yellow('⚠ Browser auth failed: ') + chalk.gray(err.message));
+        console.log(chalk.gray('  Falling back to token-based login...\n'));
 
-          const username = cvHubCred?.username;
-          if (username && remoteOrg.toLowerCase() !== username.toLowerCase()) {
-            // Org mismatch — append override to credentials file
-            const credPath = join(homedir(), '.config', 'cv-hub', 'credentials');
-            if (existsSync(credPath)) {
-              let content = readFileSync(credPath, 'utf-8');
-              if (!content.includes('CV_HUB_ORG_OVERRIDE')) {
-                content += `CV_HUB_ORG_OVERRIDE=${username}\n`;
-                writeFileSync(credPath, content, { mode: 0o600 });
-                console.log(chalk.green(`  ✓ Set org override: ${remoteOrg} → ${username}`));
-              }
-            }
-          }
-        }
-      } catch {
-        // Not in a git repo or no remote — skip org detection
+        await loginWithPAT(apiUrl);
+      }
+    });
+
+  // cv auth logout — remove credentials
+  cmd
+    .command('logout')
+    .description('Remove CV-Hub credentials and log out')
+    .action(async () => {
+      const credFile = await findCredentialFile();
+      if (!credFile) {
+        console.log(chalk.yellow('  Already logged out (no credentials file found).'));
+        return;
+      }
+
+      try {
+        unlinkSync(credFile);
+        console.log(chalk.green(`  ✓ Credentials removed from ${credFile}`));
+        console.log(chalk.green('  ✓ Logged out'));
+      } catch (err: any) {
+        console.log(chalk.red(`  Failed to remove credentials: ${err.message}`));
       }
     });
 
@@ -453,6 +496,121 @@ export function authCommand(): Command {
   addGlobalOptions(cmd);
 
   return cmd;
+}
+
+/**
+ * PAT-paste login flow: prompt for token → validate → write credentials
+ */
+async function loginWithPAT(apiUrl: string): Promise<void> {
+  console.log(chalk.bold('──────────────────────────────────────────'));
+  console.log(chalk.bold.cyan('Token-Based Login'));
+  console.log(chalk.bold('──────────────────────────────────────────'));
+  console.log();
+  console.log(chalk.gray(`  1. Open ${chalk.cyan('https://hub.controlvector.io/settings/developer')}`));
+  console.log(chalk.gray(`  2. Click "Create Token" (name it anything, e.g. "my-laptop")`));
+  console.log(chalk.gray(`  3. Copy the token (starts with cv_pat_) and paste below`));
+  console.log();
+
+  const answers = await inquirer.prompt([
+    {
+      type: 'password',
+      name: 'pat',
+      message: 'Paste your Personal Access Token:',
+      validate: (input: string) => {
+        const trimmed = input.trim();
+        if (!trimmed) return 'Token is required';
+        return true;
+      },
+    },
+  ]);
+
+  const pat = answers.pat.trim();
+  const spinner = ora('Validating token...').start();
+
+  try {
+    const res = await fetch(`${apiUrl}/api/auth/me`, {
+      headers: { 'Authorization': `Bearer ${pat}` },
+    });
+
+    if (!res.ok) {
+      spinner.fail(chalk.red('Invalid token. Check and try again.'));
+      return;
+    }
+
+    const data = await res.json() as {
+      user?: { email?: string; username?: string; displayName?: string };
+      organizations?: Array<{ id: string; slug: string; name: string }>;
+    };
+
+    const email = data.user?.email || data.user?.username || 'unknown';
+    const org = data.organizations?.[0];
+
+    spinner.succeed(chalk.green(`Validated — ${email}`));
+
+    // Write credentials file
+    const writtenPaths = writeHookCredentials(apiUrl, pat, org?.slug);
+    for (const p of writtenPaths) {
+      console.log(chalk.green(`  ✓ Credentials saved to ${p}`));
+    }
+
+    // Set machine name from hostname
+    const machine = hostname().toLowerCase().replace(/\s+/g, '-');
+    await writeCredentialField('CV_HUB_MACHINE_NAME', machine);
+    console.log(chalk.green(`  ✓ Machine name: ${machine}`));
+
+    // Show success
+    console.log();
+    console.log(chalk.green(`  ✓ Logged in as ${chalk.bold(email)}`));
+    if (org) console.log(chalk.green(`  ✓ Organization: ${org.name || org.slug}`));
+    console.log();
+    console.log(chalk.gray('  Next steps:'));
+    console.log(chalk.gray(`    ${chalk.cyan('cv init -y')}     Install hooks`));
+    console.log(chalk.gray(`    ${chalk.cyan('cv agent')}       Start listening for tasks`));
+    console.log();
+  } catch (err: any) {
+    spinner.fail(chalk.red(`Cannot reach CV-Hub API: ${err.message}`));
+    console.log(chalk.gray(`  Check your network and try again.`));
+  }
+}
+
+/**
+ * Best-effort: detect org mismatch between git remote and authenticated user
+ */
+function detectOrgMismatch(credentials: CredentialManager): void {
+  try {
+    const { execSync } = require('child_process');
+    const remoteUrl = execSync('git remote get-url origin', {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'ignore'],
+    }).trim();
+    const remoteMatch = remoteUrl.match(/[:/]([^/]+)\/[^/]+(?:\.git)?$/);
+    const remoteOrg = remoteMatch?.[1];
+
+    if (remoteOrg) {
+      credentials.list().then((allCreds) => {
+        const cvHubCred = allCreds.find(
+          (c) =>
+            c.type === CredentialType.GIT_PLATFORM_TOKEN &&
+            (c as GitPlatformTokenCredential).platform === GitPlatform.CV_HUB
+        ) as GitPlatformTokenCredential | undefined;
+
+        const username = cvHubCred?.username;
+        if (username && remoteOrg.toLowerCase() !== username.toLowerCase()) {
+          const credPath = join(homedir(), '.config', 'cv-hub', 'credentials');
+          if (existsSync(credPath)) {
+            let content = readFileSync(credPath, 'utf-8');
+            if (!content.includes('CV_HUB_ORG_OVERRIDE')) {
+              content += `CV_HUB_ORG_OVERRIDE=${username}\n`;
+              writeFileSync(credPath, content, { mode: 0o600 });
+              console.log(chalk.green(`  ✓ Set org override: ${remoteOrg} → ${username}`));
+            }
+          }
+        }
+      });
+    }
+  } catch {
+    // Not in a git repo or no remote — skip
+  }
 }
 
 /**
