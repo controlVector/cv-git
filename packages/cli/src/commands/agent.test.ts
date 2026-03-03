@@ -131,21 +131,37 @@ describe('cv agent', () => {
       fs.writeFileSync(tempCredPath, 'CV_HUB_API=https://api.test.io\n');
       const { readCredentials } = await import('../utils/cv-hub-credentials');
       const creds = await readCredentials();
-      expect(!creds.CV_HUB_PAT || !creds.CV_HUB_API).toBe(true);
+      expect(!creds.CV_HUB_PAT).toBe(true);
     });
 
-    it('detects missing API', async () => {
+    it('passes with PAT only (API defaults)', async () => {
       fs.writeFileSync(tempCredPath, 'CV_HUB_PAT=cv_pat_abc\n');
       const { readCredentials } = await import('../utils/cv-hub-credentials');
       const creds = await readCredentials();
-      expect(!creds.CV_HUB_PAT || !creds.CV_HUB_API).toBe(true);
+      // Agent now defaults CV_HUB_API if missing
+      if (!creds.CV_HUB_API) {
+        creds.CV_HUB_API = 'https://api.hub.controlvector.io';
+      }
+      expect(!creds.CV_HUB_PAT).toBe(false);
+      expect(creds.CV_HUB_API).toBe('https://api.hub.controlvector.io');
     });
 
     it('passes when both PAT and API exist', async () => {
       fs.writeFileSync(tempCredPath, 'CV_HUB_PAT=cv_pat_abc\nCV_HUB_API=https://api.test.io\n');
       const { readCredentials } = await import('../utils/cv-hub-credentials');
       const creds = await readCredentials();
-      expect(!creds.CV_HUB_PAT || !creds.CV_HUB_API).toBe(false);
+      expect(!creds.CV_HUB_PAT).toBe(false);
+      expect(creds.CV_HUB_API).toBe('https://api.test.io');
+    });
+
+    it('uses explicit API URL over default', async () => {
+      fs.writeFileSync(tempCredPath, 'CV_HUB_PAT=cv_pat_abc\nCV_HUB_API=https://custom.api.io\n');
+      const { readCredentials } = await import('../utils/cv-hub-credentials');
+      const creds = await readCredentials();
+      if (!creds.CV_HUB_API) {
+        creds.CV_HUB_API = 'https://api.hub.controlvector.io';
+      }
+      expect(creds.CV_HUB_API).toBe('https://custom.api.io');
     });
   });
 

@@ -341,14 +341,20 @@ async function withRetry<T>(
 async function runAgent(options: AgentOptions): Promise<void> {
   // ── Credential check ──────────────────────────────────────────────
   const creds = await readCredentials();
-  if (!creds.CV_HUB_PAT || !creds.CV_HUB_API) {
+
+  // Default API URL if not set
+  if (!creds.CV_HUB_API) {
+    creds.CV_HUB_API = 'https://api.hub.controlvector.io';
+  }
+
+  if (!creds.CV_HUB_PAT) {
     console.log();
     console.log(chalk.red('⚠ Not authenticated.') + ' Run ' + chalk.cyan('cv auth login') + ' first.');
     console.log();
     console.log(chalk.bold('Quick setup:'));
-    console.log(`  ${chalk.cyan('cv auth login')}                    # Get your PAT`);
+    console.log(`  ${chalk.cyan('cv auth login')}                    # Authenticate`);
     console.log(`  ${chalk.cyan('cd ~/project/my-project')}          # Go to your project`);
-    console.log(`  ${chalk.cyan('cv init')}                          # Install hooks + name your machine`);
+    console.log(`  ${chalk.cyan('cv init -y')}                       # Install hooks`);
     console.log(`  ${chalk.cyan('cv agent')}                         # Start listening`);
     console.log();
     process.exit(1);
