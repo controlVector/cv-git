@@ -227,7 +227,7 @@ function killActiveChild(): void {
 async function launchClaudeCode(
   prompt: string,
   options: { cwd: string; autoApprove: boolean },
-): Promise<{ exitCode: number; output: string }> {
+): Promise<{ exitCode: number }> {
   return new Promise((resolve, reject) => {
     const args: string[] = ['-p', prompt];
 
@@ -235,24 +235,19 @@ async function launchClaudeCode(
       args.push('--dangerously-skip-permissions');
     }
 
+    // Use stdio: 'inherit' so Claude Code gets a real TTY — this enables
+    // streaming output, colors, and spinners without Node buffering.
     const child = spawn('claude', args, {
       cwd: options.cwd,
-      stdio: ['inherit', 'pipe', 'inherit'],
+      stdio: 'inherit',
       env: { ...process.env },
     });
 
     _activeChild = child;
-    let output = '';
-
-    child.stdout?.on('data', (data: Buffer) => {
-      const text = data.toString();
-      output += text;
-      process.stdout.write(text);
-    });
 
     child.on('close', (code) => {
       _activeChild = null;
-      resolve({ exitCode: code ?? 1, output });
+      resolve({ exitCode: code ?? 1 });
     });
 
     child.on('error', (err) => {
@@ -538,11 +533,15 @@ async function executeTask(
     if (result.exitCode === 0) {
       console.log(`\n${chalk.green('✅')} Task complete (${elapsed})${changedFiles.length ? ` — ${changedFiles.length} files changed` : ''}`);
 
+      const summary = changedFiles.length
+        ? `Completed in ${elapsed}. Modified ${changedFiles.length} file(s): ${changedFiles.slice(0, 10).join(', ')}${changedFiles.length > 10 ? '...' : ''}`
+        : `Completed in ${elapsed}. No files changed.`;
+
       await withRetry(
         () => completeTask(creds, state.executorId, task.id, {
-          summary: result.output.slice(-2000),
+          summary,
           files_modified: changedFiles,
-          output: result.output.slice(-4000),
+          commit_sha: commitSha,
         }),
         'Report completion',
       );
@@ -554,7 +553,7 @@ async function executeTask(
 
       await withRetry(
         () => failTask(creds, state.executorId, task.id,
-          `Claude Code exited with code ${result.exitCode}. Output: ${result.output.slice(-1000)}`),
+          `Claude Code exited with code ${result.exitCode} after ${elapsed}.`),
         'Report failure',
       );
       state.failedCount++;

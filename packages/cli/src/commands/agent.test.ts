@@ -206,19 +206,36 @@ describe('cv agent', () => {
       expect(task!.title).toBe('Build site');
     });
 
-    it('complete sends correct payload shape', () => {
+    it('complete sends correct payload shape (git-based)', () => {
+      const changedFiles = ['index.ts', 'package.json'];
+      const elapsed = '1m 23s';
+      const commitSha = 'abc123';
+      const summary = changedFiles.length
+        ? `Completed in ${elapsed}. Modified ${changedFiles.length} file(s): ${changedFiles.slice(0, 10).join(', ')}`
+        : `Completed in ${elapsed}. No files changed.`;
       const payload = {
-        summary: 'Built 7 files',
-        files_modified: ['index.ts', 'package.json'],
-        output: 'Truncated output...',
+        summary,
+        files_modified: changedFiles,
+        commit_sha: commitSha,
       };
       expect(payload).toHaveProperty('summary');
       expect(payload).toHaveProperty('files_modified');
+      expect(payload).toHaveProperty('commit_sha');
       expect(payload.files_modified).toHaveLength(2);
+      expect(payload.summary).toContain('Modified 2 file(s)');
+    });
+
+    it('complete summary handles no files changed', () => {
+      const changedFiles: string[] = [];
+      const elapsed = '45s';
+      const summary = changedFiles.length
+        ? `Completed in ${elapsed}. Modified ${changedFiles.length} file(s): ${changedFiles.slice(0, 10).join(', ')}`
+        : `Completed in ${elapsed}. No files changed.`;
+      expect(summary).toBe('Completed in 45s. No files changed.');
     });
 
     it('fail sends error string', () => {
-      const payload = { error: 'Claude Code exited with code 1' };
+      const payload = { error: 'Claude Code exited with code 1 after 2m 5s.' };
       expect(payload.error).toContain('exited with code');
     });
   });
