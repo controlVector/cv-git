@@ -927,6 +927,148 @@ print(json.dumps({
     fi
   fi
 
+  # ── Task relay: prompt responses + auto-claim ─────────────────────
+  if [[ -n "\${CV_HUB_EXECUTOR_ID:-}" ]]; then
+    task_file="/tmp/cv-hub-task-\${CV_HUB_EXECUTOR_ID}"
+    seen_file="/tmp/cv-hub-task-prompts-seen-\${CV_HUB_EXECUTOR_ID}"
+
+    # ── Check for prompt responses on current task ────────────────
+    if [[ -f "$task_file" ]]; then
+      current_task_id=$(cat "$task_file")
+
+      if [[ -n "$current_task_id" ]]; then
+        prompts_resp=$(curl -sf \\
+          -H "Authorization: Bearer \${CV_HUB_PAT}" \\
+          "\${CV_HUB_API}/api/v1/tasks/\${current_task_id}/prompts" \\
+          2>/dev/null) || true
+
+        if [[ -n "$prompts_resp" ]]; then
+          seen_count=0
+          [[ -f "$seen_file" ]] && seen_count=$(cat "$seen_file")
+
+          python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    prompts = d.get('prompts', [])
+    seen = int(sys.argv[1])
+    seen_file = sys.argv[2]
+    responded = [p for p in prompts if p.get('response') is not None]
+    new_responses = responded[seen:]
+    if new_responses:
+        print()
+        print('---')
+        print('[CV-Hub: User Responded to Your Questions]')
+        for r in new_responses:
+            print(f'Q: {r[\"prompt_text\"]}')
+            print(f'A: {r[\"response\"]}')
+            print()
+        print('Continue working on the task with this input.')
+        print('---')
+    with open(seen_file, 'w') as f:
+        f.write(str(len(responded)))
+except:
+    pass
+" "$seen_count" "$seen_file" <<< "$prompts_resp" 2>/dev/null || true
+        fi
+
+        task_check=$(curl -sf \\
+          -H "Authorization: Bearer \${CV_HUB_PAT}" \\
+          "\${CV_HUB_API}/api/v1/tasks/\${current_task_id}" \\
+          2>/dev/null) || true
+
+        if [[ -n "$task_check" ]]; then
+          task_status=$(python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('task', {}).get('status', ''))
+except:
+    pass
+" <<< "$task_check" 2>/dev/null || true)
+
+          if [[ "$task_status" == "cancelled" ]]; then
+            echo ""
+            echo "---"
+            echo "[CV-Hub: Task Cancelled]"
+            echo "Task \${current_task_id} has been cancelled by the user."
+            echo "Stop working on this task."
+            echo "---"
+            rm -f "$task_file" "$seen_file"
+          elif [[ "$task_status" == "completed" || "$task_status" == "failed" ]]; then
+            rm -f "$task_file" "$seen_file"
+          fi
+        fi
+      fi
+    fi
+
+    # ── Auto-claim: poll for new tasks (only if no current task) ──
+    if [[ ! -f "$task_file" ]]; then
+      task_resp=$(curl -sf -X POST \\
+        -H "Authorization: Bearer \${CV_HUB_PAT}" \\
+        -H "Content-Type: application/json" \\
+        "\${CV_HUB_API}/api/v1/executors/\${CV_HUB_EXECUTOR_ID}/poll" \\
+        2>/dev/null || true)
+
+      if [[ -n "$task_resp" ]]; then
+        task_id=$(python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    t = d.get('task')
+    if t and t.get('id'):
+        print(t['id'])
+except:
+    pass
+" <<< "$task_resp" 2>/dev/null || true)
+
+        if [[ -n "$task_id" ]]; then
+          echo "$task_id" > "$task_file"
+
+          curl -sf -X POST \\
+            -H "Authorization: Bearer \${CV_HUB_PAT}" \\
+            "\${CV_HUB_API}/api/v1/executors/\${CV_HUB_EXECUTOR_ID}/tasks/\${task_id}/start" \\
+            >/dev/null 2>&1 || true
+
+          python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+t = d.get('task', {})
+if t:
+    print()
+    print('---')
+    print('[CV-Hub Task Dispatched]')
+    print(f'Task ID: {t[\"id\"]}')
+    print(f'Title: {t.get(\"title\", \"Untitled\")}')
+    if t.get('description'):
+        print(f'Description: {t[\"description\"]}')
+    if t.get('input'):
+        inp = t['input']
+        if inp.get('instructions'):
+            print('Instructions:')
+            for i in inp['instructions']:
+                print(f'  - {i}')
+        if inp.get('constraints'):
+            print('Constraints:')
+            for c in inp['constraints']:
+                print(f'  - {c}')
+    print()
+    print('When done, report results:')
+    print(f'  curl -X POST -H \"Authorization: Bearer \\\\\\$CV_HUB_PAT\" -H \"Content-Type: application/json\" \\\\\\\\')
+    print(f'    -d \\'{{\"summary\": \"...\", \"files_modified\": [...]}}\\' \\\\\\\\')
+    print(f'    \"\\\\\\$CV_HUB_API/api/v1/executors/\\\\\\$CV_HUB_EXECUTOR_ID/tasks/{t[\"id\"]}/complete\"')
+    print()
+    print('If you need user input:')
+    print(f'  curl -X POST -H \"Authorization: Bearer \\\\\\$CV_HUB_PAT\" -H \"Content-Type: application/json\" \\\\\\\\')
+    print(f'    -d \\'{{\"prompt_text\": \"your question\", \"options\": [\"A\", \"B\"]}}\\' \\\\\\\\')
+    print(f'    \"\\\\\\$CV_HUB_API/api/v1/tasks/{t[\"id\"]}/prompts\"')
+    print('---')
+" <<< "$task_resp" 2>/dev/null || true
+        fi
+      fi
+    fi
+  fi
+
 # ── CLI fallback ─────────────────────────────────────────────────────
 elif [[ -n "\${CV_SESSION_ID:-}" ]]; then
   input=$(cat)
