@@ -229,30 +229,32 @@ async function postAuthSetup(
 ): Promise<void> {
   const gitHost = getGitHost(config.apiUrl);
 
-  // Step 1: Create a PAT for git operations
+  // Step 1: Try to create a PAT for git operations
   const patSpinner = ora('Creating git access token...').start();
   const pat = await createPATFromOAuth(config.apiUrl, accessToken, username);
 
-  if (!pat) {
-    patSpinner.warn(chalk.yellow('Could not create git token — git push/clone will need manual setup'));
-    console.log(chalk.gray(`  You can create a PAT at ${config.appUrl}/settings/tokens`));
-    return;
+  // Use PAT if created, otherwise use the OAuth access token directly
+  const token = pat || accessToken;
+
+  if (pat) {
+    patSpinner.succeed(chalk.green('Git access token created'));
+  } else {
+    patSpinner.succeed(chalk.green('Using session token'));
   }
-  patSpinner.succeed(chalk.green('Git access token created'));
 
   // Step 2: Configure git credentials
-  const gitOk = configureGitCredentials(gitHost, pat);
+  const gitOk = configureGitCredentials(gitHost, token);
   if (gitOk) {
     console.log(chalk.green(`  ✓ Git credentials configured for ${gitHost}`));
   } else {
     console.log(chalk.yellow(`  ⚠ Could not auto-configure git credentials`));
-    console.log(chalk.gray(`  Add to ~/.netrc:\n    machine ${gitHost}\n      login git\n      password ${pat}`));
+    console.log(chalk.gray(`  Add to ~/.netrc:\n    machine ${gitHost}\n      login git\n      password ${token}`));
   }
 
   // Step 3: Configure MCP for Claude Code (if in a git repo)
   try {
     execSync('git rev-parse --git-dir', { stdio: 'ignore' });
-    const mcpOk = configureMCPServer(config.apiUrl, pat);
+    const mcpOk = configureMCPServer(config.apiUrl, token);
     if (mcpOk) {
       console.log(chalk.green('  ✓ MCP server configured for Claude Code (.mcp.json)'));
     }
@@ -260,10 +262,21 @@ async function postAuthSetup(
     // Not in a git repo — skip MCP setup silently
   }
 
-  // Step 4: Write flat credentials file for hooks
-  const credPaths = writeHookCredentials(config.apiUrl, pat);
+  // Step 4: Write flat credentials file for hooks + agent
+  const credPaths = writeHookCredentials(config.apiUrl, token);
   for (const p of credPaths) {
     console.log(chalk.green(`  ✓ Hook credentials written to ${p}`));
+  }
+
+  // Step 5: Set machine name from hostname
+  try {
+    const { hostname } = await import('os');
+    const machine = hostname().toLowerCase().replace(/\s+/g, '-');
+    const { writeCredentialField } = await import('../../../utils/cv-hub-credentials.js');
+    await writeCredentialField('CV_HUB_MACHINE_NAME', machine);
+    console.log(chalk.green(`  ✓ Machine name: ${machine}`));
+  } catch {
+    // Best-effort
   }
 }
 
