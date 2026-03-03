@@ -79,6 +79,7 @@ import { depsCommand } from './commands/deps.js';
 import { summaryCommand } from './commands/summary.js';
 import { knowledgeCommand } from './commands/knowledge.js';
 import { connectCommand } from './commands/connect.js';
+import { agentCommand } from './commands/agent.js';
 
 const program = new Command();
 
@@ -143,6 +144,7 @@ program.addCommand(bugreportCommand());     // Bug reporting (cv bugreport)
 program.addCommand(depsCommand());          // Dependency analysis (cv deps)
 program.addCommand(knowledgeCommand());     // Session knowledge queries (cv knowledge)
 program.addCommand(connectCommand());       // Connection instructions (cv connect)
+program.addCommand(agentCommand());         // Task listener + Claude Code launcher (cv agent)
 
 // Error handler
 program.exitOverride((err) => {
