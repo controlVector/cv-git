@@ -270,30 +270,42 @@ function installSignalHandlers(
 async function launchClaudeCode(
   prompt: string,
   options: { cwd: string; autoApprove: boolean },
-): Promise<{ exitCode: number }> {
+): Promise<{ exitCode: number; stderr: string }> {
   return new Promise((resolve, reject) => {
     const args: string[] = ['-p', prompt];
 
     if (options.autoApprove) {
-      args.push('--dangerously-skip-permissions');
+      const isRoot = process.getuid?.() === 0;
+      if (isRoot) {
+        console.log(chalk.yellow('⚠') + ' Running as root — --dangerously-skip-permissions unavailable, using print mode only');
+      } else {
+        args.push('--dangerously-skip-permissions');
+      }
     }
 
-    // Use stdio: 'inherit' so Claude Code gets a real TTY — this enables
-    // streaming output, colors, and spinners without Node buffering.
+    // stdin+stdout inherit for real TTY (streaming, colors, spinners).
+    // stderr piped so we can capture error messages for failure reports.
     const child = spawn('claude', args, {
       cwd: options.cwd,
-      stdio: 'inherit',
+      stdio: ['inherit', 'inherit', 'pipe'],
       env: { ...process.env },
     });
 
     _activeChild = child;
+    let stderr = '';
+
+    child.stderr?.on('data', (data: Buffer) => {
+      const text = data.toString();
+      stderr += text;
+      process.stderr.write(data);
+    });
 
     child.on('close', (code, signal) => {
       _activeChild = null;
       if (signal === 'SIGKILL') {
-        resolve({ exitCode: 137 });
+        resolve({ exitCode: 137, stderr });
       } else {
-        resolve({ exitCode: code ?? 1 });
+        resolve({ exitCode: code ?? 1, stderr });
       }
     });
 
@@ -584,9 +596,12 @@ async function executeTask(
     } else {
       console.log(`\n${chalk.red('❌')} Task failed (exit code ${result.exitCode}, ${elapsed})`);
 
+      const errorDetail = result.stderr.trim()
+        ? `${result.stderr.trim().slice(-1500)}\n\nExit code ${result.exitCode} after ${elapsed}.`
+        : `Claude Code exited with code ${result.exitCode} after ${elapsed}.`;
+
       await withRetry(
-        () => failTask(creds, state.executorId, task.id,
-          `Claude Code exited with code ${result.exitCode} after ${elapsed}.`),
+        () => failTask(creds, state.executorId, task.id, errorDetail),
         'Report failure',
       );
       state.failedCount++;

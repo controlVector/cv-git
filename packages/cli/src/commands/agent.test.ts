@@ -238,6 +238,27 @@ describe('cv agent', () => {
       const payload = { error: 'Claude Code exited with code 1 after 2m 5s.' };
       expect(payload.error).toContain('exited with code');
     });
+
+    it('fail includes stderr when available', () => {
+      const stderr = 'Error: --dangerously-skip-permissions cannot be used as root';
+      const exitCode = 1;
+      const elapsed = '1s';
+      const errorDetail = stderr.trim()
+        ? `${stderr.trim().slice(-1500)}\n\nExit code ${exitCode} after ${elapsed}.`
+        : `Claude Code exited with code ${exitCode} after ${elapsed}.`;
+      expect(errorDetail).toContain('--dangerously-skip-permissions');
+      expect(errorDetail).toContain('Exit code 1');
+    });
+
+    it('fail falls back to generic message when no stderr', () => {
+      const stderr = '';
+      const exitCode = 1;
+      const elapsed = '5s';
+      const errorDetail = stderr.trim()
+        ? `${stderr.trim().slice(-1500)}\n\nExit code ${exitCode} after ${elapsed}.`
+        : `Claude Code exited with code ${exitCode} after ${elapsed}.`;
+      expect(errorDetail).toBe('Claude Code exited with code 1 after 5s.');
+    });
   });
 
   // ── Retry logic ─────────────────────────────────────────────────────
@@ -385,6 +406,47 @@ describe('cv agent', () => {
       }
 
       expect(reportedError).toBe('Aborted by user (Ctrl+C)');
+    });
+  });
+
+  // ── Root detection ──────────────────────────────────────────────────
+
+  describe('root detection for --dangerously-skip-permissions', () => {
+    it('skips flag when uid is 0', () => {
+      const args = ['-p', 'test prompt'];
+      const autoApprove = true;
+      const isRoot = true; // simulated
+
+      if (autoApprove && !isRoot) {
+        args.push('--dangerously-skip-permissions');
+      }
+
+      expect(args).toEqual(['-p', 'test prompt']);
+      expect(args).not.toContain('--dangerously-skip-permissions');
+    });
+
+    it('adds flag when uid is non-zero', () => {
+      const args = ['-p', 'test prompt'];
+      const autoApprove = true;
+      const isRoot = false;
+
+      if (autoApprove && !isRoot) {
+        args.push('--dangerously-skip-permissions');
+      }
+
+      expect(args).toContain('--dangerously-skip-permissions');
+    });
+
+    it('does not add flag when autoApprove is false', () => {
+      const args = ['-p', 'test prompt'];
+      const autoApprove = false;
+      const isRoot = false;
+
+      if (autoApprove && !isRoot) {
+        args.push('--dangerously-skip-permissions');
+      }
+
+      expect(args).not.toContain('--dangerously-skip-permissions');
     });
   });
 });
