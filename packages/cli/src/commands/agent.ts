@@ -218,10 +218,53 @@ function buildClaudePrompt(task: Task): string {
 /** Shared reference to current child process so signal handlers can kill it */
 let _activeChild: ChildProcess | null = null;
 
-function killActiveChild(): void {
-  if (_activeChild) {
-    _activeChild.kill('SIGTERM');
-  }
+/** Signal handling state */
+let _sigintCount = 0;
+let _sigintTimer: ReturnType<typeof setTimeout> | null = null;
+let _signalHandlerInstalled = false;
+
+function installSignalHandlers(
+  getState: () => AgentState,
+  cleanup: () => Promise<void>,
+): void {
+  if (_signalHandlerInstalled) return;
+  _signalHandlerInstalled = true;
+
+  process.on('SIGINT', async () => {
+    // No task running — exit agent immediately
+    if (!_activeChild) {
+      console.log('\n' + chalk.gray('👋 Agent stopped.'));
+      await cleanup();
+      process.exit(0);
+    }
+
+    _sigintCount++;
+
+    if (_sigintCount === 1) {
+      console.log(`\n${chalk.yellow('⚠')} Press Ctrl+C again within 3s to abort task.`);
+      _sigintTimer = setTimeout(() => { _sigintCount = 0; }, 3000);
+      return;
+    }
+
+    // Second Ctrl+C within window — kill child, stay running
+    if (_sigintTimer) clearTimeout(_sigintTimer);
+    console.log(`\n${chalk.red('🛑')} Aborting task...`);
+    try { _activeChild.kill('SIGKILL'); } catch {}
+    _activeChild = null;
+    _sigintCount = 0;
+    // The child's 'close' event will fire with signal='SIGKILL',
+    // resolving the promise and returning to the listen loop.
+  });
+
+  process.on('SIGTERM', async () => {
+    console.log(`\n${chalk.gray('⏹')} Received SIGTERM, shutting down...`);
+    if (_activeChild) {
+      try { _activeChild.kill('SIGKILL'); } catch {}
+      _activeChild = null;
+    }
+    await cleanup();
+    process.exit(0);
+  });
 }
 
 async function launchClaudeCode(
@@ -245,9 +288,13 @@ async function launchClaudeCode(
 
     _activeChild = child;
 
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       _activeChild = null;
-      resolve({ exitCode: code ?? 1 });
+      if (signal === 'SIGKILL') {
+        resolve({ exitCode: 137 });
+      } else {
+        resolve({ exitCode: code ?? 1 });
+      }
     });
 
     child.on('error', (err) => {
@@ -408,35 +455,14 @@ async function runAgent(options: AgentOptions): Promise<void> {
     running: true,
   };
 
-  let ctrlCCount = 0;
-  let ctrlCTimer: ReturnType<typeof setTimeout> | null = null;
-
-  // ── Graceful shutdown ─────────────────────────────────────────────
-  const shutdown = async (signal: string) => {
-    if (state.currentTaskId) {
-      ctrlCCount++;
-      if (ctrlCCount === 1) {
-        console.log(`\n${chalk.yellow('⚠')} Press Ctrl+C again to abort task, or wait for it to finish.`);
-        ctrlCTimer = setTimeout(() => { ctrlCCount = 0; }, 5000);
-        return;
-      }
-      // Second Ctrl+C — kill the task
-      if (ctrlCTimer) clearTimeout(ctrlCTimer);
-      console.log(`\n${chalk.red('⏹')} Aborting task...`);
-      killActiveChild();
-      try {
-        await failTask(creds, state.executorId, state.currentTaskId, 'Aborted by user (Ctrl+C)');
-      } catch {}
-    }
-
-    state.running = false;
-    console.log(`\n${chalk.gray('⏹')} Shutting down agent...`);
-    await markOffline(creds, state.executorId);
-    process.exit(0);
-  };
-
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  // ── Signal handlers ─────────────────────────────────────────────
+  installSignalHandlers(
+    () => state,
+    async () => {
+      state.running = false;
+      await markOffline(creds, state.executorId);
+    },
+  );
 
   // ── Main loop ─────────────────────────────────────────────────────
   while (state.running) {
@@ -548,6 +574,13 @@ async function executeTask(
       state.completedCount++;
 
       console.log(chalk.gray('   Reported to CV-Hub.'));
+    } else if (result.exitCode === 137) {
+      console.log(`\n${chalk.yellow('⏹')} Task aborted by user (${elapsed})`);
+
+      try {
+        await failTask(creds, state.executorId, task.id, 'Aborted by user (Ctrl+C)');
+      } catch {}
+      state.failedCount++;
     } else {
       console.log(`\n${chalk.red('❌')} Task failed (exit code ${result.exitCode}, ${elapsed})`);
 

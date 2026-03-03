@@ -637,7 +637,7 @@ if [[ -n "$CRED_FILE" ]]; then
 fi`;
 
 // Fallback cred lookup for hooks that already have env vars from session-start
-const CRED_LOOKUP_FALLBACK = `SESSION_ENV="/tmp/cv-hub-session.env"
+const CRED_LOOKUP_FALLBACK = `SESSION_ENV="/tmp/cv-hub-session-$(id -u).env"
 
 # ── Source shared session env (primary propagation path) ─────────────
 if [[ -f "$SESSION_ENV" ]]; then
@@ -687,7 +687,7 @@ export const HOOK_TEMPLATES: Record<string, () => string> = {
 
 const HOOK_SESSION_START = `#!/usr/bin/env bash
 if [[ "\${CV_HUB_DEBUG:-}" == "1" ]]; then
-  exec 2>/tmp/cv-hook-session-start-err.log
+  exec 2>/tmp/cv-hook-session-start-$(id -u).log
   set -x
 fi
 # Claude Code hook: SessionStart
@@ -695,7 +695,7 @@ fi
 # Falls back to local cv knowledge CLI if no API credentials.
 set -euo pipefail
 
-SESSION_ENV="/tmp/cv-hub-session.env"
+SESSION_ENV="/tmp/cv-hub-session-$(id -u).env"
 
 ${CRED_LOOKUP}
 
@@ -822,7 +822,7 @@ fi
 
 const HOOK_CONTEXT_TURN = `#!/usr/bin/env bash
 if [[ "\${CV_HUB_DEBUG:-}" == "1" ]]; then
-  exec 2>/tmp/cv-hook-context-turn-err.log
+  exec 2>/tmp/cv-hook-context-turn-$(id -u).log
   set -x
 fi
 # Claude Code hook: Stop (context engine turn injection + egress)

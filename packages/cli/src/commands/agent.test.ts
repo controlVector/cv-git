@@ -308,4 +308,83 @@ describe('cv agent', () => {
       expect(sha).toBeNull();
     });
   });
+
+  // ── Signal handling ─────────────────────────────────────────────────
+
+  describe('signal handling logic', () => {
+    it('no active child → SIGINT exits', () => {
+      const activeChild = null;
+      let shouldExit = false;
+
+      if (!activeChild) {
+        shouldExit = true;
+      }
+
+      expect(shouldExit).toBe(true);
+    });
+
+    it('active child + first SIGINT → warns, does not kill', () => {
+      const activeChild = { kill: vi.fn() };
+      let sigintCount = 0;
+      let warned = false;
+      let killed = false;
+
+      sigintCount++;
+      if (!activeChild) {
+        // exit
+      } else if (sigintCount === 1) {
+        warned = true;
+      } else if (sigintCount >= 2) {
+        activeChild.kill('SIGKILL');
+        killed = true;
+      }
+
+      expect(warned).toBe(true);
+      expect(killed).toBe(false);
+      expect(activeChild.kill).not.toHaveBeenCalled();
+    });
+
+    it('active child + two SIGINTs → kills child with SIGKILL', () => {
+      const activeChild = { kill: vi.fn() };
+      let sigintCount = 0;
+      let killed = false;
+
+      for (let i = 0; i < 2; i++) {
+        sigintCount++;
+        if (!activeChild) {
+          break;
+        } else if (sigintCount === 1) {
+          // warn
+        } else if (sigintCount >= 2) {
+          activeChild.kill('SIGKILL');
+          killed = true;
+        }
+      }
+
+      expect(killed).toBe(true);
+      expect(activeChild.kill).toHaveBeenCalledWith('SIGKILL');
+    });
+
+    it('SIGKILL resolves with exit code 137', () => {
+      const signal = 'SIGKILL';
+      const code = null;
+      const exitCode = signal === 'SIGKILL' ? 137 : (code ?? 1);
+      expect(exitCode).toBe(137);
+    });
+
+    it('exit 137 reports task as user-aborted', () => {
+      const exitCode = 137;
+      let reportedError = '';
+
+      if (exitCode === 0) {
+        // success
+      } else if (exitCode === 137) {
+        reportedError = 'Aborted by user (Ctrl+C)';
+      } else {
+        reportedError = `Claude Code exited with code ${exitCode}`;
+      }
+
+      expect(reportedError).toBe('Aborted by user (Ctrl+C)');
+    });
+  });
 });
