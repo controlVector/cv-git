@@ -249,7 +249,7 @@ export class CVHubAdapter implements GitPlatformAdapter {
     }
 
     const match = origin.refs.push.match(
-      /(?:hub\.controlvector\.io|controlfab\.ai)[:/]([^/]+)\/(.+?)(?:\.git)?$/
+      /(?:(?:git\.)?hub\.controlvector\.io|(?:git\.)?controlfab\.ai)[:/]([^/]+)\/(.+?)(?:\.git)?$/
     );
 
     if (!match) {
