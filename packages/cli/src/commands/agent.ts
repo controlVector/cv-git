@@ -152,13 +152,32 @@ async function sendHeartbeat(
   creds: CVHubCredentials,
   executorId: string,
   taskId?: string,
+  message?: string,
 ): Promise<void> {
   // Executor heartbeat
   await apiCall(creds, 'POST', `/api/v1/executors/${executorId}/heartbeat`).catch(() => {});
   // Task heartbeat (if running)
   if (taskId) {
-    await apiCall(creds, 'POST', `/api/v1/executors/${executorId}/tasks/${taskId}/heartbeat`).catch(() => {});
+    const body = message ? { message, log_type: 'heartbeat' } : undefined;
+    await apiCall(creds, 'POST', `/api/v1/executors/${executorId}/tasks/${taskId}/heartbeat`, body).catch(() => {});
   }
+}
+
+async function sendTaskLog(
+  creds: CVHubCredentials,
+  executorId: string,
+  taskId: string,
+  logType: string,
+  message: string,
+  details?: Record<string, unknown>,
+  progressPct?: number,
+): Promise<void> {
+  await apiCall(creds, 'POST', `/api/v1/executors/${executorId}/tasks/${taskId}/log`, {
+    log_type: logType,
+    message,
+    ...(details ? { details } : {}),
+    ...(progressPct !== undefined ? { progress_pct: progressPct } : {}),
+  }).catch(() => {});
 }
 
 async function markOffline(
@@ -267,27 +286,133 @@ function installSignalHandlers(
   });
 }
 
+// ============================================================================
+// Permission prompt relay
+// ============================================================================
+
+/**
+ * Patterns that indicate Claude Code is waiting for permission approval.
+ * These are matched against stripped (ANSI-free) stdout lines.
+ */
+const PERMISSION_PATTERNS = [
+  // "Allow <tool>? (Y/n)" style
+  /Allow .+\?\s*\(Y\/n\)/i,
+  // "Do you want to" style
+  /Do you want to .+\?\s*\(Y\/n\)/i,
+  // Generic tool approval
+  /\(Y\/n\)\s*$/,
+  // "Allow once" / "Allow always" style menus
+  /Allow\s+\w+.*\?\s*$/i,
+];
+
+/** Strip ANSI escape codes from a string */
+function stripAnsi(str: string): string {
+  return str.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1B\].*?\x07/g, '');
+}
+
+/** Check if a line looks like a permission prompt */
+function isPermissionPrompt(line: string): boolean {
+  const clean = stripAnsi(line).trim();
+  return PERMISSION_PATTERNS.some(p => p.test(clean));
+}
+
+/** Extract the prompt text from a buffer of recent output */
+function extractPromptText(buffer: string): string {
+  const lines = stripAnsi(buffer).split('\n').filter(l => l.trim());
+  // Take the last few meaningful lines as context
+  return lines.slice(-5).join('\n').trim();
+}
+
+interface PromptRelayContext {
+  creds: CVHubCredentials;
+  executorId: string;
+  taskId: string;
+}
+
+async function createPromptAndWaitForResponse(
+  ctx: PromptRelayContext,
+  promptText: string,
+): Promise<string> {
+  // Create the prompt via API
+  const createRes = await apiCall(ctx.creds, 'POST', `/api/v1/tasks/${ctx.taskId}/prompts`, {
+    prompt_type: 'approval',
+    prompt_text: promptText,
+    options: ['Yes', 'No'],
+    context: { source: 'claude_code_permission' },
+    expires_in_minutes: 30,
+  });
+
+  if (!createRes.ok) {
+    console.log(chalk.yellow('  ⚠ Failed to relay prompt to CV-Hub, auto-approving'));
+    return 'y';
+  }
+
+  const promptData = await createRes.json() as any;
+  const promptId = promptData.id;
+
+  console.log(chalk.cyan('  📡') + ' Permission prompt relayed to CV-Hub (waiting for response...)');
+
+  // Poll for response
+  const pollStart = Date.now();
+  const timeout = 30 * 60 * 1000; // 30 minutes
+
+  while (Date.now() - pollStart < timeout) {
+    await new Promise(r => setTimeout(r, 3000));
+
+    try {
+      const res = await apiCall(ctx.creds, 'GET', `/api/v1/tasks/${ctx.taskId}/prompts`);
+      if (!res.ok) continue;
+
+      const data = await res.json() as any;
+      const prompt = data.prompts?.find((p: any) => p.id === promptId);
+      if (prompt?.response) {
+        const answer = prompt.response.toLowerCase().trim();
+        console.log(chalk.cyan('  📡') + ` Got response: ${prompt.response}`);
+        // Map to y/n for Claude Code
+        if (answer === 'yes' || answer === 'y' || answer === 'allow') {
+          return 'y';
+        }
+        return 'n';
+      }
+    } catch {
+      // Network error, keep polling
+    }
+  }
+
+  console.log(chalk.yellow('  ⚠ Prompt timed out, defaulting to "no"'));
+  return 'n';
+}
+
 async function launchClaudeCode(
   prompt: string,
   options: { cwd: string; autoApprove: boolean },
+  relayCtx?: PromptRelayContext,
 ): Promise<{ exitCode: number; stderr: string }> {
   return new Promise((resolve, reject) => {
     const args: string[] = ['-p', prompt];
 
+    let canSkipPermissions = false;
     if (options.autoApprove) {
       const isRoot = process.getuid?.() === 0;
       if (isRoot) {
-        console.log(chalk.yellow('⚠') + ' Running as root — --dangerously-skip-permissions unavailable, using print mode only');
+        console.log(chalk.yellow('⚠') + ' Running as root — --dangerously-skip-permissions unavailable');
+        if (relayCtx) {
+          console.log(chalk.cyan('📡') + ' Permission prompts will be relayed through CV-Hub');
+        }
       } else {
         args.push('--dangerously-skip-permissions');
+        canSkipPermissions = true;
       }
     }
 
-    // stdin+stdout inherit for real TTY (streaming, colors, spinners).
-    // stderr piped so we can capture error messages for failure reports.
+    // If we can skip permissions, inherit stdio for best UX.
+    // Otherwise pipe stdout+stdin so we can intercept permission prompts.
+    const needsRelay = !canSkipPermissions && !!relayCtx;
     const child = spawn('claude', args, {
       cwd: options.cwd,
-      stdio: ['inherit', 'inherit', 'pipe'],
+      stdio: needsRelay
+        ? ['pipe', 'pipe', 'pipe']
+        : ['inherit', 'inherit', 'pipe'],
       env: { ...process.env },
     });
 
@@ -300,8 +425,52 @@ async function launchClaudeCode(
       process.stderr.write(data);
     });
 
+    if (needsRelay && relayCtx) {
+      // Tee stdout to terminal while scanning for permission prompts
+      let recentOutput = '';
+
+      child.stdout?.on('data', (data: Buffer) => {
+        const text = data.toString();
+        process.stdout.write(data); // tee to terminal
+
+        recentOutput += text;
+        // Keep a rolling window of recent output
+        if (recentOutput.length > 4000) {
+          recentOutput = recentOutput.slice(-2000);
+        }
+
+        // Check if the latest chunk contains a permission prompt
+        if (isPermissionPrompt(text)) {
+          const promptText = extractPromptText(recentOutput);
+
+          // Async: relay and pipe response, don't block the stream
+          createPromptAndWaitForResponse(relayCtx, promptText)
+            .then((answer) => {
+              try {
+                child.stdin?.write(answer + '\n');
+              } catch {
+                // stdin may be closed
+              }
+            })
+            .catch(() => {
+              // Fallback: approve if relay fails
+              try { child.stdin?.write('y\n'); } catch {}
+            });
+        }
+      });
+
+      // Forward process stdin to child stdin for manual intervention
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode?.(false);
+        process.stdin.pipe(child.stdin!);
+      }
+    }
+
     child.on('close', (code, signal) => {
       _activeChild = null;
+      if (needsRelay && process.stdin.isTTY) {
+        process.stdin.unpipe();
+      }
       if (signal === 'SIGKILL') {
         resolve({ exitCode: 137, stderr });
       } else {
@@ -357,6 +526,35 @@ function formatDuration(ms: number): string {
   if (m < 60) return `${m}m ${rem}s`;
   const h = Math.floor(m / 60);
   return `${h}h ${m % 60}m`;
+}
+
+function setTerminalTitle(title: string): void {
+  if (process.stdout.isTTY) {
+    process.stdout.write(`\x1b]0;${title}\x07`);
+  }
+}
+
+function printBanner(
+  status: 'COMPLETED' | 'FAILED' | 'ABORTED',
+  elapsed: string,
+  changedFiles: string[],
+  commitSha: string | null,
+): void {
+  const color = status === 'COMPLETED' ? chalk.green : status === 'ABORTED' ? chalk.yellow : chalk.red;
+  const icon = status === 'COMPLETED' ? '✅' : status === 'ABORTED' ? '⏹' : '❌';
+
+  console.log(color('┌─────────────────────────────────────────────────────────────┐'));
+  console.log(color(`│ ${icon} ${status.padEnd(57)}│`));
+  console.log(color(`│ Duration: ${elapsed.padEnd(49)}│`));
+  if (changedFiles.length > 0) {
+    const shown = changedFiles.slice(0, 3);
+    const fileStr = shown.join(', ') + (changedFiles.length > 3 ? ` and ${changedFiles.length - 3} more` : '');
+    console.log(color(`│ Files: ${fileStr.substring(0, 51).padEnd(51)}│`));
+  }
+  if (commitSha) {
+    console.log(color(`│ Commit: ${commitSha.substring(0, 8).padEnd(51)}│`));
+  }
+  console.log(color('└─────────────────────────────────────────────────────────────┘'));
 }
 
 function updateStatusLine(state: AgentState): void {
@@ -524,6 +722,8 @@ async function executeTask(
   // ── Mark task as running ──────────────────────────────────────────
   try {
     await startTask(creds, state.executorId, task.id);
+    setTerminalTitle(`cv-agent: ${task.title} (starting...)`);
+    sendTaskLog(creds, state.executorId, task.id, 'lifecycle', 'Task started, launching Claude Code');
   } catch (err: any) {
     console.log(chalk.red(`❌ Failed to start task: ${err.message}`));
     state.currentTaskId = null;
@@ -533,7 +733,9 @@ async function executeTask(
   // ── Heartbeat timer ───────────────────────────────────────────────
   const heartbeatTimer = setInterval(async () => {
     try {
-      await sendHeartbeat(creds, state.executorId, task.id);
+      const elapsed = formatDuration(Date.now() - startTime);
+      setTerminalTitle(`cv-agent: ${task.title} (${elapsed})`);
+      await sendHeartbeat(creds, state.executorId, task.id, `Claude Code running (${elapsed} elapsed)`);
     } catch {}
   }, 30_000);
 
@@ -557,10 +759,16 @@ async function executeTask(
     console.log(chalk.cyan('🚀') + ' Launching Claude Code...');
     console.log(chalk.gray('─'.repeat(60)));
 
+    const relayCtx: PromptRelayContext = {
+      creds,
+      executorId: state.executorId,
+      taskId: task.id,
+    };
+
     const result = await launchClaudeCode(prompt, {
       cwd: options.workingDir,
       autoApprove: options.autoApprove,
-    });
+    }, relayCtx);
 
     console.log(chalk.gray('\n' + '─'.repeat(60)));
 
@@ -569,7 +777,17 @@ async function executeTask(
     const commitSha = getLatestCommit(options.workingDir);
 
     if (result.exitCode === 0) {
-      console.log(`\n${chalk.green('✅')} Task complete (${elapsed})${changedFiles.length ? ` — ${changedFiles.length} files changed` : ''}`);
+      if (changedFiles.length > 0) {
+        sendTaskLog(creds, state.executorId, task.id, 'git',
+          `${changedFiles.length} file(s) changed`,
+          { files: changedFiles.slice(0, 20) });
+      }
+
+      sendTaskLog(creds, state.executorId, task.id, 'lifecycle',
+        `Claude Code completed successfully (${elapsed})`, undefined, 100);
+
+      console.log();
+      printBanner('COMPLETED', elapsed, changedFiles, commitSha);
 
       const summary = changedFiles.length
         ? `Completed in ${elapsed}. Modified ${changedFiles.length} file(s): ${changedFiles.slice(0, 10).join(', ')}${changedFiles.length > 10 ? '...' : ''}`
@@ -587,14 +805,24 @@ async function executeTask(
 
       console.log(chalk.gray('   Reported to CV-Hub.'));
     } else if (result.exitCode === 137) {
-      console.log(`\n${chalk.yellow('⏹')} Task aborted by user (${elapsed})`);
+      sendTaskLog(creds, state.executorId, task.id, 'lifecycle',
+        'Task aborted by user (Ctrl+C)');
+
+      console.log();
+      printBanner('ABORTED', elapsed, [], null);
 
       try {
         await failTask(creds, state.executorId, task.id, 'Aborted by user (Ctrl+C)');
       } catch {}
       state.failedCount++;
     } else {
-      console.log(`\n${chalk.red('❌')} Task failed (exit code ${result.exitCode}, ${elapsed})`);
+      const stderrTail = result.stderr.trim().slice(-500);
+      sendTaskLog(creds, state.executorId, task.id, 'lifecycle',
+        `Claude Code exited with code ${result.exitCode} (${elapsed})`,
+        stderrTail ? { stderr_tail: stderrTail } : undefined);
+
+      console.log();
+      printBanner('FAILED', elapsed, changedFiles, commitSha);
 
       const errorDetail = result.stderr.trim()
         ? `${result.stderr.trim().slice(-1500)}\n\nExit code ${result.exitCode} after ${elapsed}.`
@@ -609,6 +837,9 @@ async function executeTask(
   } catch (err: any) {
     console.log(`\n${chalk.red('❌')} Task error: ${err.message}`);
 
+    sendTaskLog(creds, state.executorId, task.id, 'error',
+      `Agent error: ${err.message}`);
+
     try {
       await failTask(creds, state.executorId, task.id, err.message);
     } catch {}
@@ -620,6 +851,7 @@ async function executeTask(
     state.lastTaskEnd = Date.now();
   }
 
+  setTerminalTitle('cv-agent: listening...');
   console.log();
   console.log(chalk.cyan('🔄') + ' Listening for tasks...');
   console.log();
