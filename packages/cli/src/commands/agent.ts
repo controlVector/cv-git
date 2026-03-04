@@ -21,6 +21,12 @@ import {
   getMachineName,
   type CVHubCredentials,
 } from '../utils/cv-hub-credentials.js';
+import {
+  capturePreTaskState,
+  capturePostTaskState,
+  buildCompletionPayload,
+  verifyGitRemote,
+} from './agent-git.js';
 
 // ============================================================================
 // Types
@@ -54,6 +60,8 @@ interface Task {
   status: string;
   input?: { description?: string; context?: string; instructions?: string[]; constraints?: string[] };
   repository_id?: string;
+  owner?: string;
+  repo?: string;
   branch?: string;
   file_paths?: string[];
   timeout_at?: string;
@@ -345,35 +353,6 @@ async function launchClaudeCode(
 }
 
 // ============================================================================
-// Git helpers
-// ============================================================================
-
-function getChangedFiles(cwd: string): string[] {
-  try {
-    const stdout = execSync('git diff --name-only HEAD~1 2>/dev/null', {
-      cwd,
-      encoding: 'utf-8',
-      timeout: 5000,
-    });
-    return stdout.trim().split('\n').filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-function getLatestCommit(cwd: string): string | null {
-  try {
-    return execSync('git rev-parse HEAD 2>/dev/null', {
-      cwd,
-      encoding: 'utf-8',
-      timeout: 5000,
-    }).trim();
-  } catch {
-    return null;
-  }
-}
-
-// ============================================================================
 // Display helpers
 // ============================================================================
 
@@ -611,6 +590,18 @@ async function executeTask(
     }
   }
 
+  // ── Capture pre-task git state ──────────────────────────────────────
+  const preGitState = capturePreTaskState(options.workingDir);
+
+  // ── Verify/fix git remote ─────────────────────────────────────────
+  const gitHost = (creds.CV_HUB_API || 'https://api.hub.controlvector.io')
+    .replace(/^https?:\/\//, '')
+    .replace(/^api\./, 'git.');
+  const remoteInfo = verifyGitRemote(options.workingDir, task, gitHost);
+  if (remoteInfo) {
+    console.log(chalk.gray(`   Git remote: ${remoteInfo.remoteName} → ${remoteInfo.remoteUrl}`));
+  }
+
   // ── Build prompt and launch ───────────────────────────────────────
   const prompt = buildClaudePrompt(task);
 
@@ -628,33 +619,31 @@ async function executeTask(
 
     console.log(chalk.gray('\n' + '─'.repeat(60)));
 
+    // ── Capture post-task git state ───────────────────────────────
+    const postGitState = capturePostTaskState(options.workingDir, preGitState);
+    const payload = buildCompletionPayload(result.exitCode, preGitState, postGitState, startTime);
     const elapsed = formatDuration(Date.now() - startTime);
-    const changedFiles = getChangedFiles(options.workingDir);
-    const commitSha = getLatestCommit(options.workingDir);
+    const allChangedFiles = [
+      ...postGitState.filesAdded,
+      ...postGitState.filesModified,
+      ...postGitState.filesDeleted,
+    ];
 
     if (result.exitCode === 0) {
-      if (changedFiles.length > 0) {
+      if (allChangedFiles.length > 0) {
         sendTaskLog(creds, state.executorId, task.id, 'git',
-          `${changedFiles.length} file(s) changed`,
-          { files: changedFiles.slice(0, 20) });
+          `${allChangedFiles.length} file(s) changed (+${postGitState.linesAdded}/-${postGitState.linesDeleted})`,
+          { added: postGitState.filesAdded.slice(0, 10), modified: postGitState.filesModified.slice(0, 10), deleted: postGitState.filesDeleted.slice(0, 10) });
       }
 
       sendTaskLog(creds, state.executorId, task.id, 'lifecycle',
         `Claude Code completed successfully (${elapsed})`, undefined, 100);
 
       console.log();
-      printBanner('COMPLETED', elapsed, changedFiles, commitSha);
-
-      const summary = changedFiles.length
-        ? `Completed in ${elapsed}. Modified ${changedFiles.length} file(s): ${changedFiles.slice(0, 10).join(', ')}${changedFiles.length > 10 ? '...' : ''}`
-        : `Completed in ${elapsed}. No files changed.`;
+      printBanner('COMPLETED', elapsed, allChangedFiles, postGitState.headSha);
 
       await withRetry(
-        () => completeTask(creds, state.executorId, task.id, {
-          summary,
-          files_modified: changedFiles,
-          commit_sha: commitSha,
-        }),
+        () => completeTask(creds, state.executorId, task.id, payload as unknown as Record<string, unknown>),
         'Report completion',
       );
       state.completedCount++;
@@ -678,7 +667,7 @@ async function executeTask(
         stderrTail ? { stderr_tail: stderrTail } : undefined);
 
       console.log();
-      printBanner('FAILED', elapsed, changedFiles, commitSha);
+      printBanner('FAILED', elapsed, allChangedFiles, postGitState.headSha);
 
       const errorDetail = result.stderr.trim()
         ? `${result.stderr.trim().slice(-1500)}\n\nExit code ${result.exitCode} after ${elapsed}.`
