@@ -1065,3 +1065,124 @@ export interface SystemPackageInfo {
 // ========== Context Manifold Types ==========
 
 export * from './manifold-types.js';
+
+// ========== Deploy Configuration ==========
+
+export type DeployProvider = 'doks' | 'ssh' | 'fly' | 'docker-compose' | 'cloudflare';
+
+export interface DeployServiceConfig {
+  name: string;
+  image?: string;
+  dockerfile?: string;
+  replicas?: number;
+  health?: string;
+  envFrom?: string;
+  port?: number;
+  install?: string;
+  start?: string;
+  stop?: string;
+}
+
+export interface DeployTokenConfig {
+  source: string;
+  scope?: string;
+  rotate?: string;
+  ttl?: string;
+}
+
+export interface DeployHookConfig {
+  preDeploy?: string;
+  postDeploy?: string;
+  rollback?: string;
+  healthCheck?: string;
+}
+
+export interface DeployConfig {
+  target: string;
+  provider: DeployProvider;
+
+  // Provider-specific
+  cluster?: string;
+  namespace?: string;
+  registry?: string;
+  host?: string;
+  user?: string;
+  app?: string;
+  region?: string;
+  composeFile?: string;
+
+  services: DeployServiceConfig[];
+
+  tokens?: Record<string, string | DeployTokenConfig>;
+  hooks?: DeployHookConfig;
+}
+
+// ========== Deploy Results ==========
+
+export interface PreflightResult {
+  ready: boolean;
+  checks: Array<{ name: string; passed: boolean; message: string }>;
+}
+
+export interface BuildResult {
+  service: string;
+  image: string;
+  tag: string;
+  digest?: string;
+  durationMs: number;
+}
+
+export interface PushResult {
+  service: string;
+  image: string;
+  registry: string;
+  durationMs: number;
+}
+
+export interface DeployResult {
+  target: string;
+  provider: DeployProvider;
+  services: Array<{
+    name: string;
+    status: 'deployed' | 'failed' | 'skipped';
+    message?: string;
+  }>;
+  version: string;
+  durationMs: number;
+  dryRun: boolean;
+}
+
+export interface HealthResult {
+  target: string;
+  healthy: boolean;
+  services: Array<{
+    name: string;
+    healthy: boolean;
+    latencyMs?: number;
+    message?: string;
+  }>;
+  checkedAt: string;
+}
+
+export interface RollbackResult {
+  target: string;
+  fromVersion: string;
+  toVersion: string;
+  services: Array<{
+    name: string;
+    status: 'rolled_back' | 'failed';
+    message?: string;
+  }>;
+  durationMs: number;
+}
+
+export interface DeployHistory {
+  target: string;
+  deploys: Array<{
+    version: string;
+    commitSha: string;
+    timestamp: string;
+    status: 'success' | 'failed' | 'rolled_back';
+    durationMs: number;
+  }>;
+}
