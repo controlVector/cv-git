@@ -12,7 +12,7 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { DeployOrchestrator } from '@cv-git/core';
+import { DeployOrchestrator, ClaudeMdGenerator } from '@cv-git/core';
 import { findRepoRoot } from '@cv-git/shared';
 import type { DeployProvider } from '@cv-git/shared';
 import { addGlobalOptions, createOutput } from '../utils/output.js';
@@ -339,6 +339,43 @@ export function deployCommand(): Command {
   });
 
   cmd.addCommand(initCmd);
+
+  // ── cv deploy report ──
+
+  const reportCmd = new Command('report');
+  reportCmd
+    .description('Generate a deploy status report (CLAUDE.md format)')
+    .option('-o, --output <file>', 'Write to file instead of stdout');
+  addGlobalOptions(reportCmd);
+
+  reportCmd.action(async (options: any) => {
+    try {
+      const repoRoot = await findRepoRoot();
+      if (!repoRoot) {
+        console.error(chalk.red('Not in a git repository'));
+        process.exit(1);
+      }
+
+      const generator = new ClaudeMdGenerator();
+      const report = await generator.generate({
+        repoRoot,
+        includeDeploy: true,
+      });
+
+      if (options.output) {
+        const fs = await import('fs/promises');
+        await fs.writeFile(options.output, report, 'utf-8');
+        console.log(chalk.green(`  ✓ Report written to ${options.output}`));
+      } else {
+        console.log(report);
+      }
+    } catch (error: any) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+  cmd.addCommand(reportCmd);
 
   return cmd;
 }
