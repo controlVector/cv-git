@@ -20,6 +20,7 @@ export {
   saveTransitionState,
   loadTransitionState,
 } from './transition-model.js';
+export { ClaudeMdGenerator, ClaudeMdOptions } from './claude-md-generator.js';
 
 export interface ContextRequest {
   // The task or query to gather context for
