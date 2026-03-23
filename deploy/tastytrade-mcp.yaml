@@ -1,0 +1,9 @@
+target: tastytrade-mcp
+provider: fly
+app: tastytrade-mcp
+region: iad
+
+services:
+  - name: tastytrade-mcp
+    health: /health
+    port: 3100

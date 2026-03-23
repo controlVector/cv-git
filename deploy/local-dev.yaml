@@ -1,0 +1,11 @@
+target: local-dev
+provider: docker-compose
+composeFile: docker-compose.dev.yml
+
+services:
+  - name: api
+  - name: web
+  - name: postgres
+  - name: redis
+  - name: falkordb
+  - name: qdrant

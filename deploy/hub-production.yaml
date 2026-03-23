@@ -1,0 +1,33 @@
+target: hub-production
+provider: doks
+cluster: cv-hub-cluster
+namespace: cv-hub
+registry: registry.digitalocean.com/controlvector
+
+services:
+  - name: cv-hub-api
+    image: cv-hub-api
+    dockerfile: apps/api/Dockerfile
+    replicas: 2
+    health: /health
+    port: 3000
+    envFrom: cv-hub-api-secrets
+  - name: cv-hub-web
+    image: cv-hub-web
+    dockerfile: apps/web/Dockerfile
+    replicas: 1
+    health: /
+    port: 3000
+  - name: cv-hub-worker
+    image: cv-hub-worker
+    dockerfile: apps/worker/Dockerfile
+    replicas: 1
+
+tokens:
+  DIGITALOCEAN_TOKEN: env://DIGITALOCEAN_TOKEN
+  DOCKER_REGISTRY_TOKEN: env://DOCKER_REGISTRY_TOKEN
+
+hooks:
+  preDeploy: scripts/pre-deploy.sh
+  postDeploy: scripts/post-deploy.sh
+  rollback: scripts/rollback.sh

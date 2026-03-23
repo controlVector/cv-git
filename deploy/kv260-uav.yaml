@@ -1,0 +1,16 @@
+target: kv260-uav-01
+provider: ssh
+host: kv260-uav-01
+user: ubuntu
+
+services:
+  - name: ros2-nav
+    install: scripts/install-ros2.sh
+    start: systemctl start ros2-nav
+    stop: systemctl stop ros2-nav
+    health: "ros2 topic echo /heartbeat --once --timeout 5"
+  - name: nyxcore-inference
+    install: scripts/install-nyxcore.sh
+    start: systemctl start nyxcore-inference
+    stop: systemctl stop nyxcore-inference
+    health: "curl -sf http://localhost:8080/health"
