@@ -10,3 +10,4 @@ export { SSHProvider } from './providers/ssh.js';
 export { FlyProvider } from './providers/fly.js';
 export { DockerComposeProvider } from './providers/docker-compose.js';
 export { DeployOrchestrator } from './orchestrator.js';
+export { createTaskBridgedOptions, type TaskBridgeConfig } from './task-bridge.js';
