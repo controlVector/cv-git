@@ -80,6 +80,8 @@ import { summaryCommand } from './commands/summary.js';
 import { knowledgeCommand } from './commands/knowledge.js';
 import { connectCommand } from './commands/connect.js';
 import { agentCommand } from './commands/agent.js';
+import { agentHookCommand } from './commands/agent-hook.js';
+import { deployCommand } from './commands/deploy.js';
 
 const program = new Command();
 
@@ -145,6 +147,8 @@ program.addCommand(depsCommand());          // Dependency analysis (cv deps)
 program.addCommand(knowledgeCommand());     // Session knowledge queries (cv knowledge)
 program.addCommand(connectCommand());       // Connection instructions (cv connect)
 program.addCommand(agentCommand());         // Task listener + Claude Code launcher (cv agent)
+program.addCommand(agentHookCommand());     // Claude Code hook handler (cv agent-hook)
+program.addCommand(deployCommand());         // Deploy management (cv deploy)
 
 // Error handler
 program.exitOverride((err) => {
