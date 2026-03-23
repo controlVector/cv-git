@@ -1700,6 +1700,42 @@ export class GraphManager {
   }
 
   /**
+   * Save bandit state to the graph for persistence across sessions.
+   */
+  async saveBanditState(state: { arms: Map<string, any>; alpha: number; dimension: number }): Promise<void> {
+    // Serialize Map to plain object for JSON storage
+    const armsObj: Record<string, any> = {};
+    for (const [key, arm] of state.arms) {
+      armsObj[key] = arm;
+    }
+    const json = JSON.stringify({ arms: armsObj, alpha: state.alpha, dimension: state.dimension });
+
+    await this.query(`
+      MERGE (b:BanditState {id: 'contextual-bandit'})
+      SET b.data = $data, b.updatedAt = $ts
+    `, { data: json, ts: new Date().toISOString() });
+  }
+
+  /**
+   * Load bandit state from the graph. Returns null if no saved state.
+   */
+  async loadBanditState(): Promise<{ arms: Map<string, any>; alpha: number; dimension: number } | null> {
+    const results = await this.query(`
+      MATCH (b:BanditState {id: 'contextual-bandit'})
+      RETURN b.data as data
+    `);
+
+    if (results.length === 0 || !results[0].data) return null;
+
+    const parsed = JSON.parse(results[0].data as string);
+    const arms = new Map<string, any>();
+    for (const [key, arm] of Object.entries(parsed.arms)) {
+      arms.set(key, arm);
+    }
+    return { arms, alpha: parsed.alpha, dimension: parsed.dimension };
+  }
+
+  /**
    * Close connection
    */
   async close(): Promise<void> {

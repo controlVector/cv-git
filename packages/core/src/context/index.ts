@@ -11,6 +11,9 @@
 import { GraphManager } from '../graph/index.js';
 import { VectorManager } from '../vector/index.js';
 
+export { ContextualBandit, BanditContext, BanditArm, BanditState, CONTEXT_DIM } from './contextual-bandit.js';
+export { ContextScorer, ScoredNode } from './scorer.js';
+
 export interface ContextRequest {
   // The task or query to gather context for
   query: string;
