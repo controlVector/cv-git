@@ -13,6 +13,13 @@ import { VectorManager } from '../vector/index.js';
 
 export { ContextualBandit, BanditContext, BanditArm, BanditState, CONTEXT_DIM } from './contextual-bandit.js';
 export { ContextScorer, ScoredNode } from './scorer.js';
+export {
+  TransitionModel,
+  TransitionState,
+  EventPhase,
+  saveTransitionState,
+  loadTransitionState,
+} from './transition-model.js';
 
 export interface ContextRequest {
   // The task or query to gather context for
