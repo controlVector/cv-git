@@ -21,6 +21,12 @@ export * from './context/index.js';
 export * from './deps/index.js';
 export * from './services/index.js';
 
-// Stub modules (not yet implemented)
+// Gateway (CV-Hub client) and agent watcher
 export * from './gateway/index.js';
+export * from './agent/index.js';
+
+// Deploy orchestration
+export * from './deploy/index.js';
+
+// Stub modules (not yet implemented)
 export * from './security/index.js';
