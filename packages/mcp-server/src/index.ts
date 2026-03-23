@@ -100,6 +100,40 @@ import { handleReason, ReasonArgs } from './tools/reason.js';
 import { handleTraverseContext, TraverseContextToolArgs } from './tools/traverse-context.js';
 import { handleManifoldStatus, ManifoldStatusArgs } from './tools/manifold-status.js';
 import { handleSessionKnowledge, handleSessionEgress } from './tools/session-knowledge.js';
+import {
+  handleCreateThread,
+  handleListThreads,
+  handleGetThreadSummary,
+  handleUpdateThreadStatus,
+  handleAddSegment,
+  handleEndSegment,
+  handleBridgeContext,
+  handleGetPendingBridges,
+  CreateThreadArgs,
+  ListThreadsArgs,
+  GetThreadSummaryArgs,
+  UpdateThreadStatusArgs,
+  AddSegmentArgs,
+  EndSegmentArgs,
+  BridgeContextArgs,
+  GetPendingBridgesArgs,
+} from './tools/thread.js';
+import {
+  handleDispatchSubtask,
+  handleSubtaskStatus,
+  DispatchSubtaskArgs,
+  SubtaskStatusArgs,
+} from './tools/subtask.js';
+import {
+  handleDeployList,
+  handleDeployPush,
+  handleDeployRollback,
+  handleDeployStatus,
+  DeployListArgs,
+  DeployPushArgs,
+  DeployRollbackArgs,
+  DeployStatusArgs,
+} from './tools/deploy.js';
 
 /**
  * Tool definitions
@@ -1061,6 +1095,59 @@ USE THIS TOOL when:
       },
     },
   },
+
+  // Thread Continuity Tools (CV-Hub integration)
+  {
+    name: 'cv_thread_create',
+    description:
+      'Create a workflow thread for tracking work across multiple sessions and platforms (Claude.ai ↔ Claude Code). Requires CV_HUB_URL and CV_HUB_TOKEN env vars.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Thread title describing the overall goal',
+        },
+        description: {
+          type: 'string',
+          description: 'Detailed description of the workflow',
+        },
+        repository_id: {
+          type: 'string',
+          description: 'Associated repository UUID',
+        },
+        metadata: {
+          type: 'object',
+          description: 'Arbitrary metadata (tags, labels, etc.)',
+        },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'cv_thread_list',
+    description:
+      'List workflow threads with filtering by status or repository. Requires CV_HUB_URL and CV_HUB_TOKEN env vars.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['active', 'paused', 'completed', 'archived'],
+          description: 'Filter by thread status',
+        },
+        repository_id: {
+          type: 'string',
+          description: 'Filter by repository UUID',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max results (default: 20)',
+          default: 20,
+        },
+      },
+    },
+  },
   {
     name: 'cv_session_egress',
     description: `Write session knowledge to the knowledge graph. Creates a SessionKnowledge node with ABOUT edges to files/symbols and FOLLOWS edge to the previous turn.
@@ -1101,6 +1188,366 @@ USE THIS TOOL when:
         },
       },
       required: ['sessionId', 'turnNumber', 'transcript_segment'],
+    },
+  },
+
+  {
+    name: 'cv_thread_summary',
+    description:
+      'Get a comprehensive summary of a workflow thread including all segments, edges, and pending bridges.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        thread_id: {
+          type: 'string',
+          description: 'Thread UUID to summarize',
+        },
+      },
+      required: ['thread_id'],
+    },
+  },
+  {
+    name: 'cv_thread_status',
+    description: 'Update the status of a workflow thread.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        thread_id: {
+          type: 'string',
+          description: 'Thread UUID',
+        },
+        status: {
+          type: 'string',
+          enum: ['active', 'paused', 'completed', 'archived'],
+          description: 'New thread status',
+        },
+      },
+      required: ['thread_id', 'status'],
+    },
+  },
+  {
+    name: 'cv_segment_add',
+    description:
+      'Add a new segment to a workflow thread. Segments represent individual work sessions on specific platforms (claude_ai, claude_code, cv_hub_api).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        thread_id: {
+          type: 'string',
+          description: 'Thread UUID',
+        },
+        platform: {
+          type: 'string',
+          description: 'Platform identifier (e.g. claude_ai, claude_code, cv_hub_api)',
+        },
+        segment_type: {
+          type: 'string',
+          enum: ['planning', 'execution', 'review', 'research', 'debugging'],
+          description: 'Type of work in this segment',
+        },
+        title: {
+          type: 'string',
+          description: 'Short title for the segment',
+        },
+        summary: {
+          type: 'string',
+          description: 'What this segment accomplished',
+        },
+        session_identifier: {
+          type: 'string',
+          description: 'External session ID (e.g. Claude conversation ID)',
+        },
+        context_snapshot: {
+          type: 'object',
+          description: 'Key context snapshot at segment start',
+        },
+        tools_used: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Tools used in this segment',
+        },
+        files_modified: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Files modified in this segment',
+        },
+        previous_segment_id: {
+          type: 'string',
+          description: 'Previous segment ID (creates an edge)',
+        },
+        edge_type: {
+          type: 'string',
+          enum: ['continuation', 'fork', 'merge', 'handoff'],
+          description: 'Type of edge from previous segment',
+        },
+      },
+      required: ['thread_id', 'platform'],
+    },
+  },
+  {
+    name: 'cv_segment_end',
+    description:
+      'Mark a segment as ended with summary and result snapshot.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        segment_id: {
+          type: 'string',
+          description: 'Segment UUID',
+        },
+        thread_id: {
+          type: 'string',
+          description: 'Thread UUID the segment belongs to',
+        },
+        summary: {
+          type: 'string',
+          description: 'Summary of what was accomplished',
+        },
+        result_snapshot: {
+          type: 'object',
+          description: 'Snapshot of key results at segment end',
+        },
+        files_modified: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Final list of files modified',
+        },
+        tools_used: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Final list of tools used',
+        },
+      },
+      required: ['segment_id', 'thread_id'],
+    },
+  },
+  {
+    name: 'cv_bridge_context',
+    description:
+      'Create a context bridge to transfer context between segments or platforms. Used for handing off work from Claude.ai to Claude Code or vice versa.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        thread_id: {
+          type: 'string',
+          description: 'Thread UUID',
+        },
+        from_segment_id: {
+          type: 'string',
+          description: 'Source segment UUID',
+        },
+        to_segment_id: {
+          type: 'string',
+          description: 'Target segment UUID (optional — can be linked later)',
+        },
+        bridge_type: {
+          type: 'string',
+          enum: ['task_dispatch', 'result_return', 'context_share', 'handoff'],
+          description: 'Type of context bridge',
+        },
+        summary: {
+          type: 'string',
+          description: 'Brief summary of context being bridged',
+        },
+        context: {
+          type: 'string',
+          description: 'Detailed context to transfer',
+        },
+        decisions: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Key decisions made',
+        },
+        task_ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Related task IDs',
+        },
+        expires_in_minutes: {
+          type: 'number',
+          description: 'Bridge expiry in minutes (default: 1440 = 24h)',
+          default: 1440,
+        },
+      },
+      required: ['thread_id', 'from_segment_id'],
+    },
+  },
+  {
+    name: 'cv_bridge_pending',
+    description:
+      'Get pending context bridges for a thread, optionally filtered by target segment. Use this to receive context from a previous session.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        thread_id: {
+          type: 'string',
+          description: 'Thread UUID',
+        },
+        segment_id: {
+          type: 'string',
+          description: 'Target segment UUID to filter bridges for',
+        },
+      },
+      required: ['thread_id'],
+    },
+  },
+
+  // Sub-task Dispatch Tools
+  {
+    name: 'cv_dispatch_subtask',
+    description:
+      'Dispatch a sub-task to another executor machine via CV-Hub. Use this when: (1) a task is too large for one session, (2) a step should run on a different machine (e.g., CI for tests), or (3) you want parallel execution. The sub-task will be linked to the current thread.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: {
+          type: 'string',
+          description:
+            "Machine ID of the target executor. Use 'self' to dispatch back to this machine's queue (useful for deferring work to a fresh context window).",
+        },
+        task_type: {
+          type: 'string',
+          enum: [
+            'build',
+            'test',
+            'deploy',
+            'analyze',
+            'generate',
+            'refactor',
+          ],
+          description: 'Type of sub-task',
+        },
+        prompt: {
+          type: 'string',
+          description:
+            'Detailed instructions for the sub-task. Be specific — the executing agent will have no prior context except what you write here.',
+        },
+        priority: {
+          type: 'string',
+          enum: ['low', 'normal', 'high', 'critical'],
+          description: 'Priority level (default: normal)',
+        },
+        context: {
+          type: 'object',
+          description:
+            'Additional context: repo path, branch, files, validation rules',
+          properties: {
+            repo: { type: 'string' },
+            branch: { type: 'string' },
+            relevant_files: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Files the sub-task should focus on',
+            },
+            cv_git_refs: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'CV-Git symbols relevant to the sub-task',
+            },
+            validation: {
+              type: 'object',
+              properties: {
+                run_tests: { type: 'boolean' },
+                min_coverage: { type: 'number' },
+                lint: { type: 'boolean' },
+              },
+            },
+            depends_on_task: {
+              type: 'string',
+              description:
+                'Task ID that must complete before this sub-task can run',
+            },
+          },
+        },
+        wait: {
+          type: 'boolean',
+          description:
+            'If true, poll until the sub-task completes and return the result inline. If false (default), return immediately with the task ID.',
+          default: false,
+        },
+      },
+      required: ['target', 'task_type', 'prompt'],
+    },
+  },
+  {
+    name: 'cv_subtask_status',
+    description:
+      'Check the status of a previously dispatched sub-task.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: {
+          type: 'string',
+          description: 'The task ID returned by cv_dispatch_subtask',
+        },
+      },
+      required: ['task_id'],
+    },
+  },
+
+  // Deploy Tools
+  {
+    name: 'cv_deploy_list',
+    description: 'List all deploy targets defined in deploy/*.yaml config files. Shows target name, provider, and services.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'cv_deploy_push',
+    description: 'Deploy a target through the full lifecycle: preflight → build → push → deploy → health check. Supports dry-run mode.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: {
+          type: 'string',
+          description: 'Deploy target name (matches deploy/{target}.yaml)',
+        },
+        ref: {
+          type: 'string',
+          description: 'Git ref to deploy (default: HEAD)',
+        },
+        dry_run: {
+          type: 'boolean',
+          description: 'Preview without executing (default: false)',
+          default: false,
+        },
+      },
+      required: ['target'],
+    },
+  },
+  {
+    name: 'cv_deploy_rollback',
+    description: 'Rollback a deploy target to a previous version.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: {
+          type: 'string',
+          description: 'Deploy target name',
+        },
+        to_version: {
+          type: 'string',
+          description: 'Specific version to rollback to (default: "previous")',
+          default: 'previous',
+        },
+      },
+      required: ['target'],
+    },
+  },
+  {
+    name: 'cv_deploy_status',
+    description: 'Check the health and status of a deploy target. Runs provider-specific health checks.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: {
+          type: 'string',
+          description: 'Deploy target name',
+        },
+      },
+      required: ['target'],
     },
   },
 ];
@@ -1382,6 +1829,74 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'cv_session_egress':
         result = await handleSessionEgress(args as unknown as SessionEgressArgs);
+      // Thread Continuity (CV-Hub integration)
+      case 'cv_thread_create':
+        validateArgs(args, ['title']);
+        result = await handleCreateThread(args as unknown as CreateThreadArgs);
+        break;
+
+      case 'cv_thread_list':
+        result = await handleListThreads(args as unknown as ListThreadsArgs);
+        break;
+
+      case 'cv_thread_summary':
+        validateArgs(args, ['thread_id']);
+        result = await handleGetThreadSummary(args as unknown as GetThreadSummaryArgs);
+        break;
+
+      case 'cv_thread_status':
+        validateArgs(args, ['thread_id', 'status']);
+        result = await handleUpdateThreadStatus(args as unknown as UpdateThreadStatusArgs);
+        break;
+
+      case 'cv_segment_add':
+        validateArgs(args, ['thread_id', 'platform']);
+        result = await handleAddSegment(args as unknown as AddSegmentArgs);
+        break;
+
+      case 'cv_segment_end':
+        validateArgs(args, ['segment_id', 'thread_id']);
+        result = await handleEndSegment(args as unknown as EndSegmentArgs);
+        break;
+
+      case 'cv_bridge_context':
+        validateArgs(args, ['thread_id', 'from_segment_id']);
+        result = await handleBridgeContext(args as unknown as BridgeContextArgs);
+        break;
+
+      case 'cv_bridge_pending':
+        validateArgs(args, ['thread_id']);
+        result = await handleGetPendingBridges(args as unknown as GetPendingBridgesArgs);
+        break;
+
+      case 'cv_dispatch_subtask':
+        validateArgs(args, ['target', 'task_type', 'prompt']);
+        result = await handleDispatchSubtask(args as unknown as DispatchSubtaskArgs);
+        break;
+
+      case 'cv_subtask_status':
+        validateArgs(args, ['task_id']);
+        result = await handleSubtaskStatus(args as unknown as SubtaskStatusArgs);
+        break;
+
+      // Deploy Tools
+      case 'cv_deploy_list':
+        result = await handleDeployList(args as unknown as DeployListArgs);
+        break;
+
+      case 'cv_deploy_push':
+        validateArgs(args, ['target']);
+        result = await handleDeployPush(args as unknown as DeployPushArgs);
+        break;
+
+      case 'cv_deploy_rollback':
+        validateArgs(args, ['target']);
+        result = await handleDeployRollback(args as unknown as DeployRollbackArgs);
+        break;
+
+      case 'cv_deploy_status':
+        validateArgs(args, ['target']);
+        result = await handleDeployStatus(args as unknown as DeployStatusArgs);
         break;
 
       default:
