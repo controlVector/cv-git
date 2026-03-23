@@ -27,7 +27,8 @@
     "openai": "^4.20.0",
     "redis": "^4.6.12",
     "simple-git": "^3.21.0",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.0",
+    "yaml": "^2.8.3"
   },
   "optionalDependencies": {
     "tree-sitter": "npm:@keqingmoe/tree-sitter@^0.26.2",
