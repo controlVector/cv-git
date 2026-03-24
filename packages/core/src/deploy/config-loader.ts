@@ -28,9 +28,14 @@ export class DeployConfigLoader {
       throw new Error(`Deploy config not found: ${filePath}`);
     }
 
-    const config = parse(content) as DeployConfig;
+    let config: DeployConfig;
+    try {
+      config = parse(content) as DeployConfig;
+    } catch (parseError: any) {
+      throw new Error(`Invalid YAML in ${filePath}: ${parseError.message}`);
+    }
     if (!config || typeof config !== 'object') {
-      throw new Error(`Invalid YAML in ${filePath}`);
+      throw new Error(`Empty or invalid config in ${filePath}`);
     }
 
     return config;

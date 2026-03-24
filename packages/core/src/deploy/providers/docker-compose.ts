@@ -22,6 +22,7 @@ import { BaseDeployProvider, type DeployOptions } from '../provider.js';
 export class DockerComposeProvider extends BaseDeployProvider {
   name: DeployProvider = 'docker-compose';
 
+  /** Check docker compose availability and compose file existence. */
   async preflight(config: DeployConfig, options: DeployOptions): Promise<PreflightResult> {
     const checks: PreflightResult['checks'] = [];
 
@@ -43,15 +44,20 @@ export class DockerComposeProvider extends BaseDeployProvider {
     return { ready: checks.every((c) => c.passed), checks };
   }
 
+  /** Build all services via docker compose build. */
   async build(config: DeployConfig, options: DeployOptions): Promise<BuildResult[]> {
     const composeFile = config.composeFile ?? 'docker-compose.yml';
     const start = Date.now();
 
-    await this.execCommand(
-      `docker compose -f ${composeFile} build`,
-      options,
-      'Building services',
-    );
+    try {
+      await this.execCommand(
+        `docker compose -f ${composeFile} build`,
+        options,
+        'Building services',
+      );
+    } catch (error: any) {
+      throw new Error(`Docker Compose build failed: ${error.message}`);
+    }
 
     return config.services.map((s) => ({
       service: s.name,
@@ -61,14 +67,16 @@ export class DockerComposeProvider extends BaseDeployProvider {
     }));
   }
 
+  /** Local provider — no push needed. */
   async push(
     _config: DeployConfig,
     _builds: BuildResult[],
     _options: DeployOptions,
   ): Promise<PushResult[]> {
-    return []; // Local, no push needed
+    return [];
   }
 
+  /** Start services via docker compose up. */
   async deploy(
     config: DeployConfig,
     _images: PushResult[],
@@ -79,11 +87,15 @@ export class DockerComposeProvider extends BaseDeployProvider {
 
     await this.runHook(config.hooks?.preDeploy, config, options);
 
-    await this.execCommand(
-      `docker compose -f ${composeFile} up -d --remove-orphans`,
-      options,
-      'Starting services',
-    );
+    try {
+      await this.execCommand(
+        `docker compose -f ${composeFile} up -d --remove-orphans`,
+        options,
+        'Starting services',
+      );
+    } catch (error: any) {
+      throw new Error(`Docker Compose deploy failed: ${error.message}`);
+    }
 
     await this.runHook(config.hooks?.postDeploy, config, options);
 
@@ -98,12 +110,25 @@ export class DockerComposeProvider extends BaseDeployProvider {
     };
   }
 
+  /** Check service status via docker compose ps. */
   async healthCheck(config: DeployConfig): Promise<HealthResult> {
     const composeFile = config.composeFile ?? 'docker-compose.yml';
-    const { stdout } = await this.execCommand(
-      `docker compose -f ${composeFile} ps --format json`,
-      { dryRun: false },
-    );
+
+    let stdout = '';
+    try {
+      const result = await this.execCommand(
+        `docker compose -f ${composeFile} ps --format json`,
+        { dryRun: false },
+      );
+      stdout = result.stdout;
+    } catch {
+      return {
+        target: config.target,
+        healthy: false,
+        services: config.services.map((s) => ({ name: s.name, healthy: false, message: 'Failed to check' })),
+        checkedAt: new Date().toISOString(),
+      };
+    }
 
     const services = config.services.map((s) => {
       const running = stdout.includes(s.name) && stdout.includes('running');
@@ -118,6 +143,7 @@ export class DockerComposeProvider extends BaseDeployProvider {
     };
   }
 
+  /** Rollback by restarting services (down + up). */
   async rollback(
     config: DeployConfig,
     toVersion: string,
@@ -126,8 +152,12 @@ export class DockerComposeProvider extends BaseDeployProvider {
     const composeFile = config.composeFile ?? 'docker-compose.yml';
     const start = Date.now();
 
-    await this.execCommand(`docker compose -f ${composeFile} down`, options);
-    await this.execCommand(`docker compose -f ${composeFile} up -d`, options);
+    try {
+      await this.execCommand(`docker compose -f ${composeFile} down`, options, 'Stopping services');
+      await this.execCommand(`docker compose -f ${composeFile} up -d`, options, 'Restarting services');
+    } catch (error: any) {
+      throw new Error(`Docker Compose rollback failed: ${error.message}`);
+    }
 
     return {
       target: config.target,
@@ -138,6 +168,7 @@ export class DockerComposeProvider extends BaseDeployProvider {
     };
   }
 
+  /** Deploy history not available for docker-compose. */
   async getDeployHistory(config: DeployConfig): Promise<DeployHistory> {
     return { target: config.target, deploys: [] };
   }

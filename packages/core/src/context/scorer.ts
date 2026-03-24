@@ -25,24 +25,34 @@ export class ContextScorer {
 
   /**
    * Load bandit state from FalkorDB. Returns true if state was found.
+   * Returns false on error or if no state exists.
    */
   async load(): Promise<boolean> {
-    const state = await this.graph.loadBanditState();
-    if (state) {
-      this.bandit = new ContextualBandit(state as BanditState);
-      this.dirty = false;
-      return true;
+    try {
+      const state = await this.graph.loadBanditState();
+      if (state) {
+        this.bandit = new ContextualBandit(state as BanditState);
+        this.dirty = false;
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.warn('[ContextScorer] Failed to load bandit state:', error);
+      return false;
     }
-    return false;
   }
 
   /**
-   * Persist bandit state to FalkorDB.
+   * Persist bandit state to FalkorDB. No-op if nothing changed.
    */
   async save(): Promise<void> {
     if (!this.dirty) return;
-    await this.graph.saveBanditState(this.bandit.exportState());
-    this.dirty = false;
+    try {
+      await this.graph.saveBanditState(this.bandit.exportState());
+      this.dirty = false;
+    } catch (error) {
+      console.warn('[ContextScorer] Failed to save bandit state:', error);
+    }
   }
 
   /**
@@ -65,7 +75,7 @@ export class ContextScorer {
   /**
    * Get summary statistics.
    */
-  getStats() {
+  getStats(): { totalArms: number; totalPulls: number; avgReward: number } {
     return this.bandit.getStats();
   }
 }

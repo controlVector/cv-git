@@ -108,25 +108,40 @@ export class TransitionModel {
 
 // ==================== Persistence ====================
 
+/**
+ * Persist transition state to FalkorDB. Logs and swallows errors.
+ */
 export async function saveTransitionState(
   graph: GraphManager,
   state: TransitionState,
 ): Promise<void> {
-  const json = JSON.stringify(state);
-  await graph.query(`
-    MERGE (t:TransitionModel {id: 'phase-transitions'})
-    SET t.data = $data, t.updatedAt = $ts
-  `, { data: json, ts: new Date().toISOString() });
+  try {
+    const json = JSON.stringify(state);
+    await graph.query(`
+      MERGE (t:TransitionModel {id: 'phase-transitions'})
+      SET t.data = $data, t.updatedAt = $ts
+    `, { data: json, ts: new Date().toISOString() });
+  } catch (error) {
+    console.warn('[TransitionModel] Failed to save state:', error);
+  }
 }
 
+/**
+ * Load transition state from FalkorDB. Returns null on error or if absent.
+ */
 export async function loadTransitionState(
   graph: GraphManager,
 ): Promise<TransitionState | null> {
-  const results = await graph.query(`
-    MATCH (t:TransitionModel {id: 'phase-transitions'})
-    RETURN t.data as data
-  `);
+  try {
+    const results = await graph.query(`
+      MATCH (t:TransitionModel {id: 'phase-transitions'})
+      RETURN t.data as data
+    `);
 
-  if (results.length === 0 || !results[0].data) return null;
-  return JSON.parse(results[0].data as string);
+    if (results.length === 0 || !results[0].data) return null;
+    return JSON.parse(results[0].data as string);
+  } catch (error) {
+    console.warn('[TransitionModel] Failed to load state:', error);
+    return null;
+  }
 }

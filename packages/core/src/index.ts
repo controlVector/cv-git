@@ -28,5 +28,8 @@ export * from './agent/index.js';
 // Deploy orchestration
 export * from './deploy/index.js';
 
+// Typed errors
+export { CVError, GraphError, DeployError, ConfigError } from './errors.js';
+
 // Stub modules (not yet implemented)
 export * from './security/index.js';
