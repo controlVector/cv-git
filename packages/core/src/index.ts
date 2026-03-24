@@ -21,9 +21,9 @@ export * from './context/index.js';
 export * from './deps/index.js';
 export * from './services/index.js';
 
-// Gateway (CV-Hub client) and agent watcher
+// Gateway (CV-Hub client)
 export * from './gateway/index.js';
-export * from './agent/index.js';
+// TODO: export * from './agent/index.js' — agent module not yet in core
 
 // Deploy orchestration
 export * from './deploy/index.js';

@@ -1,6 +1,6 @@
 {
   "name": "cv-git",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "AI-Native Paired-Programming + Knowledge-Graph Version Control Layer",
   "private": true,
   "engines": {
