@@ -2,6 +2,33 @@
 
 All notable changes to CV-Git will be documented in this file.
 
+## [1.0.0] - 2026-03-23
+
+### Added
+
+#### Deploy Orchestration (Sprint 4)
+- **Multi-provider deploy** — DOKS (DigitalOcean Kubernetes), SSH, Fly.io, Docker Compose, Cloudflare
+- **`cv deploy <target>`** — Build, push, deploy, health-check from a single YAML config
+- **`cv deploy init`** — Generate deploy config templates per provider
+- **`cv deploy status`** / **`cv deploy report`** — Health checks and CLAUDE.md-format reports
+- **Lifecycle hooks** — preDeploy, postDeploy, rollback, healthCheck
+- **Token resolution** — `env://` and `vault://` secret references
+- **Deploy config validation** — Strict schema checks per provider
+
+#### Context Manifold & Feedback Loops (Sprint 5)
+- **LinUCB Contextual Bandit** — Learns which context nodes are useful per task (8-dim feature vector)
+- **ContextScorer** — Ranks graph nodes by predicted usefulness with FalkorDB persistence
+- **TransitionModel** — Markov chain learns event-phase transition probabilities
+- **CLAUDE.md Generator** — Auto-generates project context with deploy status, graph stats, bandit metrics
+- **Task Event Bridge** — Deploy lifecycle events stream to CV-Hub in real time
+- **Deploy outcome → Decision nodes** — Deploy results stored as Decision nodes in context versions
+
+#### Polish (Sprint 6)
+- **cv doctor v2** — 6 new diagnostic checks: graph counts, bandit state, transition model, Qdrant vectors, deploy configs, CV-Hub connectivity
+- **Typed error classes** — CVError, GraphError, DeployError, ConfigError with machine-readable codes
+- **Error handling hardening** — Graceful fallbacks in scorer, transition model, config loader, docker-compose provider
+- **JSDoc coverage** — All public APIs documented
+
 ## [0.5.0] - 2026-01-21
 
 ### Added
