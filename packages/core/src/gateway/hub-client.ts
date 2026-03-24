@@ -296,6 +296,7 @@ export class HubClient {
 
   // ======================== Task Events ========================
 
+  /** Post a lifecycle event to a running task's event stream. */
   async postTaskEvent(
     taskId: string,
     eventType: string,

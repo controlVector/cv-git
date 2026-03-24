@@ -2,6 +2,7 @@
  * Typed error classes for cv-git operations.
  */
 
+/** Base error class for all cv-git operations. Carries a machine-readable code and optional context. */
 export class CVError extends Error {
   constructor(
     message: string,
@@ -13,6 +14,7 @@ export class CVError extends Error {
   }
 }
 
+/** Error from FalkorDB knowledge-graph operations. */
 export class GraphError extends CVError {
   constructor(message: string, context?: Record<string, unknown>) {
     super(message, 'GRAPH_ERROR', context);
@@ -20,6 +22,7 @@ export class GraphError extends CVError {
   }
 }
 
+/** Error from deploy orchestration (build, push, rollback, health-check). */
 export class DeployError extends CVError {
   constructor(message: string, context?: Record<string, unknown>) {
     super(message, 'DEPLOY_ERROR', context);
@@ -27,6 +30,7 @@ export class DeployError extends CVError {
   }
 }
 
+/** Error from configuration loading or validation. */
 export class ConfigError extends CVError {
   constructor(message: string, context?: Record<string, unknown>) {
     super(message, 'CONFIG_ERROR', context);

@@ -146,6 +146,20 @@ cv auth set openai sk-...
 - **`cv deps check`** - Verify system availability via pkg-config
 - **`cv deps install`** - Generate installation commands for missing dependencies
 
+### Deploy Orchestration
+- **`cv deploy <target>`** - Deploy to any provider from a single config
+- **Providers** - DigitalOcean Kubernetes (DOKS), SSH, Fly.io, Docker Compose, Cloudflare
+- **`cv deploy init <target>`** - Generate deploy config templates
+- **`cv deploy status`** / **`cv deploy report`** - Health checks and status reports
+- **Lifecycle hooks** - preDeploy, postDeploy, rollback, healthCheck
+- **Token resolution** - `env://` and `vault://` secret references
+
+### Context Manifold (Feedback Loops)
+- **Contextual Bandit** - LinUCB scorer learns which context nodes are useful per task
+- **Transition Model** - Markov chain predicts next event phases from task histories
+- **CLAUDE.md Generator** - Auto-generates project context with deploy status, graph stats, bandit metrics
+- **Task Event Bridge** - Deploy lifecycle events stream to CV-Hub in real time
+
 ### Local-First Embeddings
 - **Ollama integration** - Local embeddings with `nomic-embed-text` (no API key required)
 - **Automatic fallback** to OpenRouter/OpenAI if Ollama unavailable

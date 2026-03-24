@@ -84,6 +84,7 @@ export class TransitionModel {
     return this.predict(from)[0].phase;
   }
 
+  /** Export the current transition counts for persistence. */
   exportState(): TransitionState {
     return {
       transitions: this.transitions,
@@ -91,6 +92,7 @@ export class TransitionModel {
     };
   }
 
+  /** Return summary statistics: distinct phases, total transitions, total sequences. */
   getStats(): { phases: number; totalTransitions: number; totalSequences: number } {
     let totalTransitions = 0;
     for (const counts of Object.values(this.transitions)) {
