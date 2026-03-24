@@ -21,6 +21,8 @@ import {
   getFalkorDbUrl,
   getQdrantUrl,
   getOllamaUrl,
+  GraphManager,
+  DeployConfigLoader,
 } from '@cv-git/core';
 import { loadServicesFile } from '../utils/services.js';
 import {
@@ -134,6 +136,15 @@ export function doctorCommand(): Command {
       results.push(await checkFalkorDB());
       results.push(await checkQdrant());
       results.push(await checkOllama());
+
+      // Sprint 1-5 subsystem checks
+      results.push(await checkGraphCounts());
+      results.push(await checkBanditState());
+      results.push(await checkTransitionModel());
+      results.push(await checkQdrantVectors());
+      results.push(await checkDeployConfigs());
+      results.push(await checkHubConnection());
+
       results.push(await checkDiskSpace());
       results.push(await checkNetworkConnectivity());
       results.push(await checkCVHubAuth());
@@ -846,6 +857,214 @@ async function checkOllama(): Promise<DiagnosticResult> {
       message: 'Not available',
       fix: 'Install Docker to enable local embeddings, or use: cv auth setup openrouter',
     };
+  }
+}
+
+// ==================== Sprint 1-5 Subsystem Checks ====================
+
+/**
+ * Helper: connect to FalkorDB and return a GraphManager (or null on failure).
+ */
+async function connectGraph(): Promise<GraphManager | null> {
+  const servicesFile = await loadServicesFile();
+  let falkorUrl = servicesFile?.services?.falkordb;
+  if (!falkorUrl) {
+    const containerPort = discoverFalkorDBPort();
+    falkorUrl = containerPort ? `redis://localhost:${containerPort}` : getFalkorDbUrl();
+  }
+  try {
+    const graph = new GraphManager({ url: falkorUrl, database: 'cv-git' });
+    await graph.connect();
+    return graph;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check FalkorDB graph node counts (File, Symbol, Commit).
+ */
+async function checkGraphCounts(): Promise<DiagnosticResult> {
+  let graph: GraphManager | null = null;
+  try {
+    graph = await connectGraph();
+    if (!graph) {
+      return { name: 'Knowledge Graph (Nodes)', status: 'warn', message: 'FalkorDB not reachable', fix: 'Start FalkorDB first' };
+    }
+
+    const counts: Record<string, number> = {};
+    for (const label of ['File', 'Symbol', 'Commit', 'Module']) {
+      try {
+        const rows = await graph.query(`MATCH (n:${label}) RETURN count(n) as c`);
+        counts[label] = (rows[0]?.c as number) ?? 0;
+      } catch { counts[label] = 0; }
+    }
+
+    const total = Object.values(counts).reduce((a, b) => a + b, 0);
+    const parts = Object.entries(counts).map(([k, v]) => `${k}: ${v}`).join(', ');
+
+    if (total > 0) {
+      return { name: 'Knowledge Graph (Nodes)', status: 'pass', message: parts };
+    }
+    return { name: 'Knowledge Graph (Nodes)', status: 'warn', message: 'Graph is empty — run "cv sync" to populate', fix: 'cv sync' };
+  } catch (error: any) {
+    return { name: 'Knowledge Graph (Nodes)', status: 'warn', message: `Query failed: ${error.message}` };
+  } finally {
+    try { await graph?.close(); } catch {}
+  }
+}
+
+/**
+ * Check if contextual bandit state exists in FalkorDB.
+ */
+async function checkBanditState(): Promise<DiagnosticResult> {
+  let graph: GraphManager | null = null;
+  try {
+    graph = await connectGraph();
+    if (!graph) {
+      return { name: 'Context Scorer (Bandit)', status: 'warn', message: 'FalkorDB not reachable' };
+    }
+
+    const rows = await graph.query(`MATCH (b:BanditState {id: 'contextual-bandit'}) RETURN b.data as data`);
+    if (rows.length > 0 && rows[0].data) {
+      const state = JSON.parse(rows[0].data as string);
+      const armCount = Object.keys(state.arms ?? {}).length;
+      return { name: 'Context Scorer (Bandit)', status: 'pass', message: `${armCount} arm(s), dim=${state.dimension ?? '?'}` };
+    }
+    return { name: 'Context Scorer (Bandit)', status: 'warn', message: 'No bandit state — will bootstrap on first task completion' };
+  } catch (error: any) {
+    return { name: 'Context Scorer (Bandit)', status: 'warn', message: `Query failed: ${error.message}` };
+  } finally {
+    try { await graph?.close(); } catch {}
+  }
+}
+
+/**
+ * Check if transition model state exists in FalkorDB.
+ */
+async function checkTransitionModel(): Promise<DiagnosticResult> {
+  let graph: GraphManager | null = null;
+  try {
+    graph = await connectGraph();
+    if (!graph) {
+      return { name: 'Transition Model (Markov)', status: 'warn', message: 'FalkorDB not reachable' };
+    }
+
+    const rows = await graph.query(`MATCH (t:TransitionModel {id: 'phase-transitions'}) RETURN t.data as data`);
+    if (rows.length > 0 && rows[0].data) {
+      const state = JSON.parse(rows[0].data as string);
+      const phases = Object.keys(state.transitions ?? {}).length;
+      return { name: 'Transition Model (Markov)', status: 'pass', message: `${phases} phase(s), ${state.totalSequences ?? 0} sequence(s)` };
+    }
+    return { name: 'Transition Model (Markov)', status: 'warn', message: 'No transition data — will learn from task completions' };
+  } catch (error: any) {
+    return { name: 'Transition Model (Markov)', status: 'warn', message: `Query failed: ${error.message}` };
+  } finally {
+    try { await graph?.close(); } catch {}
+  }
+}
+
+/**
+ * Check Qdrant collection counts and vector totals.
+ */
+async function checkQdrantVectors(): Promise<DiagnosticResult> {
+  const servicesFile = await loadServicesFile();
+  let qdrantUrl = servicesFile?.services?.qdrant;
+  if (!qdrantUrl) {
+    const containerPort = discoverQdrantPort();
+    qdrantUrl = containerPort ? `http://localhost:${containerPort}` : getQdrantUrl();
+  }
+
+  try {
+    const resp = await fetch(`${qdrantUrl}/collections`, { signal: AbortSignal.timeout(5000) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+    const data = await resp.json() as { result?: { collections?: Array<{ name: string }> } };
+    const collections = data.result?.collections ?? [];
+
+    if (collections.length === 0) {
+      return { name: 'Vector DB (Collections)', status: 'warn', message: 'No collections — run "cv sync" to create embeddings', fix: 'cv sync' };
+    }
+
+    // Get point counts per collection
+    const parts: string[] = [];
+    for (const col of collections.slice(0, 5)) {
+      try {
+        const infoResp = await fetch(`${qdrantUrl}/collections/${col.name}`, { signal: AbortSignal.timeout(3000) });
+        if (infoResp.ok) {
+          const info = await infoResp.json() as { result?: { points_count?: number } };
+          parts.push(`${col.name}: ${info.result?.points_count ?? '?'}`);
+        } else {
+          parts.push(col.name);
+        }
+      } catch { parts.push(col.name); }
+    }
+
+    return { name: 'Vector DB (Collections)', status: 'pass', message: parts.join(', ') };
+  } catch (error: any) {
+    return { name: 'Vector DB (Collections)', status: 'warn', message: `Not reachable: ${error.message}` };
+  }
+}
+
+/**
+ * Check deploy config files and validate them.
+ */
+async function checkDeployConfigs(): Promise<DiagnosticResult> {
+  try {
+    const cwd = process.cwd();
+    const loader = new DeployConfigLoader();
+    const configs = await loader.loadAll(cwd);
+
+    if (configs.length === 0) {
+      return { name: 'Deploy Configs', status: 'warn', message: 'No deploy/*.yaml found', fix: 'cv deploy init <target>' };
+    }
+
+    let valid = 0;
+    let invalid = 0;
+    const targets: string[] = [];
+
+    for (const config of configs) {
+      const errors = loader.validate(config);
+      if (errors.length === 0) {
+        valid++;
+        targets.push(config.target);
+      } else {
+        invalid++;
+      }
+    }
+
+    if (invalid > 0) {
+      return { name: 'Deploy Configs', status: 'warn', message: `${valid} valid, ${invalid} invalid — targets: ${targets.join(', ')}` };
+    }
+    return { name: 'Deploy Configs', status: 'pass', message: `${valid} config(s): ${targets.join(', ')}` };
+  } catch (error: any) {
+    return { name: 'Deploy Configs', status: 'warn', message: `Check failed: ${error.message}` };
+  }
+}
+
+/**
+ * Check CV-Hub API connectivity.
+ */
+async function checkHubConnection(): Promise<DiagnosticResult> {
+  const hubUrl = process.env.CV_HUB_URL || process.env.CVHUB_API_URL;
+  const hubToken = process.env.CV_HUB_TOKEN || process.env.CVHUB_TOKEN;
+
+  if (!hubUrl) {
+    return { name: 'CV-Hub Connection', status: 'warn', message: 'CV_HUB_URL not set', fix: 'export CV_HUB_URL=https://api.hub.controlvector.io' };
+  }
+
+  if (!hubToken) {
+    return { name: 'CV-Hub Connection', status: 'warn', message: `URL set (${hubUrl}) but no token`, fix: 'export CV_HUB_TOKEN=<your-token>' };
+  }
+
+  try {
+    const resp = await fetch(`${hubUrl}/health`, { signal: AbortSignal.timeout(5000) });
+    if (resp.ok) {
+      return { name: 'CV-Hub Connection', status: 'pass', message: `Connected to ${hubUrl}` };
+    }
+    return { name: 'CV-Hub Connection', status: 'warn', message: `${hubUrl} returned HTTP ${resp.status}` };
+  } catch (error: any) {
+    return { name: 'CV-Hub Connection', status: 'warn', message: `${hubUrl} not reachable: ${error.message}` };
   }
 }
 
