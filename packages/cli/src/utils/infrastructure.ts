@@ -202,7 +202,7 @@ export async function startNativeOllama(): Promise<boolean> {
 
     // Linux/other: start in background
     execSync('nohup ollama serve > /dev/null 2>&1 &', {
-      shell: '/bin/bash',
+      shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
       stdio: 'ignore'
     });
 
@@ -228,7 +228,7 @@ export async function installOllamaNative(options?: {
     if (platform === 'linux') {
       log('Installing Ollama via official script...');
       execSync('curl -fsSL https://ollama.com/install.sh | sh', {
-        shell: '/bin/bash',
+        shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
         stdio: options?.silent ? 'ignore' : 'inherit'
       });
       return true;
@@ -245,7 +245,7 @@ export async function installOllamaNative(options?: {
         // No Homebrew, use official script
         log('Installing Ollama via official script...');
         execSync('curl -fsSL https://ollama.com/install.sh | sh', {
-          shell: '/bin/bash',
+          shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
           stdio: options?.silent ? 'ignore' : 'inherit'
         });
         return true;

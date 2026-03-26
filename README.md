@@ -1,43 +1,49 @@
 # CV-Git
 
-**AI-native version control with a knowledge graph, semantic search, and deploy orchestration.**
-
-CV-Git wraps Git with a code knowledge graph (FalkorDB), vector search (Qdrant), and AI commands so you can search, explain, review, and generate code from natural language. It also serves as an MCP server for Claude Desktop and Claude Code.
+**AI-native version control with a code knowledge graph, semantic search, and deploy orchestration.**
 
 [![npm](https://img.shields.io/npm/v/@controlvector/cv-git)](https://www.npmjs.com/package/@controlvector/cv-git)
+[![CI](https://github.com/controlVector/cv-git/actions/workflows/ci.yml/badge.svg)](https://github.com/controlVector/cv-git/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
+
+CV-Git wraps Git with a code knowledge graph, vector search, and AI commands so you can search, explain, review, and generate code from natural language. It also serves as an MCP server for Claude Desktop and Claude Code.
+
+---
+
+## Platform Support
+
+| Platform | Status | Graph Backend | Server Required? |
+|---|---|---|---|
+| Linux x64 | Supported | FalkorDB (embedded via falkordblite) | No |
+| macOS arm64 | Supported | FalkorDB (embedded via falkordblite) | No |
+| Windows 10/11 x64 | Supported | LadybugDB (embedded) | No |
+| CV-Hub server | Supported | FalkorDB (remote) | Yes (Docker) |
+
+> **Windows** uses LadybugDB as a fully embedded graph database — no Docker, no server process, no configuration required. When FalkorDB ships native Windows binaries, CV-Git will migrate automatically with no user-facing changes.
+
+---
+
+## Prerequisites
+
+| Requirement | Version | Notes |
+|---|---|---|
+| Node.js | >= 20 | Runtime |
+| Ollama | Optional | Local embeddings with `nomic-embed-text` (no API key needed) |
+| Anthropic API key | Optional | Powers `cv explain`, `cv do`, `cv review` |
+
+No Docker is required for local development on any platform. The graph database runs embedded.
 
 ---
 
 ## Installation
 
-### npm (recommended)
-
 ```bash
+# Global install (recommended)
 npm install -g @controlvector/cv-git
-```
 
-### Install script (Linux)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/controlVector/cv-git/main/install.sh | bash
-```
-
-### From source
-
-```bash
-git clone https://github.com/controlVector/cv-git.git
-cd cv-git
-npm install -g pnpm   # if you don't have pnpm
-pnpm install && pnpm build
-cd packages/cli && pnpm link --global
-```
-
-System dependencies for building native modules on Linux/WSL:
-
-```bash
-sudo apt install -y libsecret-1-dev build-essential python3
+# Or run without installing
+npx @controlvector/cv-git --help
 ```
 
 ### Uninstall
@@ -54,12 +60,8 @@ npm uninstall -g @controlvector/cv-git
 # Verify installation
 cv --version
 
-# Check system health (shows what's running and what's missing)
+# Check system health
 cv doctor
-
-# Start the backing databases (knowledge graph + vector search)
-docker run -d --name falkordb -p 6379:6379 falkordb/falkordb
-docker run -d --name qdrant -p 6333:6333 qdrant/qdrant
 
 # Initialize CV-Git in your project
 cd your-project
@@ -77,29 +79,16 @@ cv explain src/auth/login.ts
 
 ---
 
-## Prerequisites
+## Backend Configuration
 
-| Requirement | Version | Notes |
-|-------------|---------|-------|
-| Node.js | >= 18 | Runtime |
-| Docker | Any | For FalkorDB and Qdrant containers |
-| Ollama | Optional | Local embeddings with `nomic-embed-text` (no API key needed) |
-| Anthropic API key | Optional | Powers `cv explain`, `cv do`, `cv review` |
+The graph backend is auto-detected based on your platform. Override with the `CV_GIT_GRAPH_BACKEND` environment variable:
 
-### Configure credentials
-
-```bash
-# Local embeddings (recommended, no API key needed)
-ollama pull nomic-embed-text
-
-# AI features need an Anthropic key — pick one method:
-export ANTHROPIC_API_KEY=sk-ant-...
-# or
-cv auth setup anthropic
-
-# Optional: OpenAI/OpenRouter for embeddings if you don't use Ollama
-cv auth setup openai
-```
+| Value | When to Use |
+|---|---|
+| *(unset)* | Auto-detect (recommended) |
+| `falkordblite` | Force embedded FalkorDB (Linux/macOS) |
+| `ladybugdb` | Force LadybugDB (Windows) |
+| `redis` | Remote FalkorDB server (CV-Hub, Docker) |
 
 ---
 
@@ -108,7 +97,7 @@ cv auth setup openai
 ### AI-powered
 
 | Command | Description |
-|---------|-------------|
+|---|---|
 | `cv find <query>` | Semantic code search across all languages |
 | `cv explain <target>` | Natural language explanation of a file, function, or concept |
 | `cv do <task>` | Generate code from a task description (`--plan-only` to preview) |
@@ -119,7 +108,7 @@ cv auth setup openai
 ### Knowledge graph
 
 | Command | Description |
-|---------|-------------|
+|---|---|
 | `cv sync` | Build or update the knowledge graph from your repo |
 | `cv graph stats` | Knowledge graph statistics |
 | `cv graph calls <fn>` | What does this function call? |
@@ -138,7 +127,7 @@ CV-Git wraps common Git commands and adds knowledge graph sync on operations tha
 ### Advanced Git
 
 | Command | Description |
-|---------|-------------|
+|---|---|
 | `cv absorb` | Absorb staged changes into the appropriate prior commits |
 | `cv undo [target]` | Undo the last operation using reflog |
 | `cv stack` | Manage stacked branches for incremental reviews |
@@ -147,8 +136,8 @@ CV-Git wraps common Git commands and adds knowledge graph sync on operations tha
 ### Deploy orchestration
 
 | Command | Description |
-|---------|-------------|
-| `cv deploy init <target>` | Generate a deploy config template (`deploy/<target>.yaml`) |
+|---|---|
+| `cv deploy init <target>` | Generate a deploy config template |
 | `cv deploy push <target>` | Deploy through the full lifecycle |
 | `cv deploy status <target>` | Show health status |
 | `cv deploy rollback <target>` | Rollback to previous version |
@@ -160,7 +149,7 @@ Supported providers: DigitalOcean Kubernetes (DOKS), SSH, Fly.io, Docker Compose
 ### Other
 
 | Command | Description |
-|---------|-------------|
+|---|---|
 | `cv doctor` | Diagnostics and health checks (`--fix` to auto-repair) |
 | `cv init` | Initialize CV-Git in the current repo |
 | `cv auth` | Credential management (`setup`, `list`, `login`, `status`) |
@@ -200,7 +189,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 ### MCP Tools
 
 | Tool | Purpose |
-|------|---------|
+|---|---|
 | `cv_find` | Semantic code search |
 | `cv_explain` | Code explanations |
 | `cv_do` | AI code generation |
@@ -208,7 +197,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 | `cv_graph_path` | Find paths between symbols |
 | `cv_graph_neighborhood` | Explore symbol relationships |
 | `cv_graph_impact` | Analyze change impact |
-| `cv_traverse_context` | Traversal-aware dynamic context (hierarchical navigation) |
+| `cv_traverse_context` | Traversal-aware dynamic context |
 | `cv_context` | Generate AI context for a query |
 | `cv_auto_context` | Automatic context assembly |
 | `cv_status` | Repository and graph status |
@@ -220,8 +209,8 @@ See [packages/mcp-server/](packages/mcp-server/) for full documentation.
 
 ## Language Support
 
-| Language | Extensions | Parsed symbols |
-|----------|-----------|----------------|
+| Language | Extensions | Parsed Symbols |
+|---|---|---|
 | TypeScript | `.ts`, `.tsx` | Functions, classes, interfaces, types |
 | JavaScript | `.js`, `.jsx`, `.mjs` | Functions, classes, imports/exports |
 | Python | `.py` | Functions, classes, methods, decorators |
@@ -231,18 +220,50 @@ See [packages/mcp-server/](packages/mcp-server/) for full documentation.
 
 ---
 
+## Configure Credentials
+
+```bash
+# Local embeddings (recommended, no API key needed)
+ollama pull nomic-embed-text
+
+# AI features need an Anthropic key:
+export ANTHROPIC_API_KEY=sk-ant-...
+# or
+cv auth setup anthropic
+
+# Optional: OpenAI/OpenRouter for embeddings if you don't use Ollama
+cv auth setup openai
+```
+
+---
+
+## Contributing
+
+```bash
+git clone https://github.com/controlVector/cv-git.git
+cd cv-git
+npm install -g pnpm   # if you don't have pnpm
+pnpm install && pnpm build
+pnpm test
+```
+
+System dependencies for building native modules on Linux:
+
+```bash
+sudo apt install -y libsecret-1-dev build-essential
+```
+
+The CI matrix tests on both `ubuntu-latest` (falkordblite backend) and `windows-latest` (LadybugDB backend).
+
+---
+
 ## Troubleshooting
 
 ```bash
 # First step for any issue
 cv doctor
 
-# FalkorDB/Qdrant not running?
-docker ps
-docker start falkordb qdrant
-
 # cv command not found after npm install?
-# Make sure your npm global bin is in PATH:
 npm config get prefix   # shows /usr/local or ~/.npm-global
 export PATH="$(npm config get prefix)/bin:$PATH"
 ```

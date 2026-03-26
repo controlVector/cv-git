@@ -722,7 +722,7 @@ export interface CVConfig {
     dimensions: number;
   };
   graph: {
-    provider: 'falkordb';
+    provider: 'falkordb' | 'falkordblite' | 'ladybugdb' | 'auto';
     url: string;
     embedded: boolean;
     database: string;

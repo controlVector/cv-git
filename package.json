@@ -1,6 +1,6 @@
 {
   "name": "cv-git",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "AI-Native Paired-Programming + Knowledge-Graph Version Control Layer",
   "private": true,
   "engines": {
@@ -63,5 +63,12 @@
     "tree-sitter-python": "^0.21.0",
     "tree-sitter-rust": "^0.21.0",
     "tree-sitter-typescript": "^0.21.2"
+  },
+  "pnpm": {
+    "peerDependencyRules": {
+      "allowedVersions": {
+        "redis": ">=4"
+      }
+    }
   }
 }

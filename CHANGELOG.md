@@ -2,6 +2,35 @@
 
 All notable changes to CV-Git will be documented in this file.
 
+## [1.2.0] — 2026-03-26
+
+### Added
+- Windows 10/11 support via LadybugDB embedded graph database (no Docker required)
+- Cross-platform graph backend abstraction layer (`IGraphBackend` interface)
+- FalkorDB embedded support for Linux/macOS via `falkordblite` (no server required)
+- `CV_GIT_GRAPH_BACKEND` env var for manual backend override
+- CI matrix now tests on `ubuntu-latest` and `windows-latest`
+- Platform support table in README
+
+### Changed
+- GraphManager now delegates to pluggable backend instead of direct redis client
+- Cross-platform path handling (`path.join`, `os.homedir`) in privilege-config
+- Shell invocations use cross-platform shell instead of hardcoded `/bin/bash`
+- Node.js engine requirement bumped to >= 20
+
+### Fixed
+- `process.getuid()` guard for Windows compatibility in privilege-config
+- Credential path search no longer references `/root/` on Windows
+- `hasRootlessDocker()` and `isInDockerGroup()` short-circuit on Windows
+
+### Internal
+- New files: `backend.ts`, `backend-factory.ts`, `schema.ts`, `backends/redis-backend.ts`, `backends/falkordblite-backend.ts`, `backends/ladybug-backend.ts`, `graph-backends.d.ts`
+- New optional dependencies: `falkordblite`, `@ladybugdb/core`
+- New dependency: `env-paths`
+- esbuild externals updated for new packages
+
+---
+
 ## [1.0.0] - 2026-03-23
 
 ### Added
@@ -447,6 +476,8 @@ All notable changes to CV-Git will be documented in this file.
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 1.2.0 | 2026-03-26 | Windows support via LadybugDB, cross-platform graph backend |
+| 1.0.0 | 2026-03-23 | Deploy orchestration, context manifold, polish |
 | 0.4.25 | 2026-01-21 | Performance caching, new MCP tools, enhanced diff |
 | 0.4.23 | 2026-01-14 | Repository isolation, cv deps, tree-sitter improvements |
 | 0.4.20 | 2026-01-10 | Ollama local embeddings, sync error reporting |

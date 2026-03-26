@@ -8,7 +8,15 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ['18', '20']
+        exclude:
+          - os: windows-latest
+            node: '18'
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout code
@@ -17,7 +25,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: ${{ matrix.node }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v2
@@ -37,19 +45,37 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
+      - name: Start FalkorDB (Linux only)
+        if: runner.os == 'Linux'
+        run: docker run -d -p 6379:6379 falkordb/falkordb:latest
+
       - name: Install dependencies
         run: pnpm install
 
       - name: Build
         run: pnpm build
 
+      - name: Smoke test graph backend
+        shell: bash
+        run: |
+          node -e "
+            const { resolveBackendType } = require('./packages/core/dist/graph/backend-factory.js');
+            console.log('Detected backend:', resolveBackendType());
+          "
+
       - name: Run integration tests
+        if: runner.os == 'Linux'
         run: pnpm test
 
+      - name: Run unit tests
+        run: pnpm test:unit
+
       - name: Run unit tests with coverage
+        if: runner.os == 'Linux' && matrix.node == '20'
         run: pnpm test:coverage
 
       - name: Upload coverage to Codecov
+        if: runner.os == 'Linux' && matrix.node == '20'
         uses: codecov/codecov-action@v4
         with:
           files: ./coverage/lcov.info
@@ -61,6 +87,7 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload coverage artifacts
+        if: runner.os == 'Linux' && matrix.node == '20'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report

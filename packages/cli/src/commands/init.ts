@@ -242,7 +242,7 @@ export function initCommand(): Command {
             if (!existsSync(readmePath)) {
               writeFileSync(readmePath, `# ${projectName}\n\nInitialized with CV-Git.\n`);
             }
-            execSync('git add -A && git commit -m "Initial commit"', { cwd: currentDir, stdio: 'inherit', shell: '/bin/bash' });
+            execSync('git add -A && git commit -m "Initial commit"', { cwd: currentDir, stdio: 'inherit', shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh' });
             mode = 'repo';
             spinner.start('Initializing CV-Git...');
           } else {
@@ -266,7 +266,7 @@ export function initCommand(): Command {
               if (!existsSync(readmePath)) {
                 writeFileSync(readmePath, `# ${projectName}\n\nInitialized with CV-Git.\n`);
               }
-              execSync('git add -A && git commit -m "Initial commit"', { cwd: currentDir, stdio: 'inherit', shell: '/bin/bash' });
+              execSync('git add -A && git commit -m "Initial commit"', { cwd: currentDir, stdio: 'inherit', shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh' });
               mode = 'repo';
               spinner.start('Initializing CV-Git...');
             } else {

@@ -1,9 +1,19 @@
 /**
- * FalkorDB Graph Manager
- * Manages the knowledge graph using FalkorDB (Redis-based graph database)
+ * Graph Manager
+ * Manages the knowledge graph with platform-routed backend support.
+ *
+ * Backends:
+ *   redis        — FalkorDB remote via redis client (CV-Hub server, Docker)
+ *   falkordblite — FalkorDB embedded for Linux/macOS (no server)
+ *   ladybugdb    — LadybugDB embedded for Windows (no server)
+ *
+ * All 40+ public methods are backend-agnostic. Backend selection happens
+ * in connect() via the factory in backend-factory.ts.
  */
 
-import { createClient, RedisClientType } from 'redis';
+import type { IGraphBackend, BackendType } from './backend.js';
+import { createBackend, isEmbeddedBackend, resolveBackendType } from './backend-factory.js';
+import { initSchema } from './schema.js';
 import {
   FileNode,
   SymbolNode,
@@ -41,21 +51,25 @@ interface SchemaVersionResult {
  * Options for creating a GraphManager instance
  */
 export interface GraphManagerOptions {
-  /** FalkorDB/Redis URL */
+  /** FalkorDB/Redis URL (used for redis backend) */
   url: string;
   /** Explicit database name (for workspace mode or legacy) */
   database?: string;
   /** Repository ID - when provided, uses isolated database cv_{repoId} */
   repoId?: string;
+  /** Pre-created backend (for testing or explicit injection) */
+  backend?: IGraphBackend;
 }
 
 export class GraphManager {
-  private client: RedisClientType | null = null;
+  private backend: IGraphBackend | null = null;
+  private backendType: BackendType = 'redis';
   private graphName: string;
   private connected: boolean = false;
   private instanceId: string;
   private url: string;
   private repoId?: string;
+  private injectedBackend?: IGraphBackend;
 
   /**
    * Create a GraphManager instance
@@ -73,6 +87,7 @@ export class GraphManager {
       // New: constructor(options)
       this.url = urlOrOptions.url;
       this.repoId = urlOrOptions.repoId;
+      this.injectedBackend = urlOrOptions.backend;
 
       if (urlOrOptions.repoId) {
         // Use repo-specific database for isolation
@@ -93,48 +108,42 @@ export class GraphManager {
   }
 
   /**
-   * Connect to FalkorDB (via Redis)
+   * Connect to the graph database.
+   *
+   * Backend is resolved automatically based on platform and environment:
+   *   - Windows  → LadybugDB embedded
+   *   - Linux    → falkordblite embedded (fallback: redis remote)
+   *   - Server   → redis remote (when CV_GIT_GRAPH_BACKEND=redis)
    */
   async connect(): Promise<void> {
     try {
-      this.client = createClient({
-        url: this.url,
-        socket: {
-          reconnectStrategy: (retries) => {
-            if (retries > 10) {
-              return new Error('Max reconnection attempts reached');
-            }
-            return retries * 100;
-          }
-        }
-      });
+      // Use injected backend (testing) or auto-detect via factory
+      if (this.injectedBackend) {
+        this.backend = this.injectedBackend;
+        this.backendType = 'redis'; // assume redis for injected
+      } else {
+        const result = await createBackend({
+          url: this.url,
+          graphName: this.graphName,
+        });
+        this.backend = result.backend;
+        this.backendType = result.type;
+      }
 
-      this.client.on('error', (err) => {
-        console.error('Redis Client Error:', err);
-        this.connected = false;
-      });
-
-      this.client.on('end', () => {
-        this.connected = false;
-      });
-
-      this.client.on('reconnecting', () => {
-        this.connected = false;
-      });
-
-      this.client.on('ready', () => {
-        this.connected = true;
-      });
-
-      await this.client.connect();
+      await this.backend.connect();
       this.connected = true;
 
       if (process.env.CV_DEBUG) {
-        console.log(`[GraphManager ${this.instanceId}] Connected, client exists: ${!!this.client}`);
+        console.log(`[GraphManager ${this.instanceId}] Connected via ${this.backendType}, graphName: ${this.graphName}`);
       }
 
-      // Test connection with GRAPH.QUERY
+      // Test connection
       await this.ping();
+
+      // Initialize schema for LadybugDB (no-op on FalkorDB backends)
+      await initSchema(this.backendType, async (cypher: string) => {
+        await this.backend!.rawQuery(this.graphName, cypher);
+      });
 
       // Create indexes
       await this.createIndexes();
@@ -149,7 +158,7 @@ export class GraphManager {
       }
 
     } catch (error: any) {
-      throw new GraphError(`Failed to connect to FalkorDB: ${error.message}`, error);
+      throw new GraphError(`Failed to connect to graph database (${this.backendType}): ${error.message}`, error);
     }
   }
 
@@ -157,13 +166,12 @@ export class GraphManager {
    * Test connection
    */
   async ping(): Promise<boolean> {
-    if (!this.client || !this.connected) {
-      throw new GraphError('Not connected to FalkorDB');
+    if (!this.backend || !this.connected) {
+      throw new GraphError('Not connected to graph database');
     }
 
     try {
-      const result = await this.client.ping();
-      return result === 'PONG';
+      return await this.backend.ping();
     } catch (error: any) {
       throw new GraphError(`Ping failed: ${error.message}`, error);
     }
@@ -415,14 +423,14 @@ export class GraphManager {
    * Execute a Cypher query
    */
   async query(cypher: string, params?: Record<string, any>): Promise<GraphQueryResult[]> {
-    if (!this.client || !this.connected) {
+    if (!this.backend || !this.connected) {
       const state = {
         instanceId: this.instanceId,
-        hasClient: !!this.client,
+        hasBackend: !!this.backend,
+        backendType: this.backendType,
         connected: this.connected,
-        clientReady: this.client?.isReady,
       };
-      throw new GraphError(`Not connected to FalkorDB (state: ${JSON.stringify(state)})`);
+      throw new GraphError(`Not connected to graph database (state: ${JSON.stringify(state)})`);
     }
 
     // Declare outside try block so it's available in catch
@@ -445,28 +453,17 @@ export class GraphManager {
 
       // Debug logging when CV_DEBUG is set
       if (process.env.CV_DEBUG === '1') {
-        console.log('[GraphManager] Processed query:', processedQuery.substring(0, 500));
+        console.log(`[GraphManager] (${this.backendType}) Processed query:`, processedQuery.substring(0, 500));
       }
 
-      // Execute query using GRAPH.QUERY
-      const result = await this.client.sendCommand([
-        'GRAPH.QUERY',
-        this.graphName,
-        processedQuery,
-        '--compact'
-      ]);
+      // Execute query via backend abstraction
+      const result = await this.backend.rawQuery(this.graphName, processedQuery);
 
       return this.parseQueryResult(result as any);
 
     } catch (error: any) {
       // Include more context in error for debugging
       const errorQuery = process.env.CV_DEBUG === '1' ? cypher : cypher.substring(0, 200);
-      const debugInfo = {
-        query: cypher.substring(0, 500),
-        processedQuery: processedQuery.substring(0, 500),
-        paramKeys: params ? Object.keys(params) : [],
-        errorMessage: error.message
-      };
 
       // Enhanced error for multi-statement issues
       if (error.message.includes('more than one statement')) {
@@ -1739,13 +1736,13 @@ export class GraphManager {
    * Close connection
    */
   async close(): Promise<void> {
-    if (this.client && this.connected) {
+    if (this.backend && this.connected) {
       if (process.env.CV_DEBUG) {
-        console.log(`[GraphManager] close() called - stack:`, new Error().stack);
+        console.log(`[GraphManager] close() called (${this.backendType}) - stack:`, new Error().stack);
       }
-      await this.client.quit();
+      await this.backend.close();
       this.connected = false;
-      this.client = null;
+      this.backend = null;
     }
   }
 
@@ -1776,6 +1773,13 @@ export class GraphManager {
   getRepoId(): string | undefined {
     return this.repoId;
   }
+
+  /**
+   * Get the active backend type
+   */
+  getBackendType(): BackendType {
+    return this.backendType;
+  }
 }
 
 /**
@@ -1787,3 +1791,7 @@ export class GraphManager {
 export function createGraphManager(urlOrOptions: string | GraphManagerOptions, database?: string): GraphManager {
   return new GraphManager(urlOrOptions, database);
 }
+
+// Re-export backend types for consumers that need backend awareness
+export type { IGraphBackend, BackendType } from './backend.js';
+export { resolveBackendType, isEmbeddedBackend } from './backend-factory.js';

@@ -1,6 +1,6 @@
 {
   "name": "@cv-git/core",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Core business logic for CV-Git",
   "type": "module",
   "main": "./dist/index.js",
@@ -25,12 +25,15 @@
     "lru-cache": "^11.2.4",
     "minimatch": "^10.1.1",
     "openai": "^4.20.0",
+    "env-paths": "^3.0.0",
     "redis": "^4.6.12",
     "simple-git": "^3.21.0",
     "uuid": "^13.0.0",
     "yaml": "^2.8.3"
   },
   "optionalDependencies": {
+    "falkordblite": "^0.2.0",
+    "@ladybugdb/core": "^0.15.2",
     "tree-sitter": "npm:@keqingmoe/tree-sitter@^0.26.2",
     "tree-sitter-go": "^0.21.2",
     "tree-sitter-java": "^0.21.0",
