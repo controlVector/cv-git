@@ -1,68 +1,77 @@
 # CV-Git
 
-**AI-Native Version Control Layer with Knowledge Graph & Semantic Search**
+**AI-native version control with a knowledge graph, semantic search, and deploy orchestration.**
 
-CV-Git is an intelligent wrapper around Git that adds a knowledge graph, semantic search, and AI-powered code understanding to your development workflow. Think of it as "Git with a brain" - it understands your codebase structure, relationships, and context.
+CV-Git wraps Git with a code knowledge graph (FalkorDB), vector search (Qdrant), and AI commands so you can search, explain, review, and generate code from natural language. It also serves as an MCP server for Claude Desktop and Claude Code.
 
+[![npm](https://img.shields.io/npm/v/@controlvector/cv-git)](https://www.npmjs.com/package/@controlvector/cv-git)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
-[![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org/)
-[![codecov](https://codecov.io/gh/controlVector/cv-git/graph/badge.svg)](https://codecov.io/gh/controlVector/cv-git)
-[![CI](https://github.com/controlVector/cv-git/actions/workflows/ci.yml/badge.svg)](https://github.com/controlVector/cv-git/actions/workflows/ci.yml)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
 
 ---
 
 ## Installation
 
-### Option 1: APT (Debian/Ubuntu) - Recommended
+### npm (recommended)
 
 ```bash
-# Add GPG key
-curl -fsSL https://controlvector.github.io/cv-git/gpg.pub | sudo gpg --dearmor -o /usr/share/keyrings/cv-git.gpg
-
-# Add repository
-echo "deb [signed-by=/usr/share/keyrings/cv-git.gpg] https://controlvector.github.io/cv-git stable main" | sudo tee /etc/apt/sources.list.d/cv-git.list
-
-# Install
-sudo apt update
-sudo apt install cv-git
+npm install -g @controlvector/cv-git
 ```
 
-### Option 2: Quick Install Script
+### Install script (Linux)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/controlVector/cv-git/main/install.sh | bash
 ```
 
-### Option 3: Download .deb directly
+### From source
 
 ```bash
-wget https://github.com/controlVector/cv-git/releases/latest/download/cv-git_0.4.23_amd64.deb
-sudo dpkg -i cv-git_*.deb
+git clone https://github.com/controlVector/cv-git.git
+cd cv-git
+npm install -g pnpm   # if you don't have pnpm
+pnpm install && pnpm build
+cd packages/cli && pnpm link --global
 ```
 
-### After Installation
+System dependencies for building native modules on Linux/WSL:
+
+```bash
+sudo apt install -y libsecret-1-dev build-essential python3
+```
+
+### Uninstall
+
+```bash
+npm uninstall -g @controlvector/cv-git
+```
+
+---
+
+## Quick Start
 
 ```bash
 # Verify installation
 cv --version
 
-# Check system health
+# Check system health (shows what's running and what's missing)
 cv doctor
 
-# Start required services (if not running)
+# Start the backing databases (knowledge graph + vector search)
 docker run -d --name falkordb -p 6379:6379 falkordb/falkordb
 docker run -d --name qdrant -p 6333:6333 qdrant/qdrant
 
-# Initialize in your project
+# Initialize CV-Git in your project
 cd your-project
 cv init
 
 # Build the knowledge graph
 cv sync
 
-# Start exploring!
-cv find "authentication"
+# Search your codebase with natural language
+cv find "authentication logic"
+
+# Explain a file or symbol
 cv explain src/auth/login.ts
 ```
 
@@ -70,200 +79,109 @@ cv explain src/auth/login.ts
 
 ## Prerequisites
 
-| Requirement | Version | Purpose |
-|-------------|---------|---------|
-| Node.js | 18-22 | Runtime |
-| Docker | Any | FalkorDB & Qdrant databases |
-| Ollama | Optional | Local embeddings (recommended) |
-| Anthropic API Key | Optional | AI features (explain, do, review) |
-| OpenAI API Key | Optional | Embeddings (fallback if no Ollama) |
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| Node.js | >= 18 | Runtime |
+| Docker | Any | For FalkorDB and Qdrant containers |
+| Ollama | Optional | Local embeddings with `nomic-embed-text` (no API key needed) |
+| Anthropic API key | Optional | Powers `cv explain`, `cv do`, `cv review` |
 
-### Configure API Keys
+### Configure credentials
 
 ```bash
-# Option 1: Local embeddings with Ollama (no API key needed!)
+# Local embeddings (recommended, no API key needed)
 ollama pull nomic-embed-text
 
-# Option 2: Environment variables (for AI features)
+# AI features need an Anthropic key — pick one method:
 export ANTHROPIC_API_KEY=sk-ant-...
-export OPENAI_API_KEY=sk-...  # Optional, Ollama is preferred
+# or
+cv auth setup anthropic
 
-# Option 3: Use cv auth (stored securely in system keychain)
-cv auth set anthropic sk-ant-...
-cv auth set openai sk-...
+# Optional: OpenAI/OpenRouter for embeddings if you don't use Ollama
+cv auth setup openai
 ```
 
 ---
 
-## Features
+## Commands
 
-### Knowledge Graph
-- **AST-based parsing** using Tree-sitter for TypeScript, JavaScript, Python, Go, Rust, Java
-- **FalkorDB graph database** for code relationships
-- **Call graph extraction** - understand function dependencies
-- **Symbol relationships** - imports, exports, inheritance
+### AI-powered
 
-### Semantic Search
-- **Vector embeddings** with OpenAI
-- **Qdrant vector database** for fast similarity search
-- **Natural language queries** - find code by describing what it does
+| Command | Description |
+|---------|-------------|
+| `cv find <query>` | Semantic code search across all languages |
+| `cv explain <target>` | Natural language explanation of a file, function, or concept |
+| `cv do <task>` | Generate code from a task description (`--plan-only` to preview) |
+| `cv review [ref]` | AI code review with security, quality, and style analysis |
+| `cv chat [question]` | Interactive AI chat with codebase context |
+| `cv context <query>` | Generate context snippets for AI coding assistants |
 
-### AI-Powered Commands
-- **`cv explain`** - Get natural language explanations of code
-- **`cv do`** - Generate code from task descriptions
-- **`cv review`** - AI code review with multi-aspect analysis
-- **`cv find`** - Semantic code search across all languages
+### Knowledge graph
 
-### Traversal-Aware Context (for AI Agents)
-- **`cv_traverse_context`** - MCP tool for dynamic context based on codebase position
-- **Hierarchical summaries** - Multi-level (symbol → file → directory → repo)
-- **Stateful navigation** - Session tracking across tool calls
-- **Smart context scaling** - Automatically adjusts detail level based on depth
+| Command | Description |
+|---------|-------------|
+| `cv sync` | Build or update the knowledge graph from your repo |
+| `cv graph stats` | Knowledge graph statistics |
+| `cv graph calls <fn>` | What does this function call? |
+| `cv graph called-by <fn>` | What calls this function? |
+| `cv graph path --from A --to B` | Find execution paths between symbols |
+| `cv graph dead-code` | Detect unreachable code |
+| `cv graph cycles` | Find circular dependencies |
+| `cv graph complexity` | Find high-complexity functions |
 
-### Graph Analysis
-- **`cv graph stats`** - View knowledge graph statistics
-- **`cv graph calls <function>`** - What does this function call?
-- **`cv graph called-by <function>`** - What calls this function?
-- **`cv graph path --from A --to B`** - Find execution paths
-- **`cv graph dead-code`** - Detect unreachable code
-- **`cv graph cycles`** - Find circular dependencies
-- **`cv graph complexity`** - Find high-complexity functions
+### Git wrappers
 
-### Repository Isolation (Multi-Repo Support)
-- **Isolated GraphRAG databases** per repository
-- **No cross-contamination** between projects
-- **Deterministic repo IDs** from git remote URL or path
+CV-Git wraps common Git commands and adds knowledge graph sync on operations that change the working tree:
 
-### Modern VCS Features
-- **`cv absorb`** - Automatically absorb uncommitted changes into relevant commits
-- **`cv undo`** - Undo last commit while preserving changes
-- **`cv stack`** - Manage stacked branches for incremental reviews
-- **`cv split`** - Split a commit into multiple smaller commits
-- **`cv smart-log`** - Enhanced git log with graph visualization
+`cv add`, `cv commit`, `cv push`, `cv pull`, `cv checkout`, `cv switch`, `cv merge`, `cv branch`, `cv stash`, `cv diff`, `cv log`, `cv fetch`, `cv remote`, `cv reset`, `cv revert`, `cv tag`
 
-### Native Dependency Analysis (C/C++)
-- **`cv deps analyze`** - Detect build systems and extract dependencies
-- **`cv deps check`** - Verify system availability via pkg-config
-- **`cv deps install`** - Generate installation commands for missing dependencies
+### Advanced Git
 
-### Deploy Orchestration
-- **`cv deploy <target>`** - Deploy to any provider from a single config
-- **Providers** - DigitalOcean Kubernetes (DOKS), SSH, Fly.io, Docker Compose, Cloudflare
-- **`cv deploy init <target>`** - Generate deploy config templates
-- **`cv deploy status`** / **`cv deploy report`** - Health checks and status reports
-- **Lifecycle hooks** - preDeploy, postDeploy, rollback, healthCheck
-- **Token resolution** - `env://` and `vault://` secret references
+| Command | Description |
+|---------|-------------|
+| `cv absorb` | Absorb staged changes into the appropriate prior commits |
+| `cv undo [target]` | Undo the last operation using reflog |
+| `cv stack` | Manage stacked branches for incremental reviews |
+| `cv split [commit]` | Split a commit into smaller commits |
 
-### Context Manifold (Feedback Loops)
-- **Contextual Bandit** - LinUCB scorer learns which context nodes are useful per task
-- **Transition Model** - Markov chain predicts next event phases from task histories
-- **CLAUDE.md Generator** - Auto-generates project context with deploy status, graph stats, bandit metrics
-- **Task Event Bridge** - Deploy lifecycle events stream to CV-Hub in real time
+### Deploy orchestration
 
-### Local-First Embeddings
-- **Ollama integration** - Local embeddings with `nomic-embed-text` (no API key required)
-- **Automatic fallback** to OpenRouter/OpenAI if Ollama unavailable
+| Command | Description |
+|---------|-------------|
+| `cv deploy init <target>` | Generate a deploy config template (`deploy/<target>.yaml`) |
+| `cv deploy push <target>` | Deploy through the full lifecycle |
+| `cv deploy status <target>` | Show health status |
+| `cv deploy rollback <target>` | Rollback to previous version |
+| `cv deploy list` | List all deploy targets |
+| `cv deploy report` | Generate deploy status report |
 
----
+Supported providers: DigitalOcean Kubernetes (DOKS), SSH, Fly.io, Docker Compose.
 
-## Usage Examples
+### Other
 
-### Semantic Search
+| Command | Description |
+|---------|-------------|
+| `cv doctor` | Diagnostics and health checks (`--fix` to auto-repair) |
+| `cv init` | Initialize CV-Git in the current repo |
+| `cv auth` | Credential management (`setup`, `list`, `login`, `status`) |
+| `cv pr` | Pull request management |
+| `cv release` | Release management |
+| `cv deps` | Native dependency analysis (C/C++ build systems) |
+| `cv docs` | Documentation management and search |
+| `cv agent` | Listen for CV-Hub task dispatch and execute with Claude Code |
+| `cv connect` | Show instructions for linking Claude Code to this machine |
 
-```bash
-# Find authentication code
-cv find "authentication logic"
-
-# Search specific language
-cv find "database connection" --language python
-
-# Search in directory
-cv find "validation" --file src/api
-```
-
-### AI Explanation
-
-```bash
-# Explain a function
-cv explain "authenticateUser"
-
-# Explain a file
-cv explain "src/auth/service.py"
-```
-
-### AI Code Generation
-
-```bash
-# Generate code
-cv do "add logging to all API endpoints"
-
-# Preview plan without executing
-cv do "refactor auth to use OAuth2" --plan-only
-```
-
-### AI Code Review
-
-```bash
-# Review staged changes
-cv review --staged
-
-# Review specific commit
-cv review HEAD
-```
+Run `cv --help` for the full list. Every subcommand supports `--help`.
 
 ---
 
-## Alternative Installation Methods
+## MCP Server
 
-<details>
-<summary><b>From Source (Development)</b></summary>
+CV-Git includes an MCP server for Claude Desktop and Claude Code.
 
-```bash
-# Install pnpm if needed
-npm install -g pnpm
+### Setup (Claude Desktop)
 
-# Clone and build
-git clone https://github.com/controlVector/cv-git.git
-cd cv-git
-pnpm install
-pnpm build
-
-# Link globally
-cd packages/cli && pnpm link --global
-```
-
-**System Dependencies (Linux/WSL):**
-```bash
-# Required for native modules
-sudo apt install -y libsecret-1-dev build-essential python3
-```
-
-</details>
-
-<details>
-<summary><b>Uninstall</b></summary>
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/controlVector/cv-git/main/install.sh | bash -s uninstall
-```
-
-Or manually:
-```bash
-sudo rm -rf /usr/local/lib/cv-git
-sudo rm -f /usr/local/bin/cv
-```
-
-</details>
-
----
-
-## MCP Server for Claude Desktop
-
-CV-Git includes an MCP server for AI agents like Claude Desktop.
-
-### Setup
-
-Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `~/.config/claude/claude_desktop_config.json` (Linux):
 
 ```json
 {
@@ -272,53 +190,38 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
       "command": "node",
       "args": ["/path/to/cv-git/packages/mcp-server/dist/index.js"],
       "env": {
-        "ANTHROPIC_API_KEY": "your-api-key",
-        "OPENAI_API_KEY": "your-api-key"
+        "ANTHROPIC_API_KEY": "your-key"
       }
     }
   }
 }
 ```
 
-### Available MCP Tools
+### MCP Tools
 
 | Tool | Purpose |
 |------|---------|
 | `cv_find` | Semantic code search |
-| `cv_explain` | Get code explanations |
+| `cv_explain` | Code explanations |
+| `cv_do` | AI code generation |
+| `cv_review` | Code review |
 | `cv_graph_path` | Find paths between symbols |
 | `cv_graph_neighborhood` | Explore symbol relationships |
 | `cv_graph_impact` | Analyze change impact |
-| `cv_traverse_context` | **Traversal-aware dynamic context** |
+| `cv_traverse_context` | Traversal-aware dynamic context (hierarchical navigation) |
+| `cv_context` | Generate AI context for a query |
+| `cv_auto_context` | Automatic context assembly |
+| `cv_status` | Repository and graph status |
+| `cv_sync` | Trigger knowledge graph sync |
 
-### Traversal-Aware Context for Claude Code
-
-The `cv_traverse_context` tool enables intelligent context management:
-
-```
-# Navigate to a file
-cv_traverse_context(file="src/auth/oauth.ts", direction="jump")
-→ Returns: File summary + symbol list
-
-# Drill into a symbol
-cv_traverse_context(symbol="validateToken", direction="in", sessionId="...")
-→ Returns: Function code + callers + callees
-
-# Zoom out to module
-cv_traverse_context(direction="out", sessionId="...")
-→ Returns: Module overview + sibling files
-```
-
-Context automatically scales based on your position in the codebase.
-
-See [packages/mcp-server/README.md](packages/mcp-server/README.md) for full documentation.
+See [packages/mcp-server/](packages/mcp-server/) for full documentation.
 
 ---
 
-## Multi-Language Support
+## Language Support
 
-| Language | Extensions | Features |
-|----------|-----------|----------|
+| Language | Extensions | Parsed symbols |
+|----------|-----------|----------------|
 | TypeScript | `.ts`, `.tsx` | Functions, classes, interfaces, types |
 | JavaScript | `.js`, `.jsx`, `.mjs` | Functions, classes, imports/exports |
 | Python | `.py` | Functions, classes, methods, decorators |
@@ -330,45 +233,29 @@ See [packages/mcp-server/README.md](packages/mcp-server/README.md) for full docu
 
 ## Troubleshooting
 
-### `cv` command not found after install
 ```bash
-# Add to PATH
-export PATH="/usr/local/bin:$PATH"
-```
-
-### FalkorDB/Qdrant connection errors
-```bash
-# Check if containers are running
-docker ps
-
-# Start if needed
-docker start falkordb qdrant
-```
-
-### Native module errors
-```bash
-# Rebuild native modules
-cd /usr/local/lib/cv-git
-sudo npm rebuild
-```
-
-### Check system health
-```bash
+# First step for any issue
 cv doctor
+
+# FalkorDB/Qdrant not running?
+docker ps
+docker start falkordb qdrant
+
+# cv command not found after npm install?
+# Make sure your npm global bin is in PATH:
+npm config get prefix   # shows /usr/local or ~/.npm-global
+export PATH="$(npm config get prefix)/bin:$PATH"
 ```
 
 ---
 
-## Contributing
+## Related Projects
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+- [CV-Hub](https://hub.controlvector.io) — AI-native Git platform (web app)
+- [CV-Agent](https://www.npmjs.com/package/@controlvector/cv-agent) (`cva`) — Remote task dispatch daemon for CV-Hub
 
 ---
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
-
----
-
-**Built with love for the open source community**
+MIT — see [LICENSE](LICENSE).
