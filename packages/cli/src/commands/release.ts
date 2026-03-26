@@ -19,7 +19,7 @@ import { getConfig } from '../config.js';
 const git = simpleGit();
 
 export function releaseCommand(): Command {
-  const cmd = new Command('release').description('Manage releases');
+  const cmd = new Command('release').description('Create, list, and publish releases');
 
   // cv release create
   cmd

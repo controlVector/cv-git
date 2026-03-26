@@ -21,7 +21,7 @@ import { getConfig } from '../config.js';
 const git = simpleGit();
 
 export function prCommand(): Command {
-  const cmd = new Command('pr').description('Manage pull requests');
+  const cmd = new Command('pr').description('Create, list, view, and merge pull requests');
 
   // cv pr create
   cmd

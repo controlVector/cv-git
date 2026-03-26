@@ -708,7 +708,7 @@ async function executeTask(
 
 export function agentCommand(): Command {
   const cmd = new Command('agent');
-  cmd.description('Listen for tasks dispatched from Claude.ai and execute them with Claude Code');
+  cmd.description('[experimental] Listen for tasks dispatched from Claude.ai and execute them with Claude Code');
 
   cmd.option('--machine <name>', 'Machine name override');
   cmd.option('--poll-interval <seconds>', 'How often to check for tasks', '5');

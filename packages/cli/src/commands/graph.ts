@@ -51,7 +51,7 @@ export function graphCommand(): Command {
     .description('List files in the graph')
     .option('-l, --language <lang>', 'Filter by language')
     .option('--limit <n>', 'Limit results', '20')
-    .option('--sort <field>', 'Sort by field (complexity, size, symbols)', 'path')
+    .option('--sort <field>', 'Sort by field (path, language, linesOfCode, complexity)', 'path')
     .action(async (options) => {
       await withGraph(async (graph) => {
         let cypher = 'MATCH (f:File) ';
@@ -106,7 +106,7 @@ export function graphCommand(): Command {
     .option('-k, --kind <kind>', 'Filter by symbol kind (function, class, method, etc.)')
     .option('-f, --file <path>', 'Filter by file path')
     .option('--limit <n>', 'Limit results', '50')
-    .option('--sort <field>', 'Sort by field (name, complexity, line)', 'name')
+    .option('--sort <field>', 'Sort by field (name, complexity, startLine)', 'name')
     .action(async (options) => {
       await withGraph(async (graph) => {
         let cypher = 'MATCH (s:Symbol) WHERE 1=1 ';

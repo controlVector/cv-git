@@ -19,7 +19,7 @@ import { addGlobalOptions, createOutput } from '../utils/output.js';
 
 export function deployCommand(): Command {
   const cmd = new Command('deploy');
-  cmd.description('Manage deployments via tagged YAML configurations');
+  cmd.description('[experimental] Deploy via tagged YAML configurations');
 
   // ── cv deploy list ──
 
@@ -303,7 +303,7 @@ export function deployCommand(): Command {
   initCmd
     .description('Create a deploy config template')
     .argument('<target>', 'Deploy target name')
-    .option('-p, --provider <provider>', 'Deploy provider', 'doks');
+    .option('-p, --provider <provider>', 'Deploy provider (doks, ssh, fly, docker-compose)', 'doks');
   addGlobalOptions(initCmd);
 
   initCmd.action(async (target: string, options: any) => {

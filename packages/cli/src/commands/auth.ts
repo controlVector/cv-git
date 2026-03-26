@@ -54,7 +54,7 @@ import { readCredentials, getMachineName, findCredentialFile, writeCredentialFie
 
 export function authCommand(): Command {
   const cmd = new Command('auth').description(
-    'Manage credentials and authentication'
+    'Configure credentials for git platforms, AI services, and cloud providers'
   );
 
   // cv auth setup [service]
