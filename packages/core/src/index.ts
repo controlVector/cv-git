@@ -10,6 +10,7 @@ export * from './vector/index.js';
 export * from './ai/index.js';
 export * from './ai/openrouter.js';
 export * from './ai/ollama.js';
+export * from './ai/lmstudio.js';
 export * from './ai/types.js';
 export * from './ai/factory.js';
 export * from './ai/system-capabilities.js';

@@ -11,7 +11,8 @@
 const DEFAULT_URLS = {
   falkordb: 'redis://localhost:6379',
   qdrant: 'http://localhost:6333',
-  ollama: 'http://localhost:11434'
+  ollama: 'http://localhost:11434',
+  lmstudio: 'http://localhost:1234/v1',
 } as const;
 
 /**
@@ -21,6 +22,7 @@ export interface ServiceUrlConfig {
   falkordb?: string;
   qdrant?: string;
   ollama?: string;
+  lmstudio?: string;
 }
 
 /**
@@ -94,6 +96,26 @@ export function getOllamaUrl(configUrl?: string): string {
 }
 
 /**
+ * Get the LM Studio API URL
+ *
+ * Priority: CV_LMSTUDIO_URL env var > config > default
+ *
+ * @param configUrl - URL from config file (optional)
+ */
+export function getLMStudioUrl(configUrl?: string): string {
+  const envUrl = process.env.CV_LMSTUDIO_URL || process.env.LMSTUDIO_URL;
+  if (envUrl) {
+    return envUrl.replace(/\/$/, '');
+  }
+
+  if (configUrl) {
+    return configUrl.replace(/\/$/, '');
+  }
+
+  return DEFAULT_URLS.lmstudio;
+}
+
+/**
  * Get all service URLs
  *
  * @param config - Service URL configuration from config file
@@ -102,11 +124,13 @@ export function getServiceUrls(config: ServiceUrlConfig = {}): {
   falkordb: string;
   qdrant: string;
   ollama: string;
+  lmstudio: string;
 } {
   return {
     falkordb: getFalkorDbUrl(config.falkordb),
     qdrant: getQdrantUrl(config.qdrant),
-    ollama: getOllamaUrl(config.ollama)
+    ollama: getOllamaUrl(config.ollama),
+    lmstudio: getLMStudioUrl(config.lmstudio),
   };
 }
 

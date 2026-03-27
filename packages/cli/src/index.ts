@@ -82,6 +82,7 @@ import { connectCommand } from './commands/connect.js';
 import { agentCommand } from './commands/agent.js';
 import { agentHookCommand } from './commands/agent-hook.js';
 import { deployCommand } from './commands/deploy.js';
+import { aiCommand } from './commands/ai-setup.js';
 
 const program = new Command();
 
@@ -149,6 +150,7 @@ program.addCommand(connectCommand());       // Connection instructions (cv conne
 program.addCommand(agentCommand());         // Task listener + Claude Code launcher (cv agent)
 program.addCommand(agentHookCommand());     // Claude Code hook handler (cv agent-hook)
 program.addCommand(deployCommand());         // Deploy management (cv deploy)
+program.addCommand(aiCommand());             // AI provider setup (cv ai setup/status)
 
 // Error handler
 program.exitOverride((err) => {

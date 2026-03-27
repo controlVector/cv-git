@@ -2,6 +2,24 @@
 
 All notable changes to CV-Git will be documented in this file.
 
+## [1.3.0] — 2026-03-27
+
+### Added
+- LM Studio provider (`LMStudioClient`) — local LLM inference and embeddings via OpenAI-compatible API
+- `cv ai setup` — interactive wizard to detect, configure, and test local AI providers
+- `cv ai status` — show current AI provider configuration and connectivity
+- LM Studio auto-detection in `detectAvailableProviders()` (parallel with Ollama)
+- LM Studio URL config: `CV_LMSTUDIO_URL` env var, `getLMStudioUrl()` helper
+- 54 new unit tests for LM Studio provider
+- `docs/local-ai.md` — recommended models and setup guide for both Ollama and LM Studio
+- Local AI Providers section in README with provider comparison table
+
+### Changed
+- AI factory auto-mode now tries Ollama → LM Studio → OpenRouter (was Ollama → OpenRouter)
+- `AIProvider` type expanded to include `'lmstudio'`
+
+---
+
 ## [1.2.0] — 2026-03-26
 
 ### Added

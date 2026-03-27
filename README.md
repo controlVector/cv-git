@@ -220,6 +220,19 @@ See [packages/mcp-server/](packages/mcp-server/) for full documentation.
 
 ---
 
+## Local AI Providers
+
+CV-Git supports local LLM inference and embeddings with no cloud dependency.
+
+| Provider | Chat | Embeddings | Platform | Setup |
+|---|---|---|---|---|
+| Ollama | Yes | Yes | Linux, macOS, Windows | `ollama serve` |
+| LM Studio | Yes | Yes | Linux, macOS, Windows | `lms server start` |
+
+Run `cv ai setup` to configure your preferred provider interactively. See [docs/local-ai.md](docs/local-ai.md) for recommended models and details.
+
+---
+
 ## Configure Credentials
 
 ```bash
