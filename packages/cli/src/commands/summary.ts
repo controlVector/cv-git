@@ -99,6 +99,7 @@ export function summaryCommand(): Command {
       let openaiApiKey = config.ai?.apiKey || process.env.OPENAI_API_KEY;
       let openrouterApiKey = process.env.OPENROUTER_API_KEY;
       let ollamaUrl: string | undefined;
+      let lmstudioUrl: string | undefined;
 
       try {
         const credentials = new CredentialManager();
@@ -119,21 +120,29 @@ export function summaryCommand(): Command {
         if (ollamaInfo) {
           ollamaUrl = ollamaInfo.url;
         }
+      } else if (embeddingProvider === 'lmstudio') {
+        const { isLMStudioRunning, getLMStudioUrl } = await import('@cv-git/core');
+        const lmUrl = getLMStudioUrl();
+        if (await isLMStudioRunning(lmUrl)) {
+          lmstudioUrl = lmUrl;
+        }
       }
 
       // Set up Qdrant if we have embedding capability
-      const hasEmbeddingCapability = ollamaUrl || openaiApiKey || openrouterApiKey;
+      const hasEmbeddingCapability = ollamaUrl || lmstudioUrl || openaiApiKey || openrouterApiKey;
       if (hasEmbeddingCapability && config.vector) {
         try {
           const qdrantInfo = await ensureQdrant({ silent: true });
           if (qdrantInfo) {
+            const useLocal = !!(ollamaUrl || lmstudioUrl);
             vector = createVectorManager({
               url: qdrantInfo.url,
               repoId,
               ollamaUrl,
-              openrouterApiKey: ollamaUrl ? undefined : openrouterApiKey,
-              openaiApiKey: ollamaUrl ? undefined : openaiApiKey,
-              vectorSize: embeddingProvider === 'ollama' ? 768 : 1536
+              lmstudioUrl,
+              openrouterApiKey: useLocal ? undefined : openrouterApiKey,
+              openaiApiKey: useLocal ? undefined : openaiApiKey,
+              vectorSize: (embeddingProvider === 'ollama' || embeddingProvider === 'lmstudio') ? 768 : 1536
             });
             await vector.connect();
           }

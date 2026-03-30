@@ -715,7 +715,7 @@ export interface CVConfig {
     temperature: number;
   };
   embedding: {
-    provider: 'openrouter' | 'openai' | 'ollama';
+    provider: 'openrouter' | 'openai' | 'ollama' | 'lmstudio';
     model: string;
     apiKey?: string;
     url?: string;

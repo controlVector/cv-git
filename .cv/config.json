@@ -32,7 +32,7 @@
   },
   "vector": {
     "provider": "qdrant",
-    "url": "http://localhost:6334",
+    "url": "http://localhost:6333",
     "embedded": true,
     "collections": {
       "codeChunks": "code_chunks",

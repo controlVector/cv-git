@@ -10,7 +10,12 @@
       "Bash(git commit:*)",
       "Bash(npm test:*)",
       "Bash(npx vitest run:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "mcp__claude_ai_CV-Hub__get_tree",
+      "mcp__claude_ai_CV-Hub__get_file",
+      "Bash(cd:*)",
+      "mcp__claude_ai_CV-Hub__search_code",
+      "mcp__claude_ai_CV-Hub__create_issue"
     ]
   },
   "enableAllProjectMcpServers": true,

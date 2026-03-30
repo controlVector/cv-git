@@ -85,6 +85,7 @@ export function contextCommand(): Command {
 
       // Get embedding credentials based on provider
       let ollamaUrl: string | undefined;
+      let lmstudioUrl: string | undefined;
       let openrouterApiKey: string | undefined;
       let openaiApiKey: string | undefined;
 
@@ -95,8 +96,23 @@ export function contextCommand(): Command {
           ollamaUrl = ollamaInfo.url;
           log(`Using Ollama at ${ollamaUrl}...`);
         } else {
-          // Fall back to cloud providers
           log('Ollama not available, checking cloud providers...');
+          const embeddingCreds = await getEmbeddingCredentials({
+            openRouterKey: config.embedding?.apiKey,
+            openaiKey: config.ai?.apiKey
+          });
+          openrouterApiKey = embeddingCreds.openrouterApiKey;
+          openaiApiKey = embeddingCreds.openaiApiKey;
+        }
+      } else if (embeddingProvider === 'lmstudio') {
+        log('Checking LM Studio...');
+        const { isLMStudioRunning, getLMStudioUrl } = await import('@cv-git/core');
+        const lmUrl = getLMStudioUrl();
+        if (await isLMStudioRunning(lmUrl)) {
+          lmstudioUrl = lmUrl;
+          log(`Using LM Studio at ${lmUrl}...`);
+        } else {
+          log('LM Studio not available, checking cloud providers...');
           const embeddingCreds = await getEmbeddingCredentials({
             openRouterKey: config.embedding?.apiKey,
             openaiKey: config.ai?.apiKey
@@ -113,21 +129,23 @@ export function contextCommand(): Command {
         openaiApiKey = embeddingCreds.openaiApiKey;
       }
 
-      if (!ollamaUrl && !openrouterApiKey && !openaiApiKey) {
+      if (!ollamaUrl && !lmstudioUrl && !openrouterApiKey && !openaiApiKey) {
         if (spinner) spinner.fail(chalk.red('No embedding provider available'));
-        else console.error('Error: Run `cv auth setup openrouter` or ensure Ollama is running');
+        else console.error('Error: Run `cv ai setup` or ensure Ollama/LM Studio is running');
         process.exit(1);
       }
 
       // Initialize managers
       log('Connecting to vector database...');
+      const useLocal = !!(ollamaUrl || lmstudioUrl);
       const vector = createVectorManager({
         url: config.vector.url,
         ollamaUrl,
-        openrouterApiKey: ollamaUrl ? undefined : openrouterApiKey,
-        openaiApiKey: ollamaUrl ? undefined : openaiApiKey,
+        lmstudioUrl,
+        openrouterApiKey: useLocal ? undefined : openrouterApiKey,
+        openaiApiKey: useLocal ? undefined : openaiApiKey,
         collections: config.vector.collections,
-        vectorSize: embeddingProvider === 'ollama' ? 768 : 1536
+        vectorSize: (embeddingProvider === 'ollama' || embeddingProvider === 'lmstudio') ? 768 : 1536
       });
       await vector.connect();
 

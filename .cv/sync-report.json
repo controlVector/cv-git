@@ -1,13 +1,19 @@
 {
-  "timestamp": 1769378208472,
-  "duration": 25.963,
+  "timestamp": 1774623584634,
+  "duration": 5.54,
   "type": "delta",
   "success": true,
   "stats": {
-    "filesProcessed": 83,
+    "filesProcessed": 7,
     "filesFailed": 0,
-    "symbolsCreated": 2704,
-    "vectorsCreated": 39038
+    "symbolsCreated": 3035,
+    "vectorsCreated": 0
+  },
+  "summaryStats": {
+    "generated": 45,
+    "skipped": 0,
+    "llmCalls": 0,
+    "estimatedCostCents": 0
   },
   "errors": [],
   "systemInfo": {

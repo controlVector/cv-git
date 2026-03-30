@@ -2,6 +2,18 @@
 
 All notable changes to CV-Git will be documented in this file.
 
+## [1.3.1] — 2026-03-30
+
+### Fixed
+- LM Studio now wired into the actual embedding pipeline (VectorManager, init, sync, find, context, summary)
+- Added `lmstudio` to `EmbeddingProvider` type and preference picker choices
+- VectorManager: added `lmstudioUrl` option, `initLMStudio()`, `embedWithLMStudio()`, `isLMStudioAvailable()`
+- Init command `--embedding-provider` now accepts `lmstudio`
+- All embedding-consuming commands (sync, find, context, summary) handle `lmstudio` provider
+- Preference picker shows LM Studio as a local embedding option alongside Ollama
+
+---
+
 ## [1.3.0] — 2026-03-27
 
 ### Added

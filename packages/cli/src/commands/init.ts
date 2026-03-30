@@ -58,7 +58,7 @@ export function initCommand(): Command {
     .option('-y, --yes', 'Non-interactive mode with defaults (for AI/automation)')
     .option('--platform <platform>', 'Git platform: github, gitlab, bitbucket (default: github)')
     .option('--ai-provider <provider>', 'AI provider: anthropic, openai, openrouter (default: anthropic)')
-    .option('--embedding-provider <provider>', 'Embedding provider: ollama, openai, openrouter (default: ollama)');
+    .option('--embedding-provider <provider>', 'Embedding provider: ollama, lmstudio, openai, openrouter (default: ollama)');
 
   addGlobalOptions(cmd);
 
@@ -90,7 +90,7 @@ export function initCommand(): Command {
           preferences = {
             gitPlatform: (options.platform || 'github') as 'github' | 'gitlab' | 'bitbucket',
             aiProvider: (options.aiProvider || 'anthropic') as 'anthropic' | 'openai' | 'openrouter',
-            embeddingProvider: (options.embeddingProvider || 'ollama') as 'ollama' | 'openai' | 'openrouter',
+            embeddingProvider: (options.embeddingProvider || 'ollama') as 'ollama' | 'lmstudio' | 'openai' | 'openrouter',
           };
           // Save preferences in non-interactive mode too
           if (!hasPrefs) {
@@ -122,11 +122,10 @@ export function initCommand(): Command {
           console.log(chalk.green('Preferences saved!'));
           console.log();
 
-          // If using Ollama for embeddings, set it up
+          // Set up local embedding provider if selected
           if (preferences.embeddingProvider === 'ollama') {
             const ollamaResult = await setupOllamaEmbeddings();
 
-            // If system can't handle local AI, offer to switch
             if (ollamaResult === 'cloud-recommended') {
               const { switchToCloud } = await inquirer.prompt([{
                 type: 'confirm',
@@ -142,6 +141,18 @@ export function initCommand(): Command {
                 console.log(chalk.gray('Run: cv auth setup openrouter'));
                 console.log();
               }
+            }
+          } else if (preferences.embeddingProvider === 'lmstudio') {
+            // Verify LM Studio is running
+            const { isLMStudioRunning, getLMStudioUrl } = await import('@cv-git/core');
+            const lmUrl = getLMStudioUrl();
+            if (await isLMStudioRunning(lmUrl)) {
+              console.log(chalk.green(`LM Studio detected at ${lmUrl}`));
+            } else {
+              console.log(chalk.yellow('LM Studio not running.'));
+              console.log(chalk.gray('Start it with: lms server start'));
+              console.log(chalk.gray('Or open LM Studio and enable the local server.'));
+              console.log();
             }
           }
         } else {

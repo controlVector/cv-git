@@ -29,7 +29,7 @@ export interface VectorCollections {
 }
 
 // Embedding model configurations with their vector dimensions
-const EMBEDDING_MODELS: Record<string, { dimension: number; provider: 'openai' | 'openrouter' | 'ollama' }> = {
+const EMBEDDING_MODELS: Record<string, { dimension: number; provider: 'openai' | 'openrouter' | 'ollama' | 'lmstudio' }> = {
   // OpenAI models (direct)
   'text-embedding-3-small': { dimension: 1536, provider: 'openai' },
   'text-embedding-3-large': { dimension: 3072, provider: 'openai' },
@@ -42,7 +42,11 @@ const EMBEDDING_MODELS: Record<string, { dimension: number; provider: 'openai' |
   'nomic-embed-text': { dimension: 768, provider: 'ollama' },
   'mxbai-embed-large': { dimension: 1024, provider: 'ollama' },
   'all-minilm': { dimension: 384, provider: 'ollama' },
-  'snowflake-arctic-embed': { dimension: 1024, provider: 'ollama' }
+  'snowflake-arctic-embed': { dimension: 1024, provider: 'ollama' },
+  // LM Studio models (local, OpenAI-compatible API)
+  // Model IDs are runtime-fetched; these are common defaults
+  'nomic-ai/nomic-embed-text-v1.5-gguf': { dimension: 768, provider: 'lmstudio' },
+  'text-embedding-bge-small-en-v1.5': { dimension: 384, provider: 'lmstudio' },
 };
 
 // Model fallback order for OpenRouter (preferred)
@@ -80,6 +84,8 @@ export interface VectorManagerOptions {
   embeddingModel?: string;
   /** Ollama URL for local embeddings */
   ollamaUrl?: string;
+  /** LM Studio URL for local embeddings (default: http://localhost:1234/v1) */
+  lmstudioUrl?: string;
   /** Enable content-addressed embedding cache */
   enableCache?: boolean;
   /** Cache directory (default: .cv/embeddings) */
@@ -94,8 +100,9 @@ export class VectorManager {
   private openrouter: OpenAI | null = null;
   private collections: VectorCollections;
   private embeddingModel: string;
-  private embeddingProvider: 'openai' | 'openrouter' | 'ollama';
+  private embeddingProvider: 'openai' | 'openrouter' | 'ollama' | 'lmstudio';
   private ollamaUrl: string;
+  private lmstudioUrl: string;
   private openrouterApiKey?: string;
   private openaiApiKey?: string;
   private vectorSize: number;
@@ -134,12 +141,12 @@ export class VectorManager {
     this.url = opts.url;
     this.repoId = opts.repoId;
     this.ollamaUrl = opts.ollamaUrl || process.env.OLLAMA_URL || process.env.CV_OLLAMA_URL || 'http://127.0.0.1:11434';
+    this.lmstudioUrl = opts.lmstudioUrl || process.env.CV_LMSTUDIO_URL || process.env.LMSTUDIO_URL || 'http://127.0.0.1:1234/v1';
 
-    // If Ollama URL is explicitly provided, don't auto-detect cloud API keys from env
-    // This ensures local-first operation when Ollama is configured
-    const useOllama = !!opts.ollamaUrl;
-    this.openaiApiKey = useOllama ? undefined : opts.openaiApiKey;
-    this.openrouterApiKey = useOllama ? undefined : (opts.openrouterApiKey || process.env.OPENROUTER_API_KEY);
+    // If a local provider URL is explicitly provided, don't auto-detect cloud API keys from env
+    const useLocal = !!opts.ollamaUrl || !!opts.lmstudioUrl;
+    this.openaiApiKey = useLocal ? undefined : opts.openaiApiKey;
+    this.openrouterApiKey = useLocal ? undefined : (opts.openrouterApiKey || process.env.OPENROUTER_API_KEY);
 
     // Collection naming: if repoId provided, use repo-specific names for isolation
     // Otherwise use explicit collections or defaults
@@ -168,12 +175,14 @@ export class VectorManager {
     this.cacheDir = opts.cacheDir ?? '.cv/embeddings';
 
     // Default model based on available provider
-    // Ollama (local) > OpenRouter > OpenAI
-    const defaultModel = useOllama
-      ? 'nomic-embed-text'
-      : this.openrouterApiKey
-        ? 'openai/text-embedding-3-small'
-        : 'text-embedding-3-small';
+    // Local (Ollama/LM Studio) > OpenRouter > OpenAI
+    const defaultModel = opts.lmstudioUrl
+      ? 'nomic-ai/nomic-embed-text-v1.5-gguf'
+      : opts.ollamaUrl
+        ? 'nomic-embed-text'
+        : this.openrouterApiKey
+          ? 'openai/text-embedding-3-small'
+          : 'text-embedding-3-small';
 
     this.embeddingModel = opts.embeddingModel || process.env.CV_EMBEDDING_MODEL || defaultModel;
 
@@ -205,8 +214,11 @@ export class VectorManager {
       await this.client.getCollections();
 
       // Initialize embedding provider based on what's available
-      // Priority: OpenRouter > OpenAI > Ollama
-      if (this.embeddingProvider === 'ollama') {
+      // Priority: Explicit local > OpenRouter > OpenAI > auto-detect local
+      if (this.embeddingProvider === 'lmstudio') {
+        // Explicit LM Studio request — uses OpenAI-compatible API
+        await this.initLMStudio();
+      } else if (this.embeddingProvider === 'ollama') {
         // Explicit Ollama request
         await this.initOllama();
       } else if (this.openrouterApiKey) {
@@ -229,17 +241,23 @@ export class VectorManager {
           this.embeddingModel = this.embeddingModel.replace('openai/', '');
         }
       } else {
-        // No cloud API keys - try Ollama
+        // No cloud API keys - try local providers
         const ollamaAvailable = await this.isOllamaAvailable();
         if (ollamaAvailable) {
           await this.initOllama();
         } else {
-          throw new VectorError(
-            'No embedding API key provided.\n' +
-            'Run: cv auth setup openrouter (recommended)\n' +
-            'Or:  cv auth setup openai\n' +
-            'Or:  Start Ollama for local embeddings'
-          );
+          const lmstudioAvailable = await this.isLMStudioAvailable();
+          if (lmstudioAvailable) {
+            await this.initLMStudio();
+          } else {
+            throw new VectorError(
+              'No embedding provider available.\n' +
+              'Run: cv ai setup (configure local AI)\n' +
+              'Or:  cv auth setup openrouter (cloud)\n' +
+              'Or:  Start Ollama: ollama serve\n' +
+              'Or:  Start LM Studio: lms server start'
+            );
+          }
         }
       }
 
@@ -623,10 +641,162 @@ export class VectorManager {
   }
 
   /**
+   * Check if LM Studio is available
+   */
+  private async isLMStudioAvailable(): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.lmstudioUrl}/models`, {
+        signal: AbortSignal.timeout(2000)
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Initialize LM Studio and verify embedding model availability
+   */
+  private async initLMStudio(): Promise<void> {
+    try {
+      const response = await fetch(`${this.lmstudioUrl}/models`, {
+        signal: AbortSignal.timeout(5000)
+      });
+
+      if (!response.ok) {
+        throw new Error('LM Studio not responding');
+      }
+
+      const data = await response.json() as { data?: Array<{ id: string }> };
+      const availableModels = data.data?.map(m => m.id) || [];
+
+      // Check if our model is available
+      const modelFound = availableModels.some(m =>
+        m === this.embeddingModel ||
+        m.toLowerCase().includes('embed') ||
+        m.toLowerCase().includes('bge')
+      );
+
+      if (!modelFound && availableModels.length > 0) {
+        // Pick the first embedding-like model available
+        const embedModel = availableModels.find(m =>
+          m.toLowerCase().includes('embed') || m.toLowerCase().includes('bge')
+        );
+        if (embedModel) {
+          console.log(`LM Studio: Using ${embedModel} for embeddings`);
+          this.embeddingModel = embedModel;
+        } else {
+          // No embedding model — use the first available model
+          console.log(`LM Studio: No embedding-specific model found, using ${availableModels[0]}`);
+          this.embeddingModel = availableModels[0];
+        }
+      }
+
+      this.embeddingProvider = 'lmstudio';
+
+    } catch (error: any) {
+      if (error.message.includes('fetch failed') || error.message.includes('ECONNREFUSED')) {
+        throw new VectorError(
+          'LM Studio not running. Start with: lms server start\n' +
+          'Or open LM Studio and enable the local server.'
+        );
+      }
+      throw new VectorError(`Failed to initialize LM Studio: ${error.message}`, error);
+    }
+  }
+
+  /**
+   * Generate embedding using LM Studio (OpenAI-compatible /v1/embeddings)
+   */
+  private async embedWithLMStudio(text: string): Promise<number[]> {
+    const maxLength = 500;
+    const truncatedText = text.length > maxLength
+      ? text.substring(0, maxLength) + '...'
+      : text;
+
+    if (process.env.CV_DEBUG) {
+      console.log(`[VectorManager] LM Studio embedding request: url=${this.lmstudioUrl}, model=${this.embeddingModel}, textLen=${text.length}${text.length > maxLength ? ' (truncated)' : ''}`);
+    }
+
+    const response = await fetch(`${this.lmstudioUrl}/embeddings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer lm-studio',
+      },
+      body: JSON.stringify({
+        model: this.embeddingModel,
+        input: [truncatedText],
+      }),
+      signal: AbortSignal.timeout(60000)
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`LM Studio embedding failed: ${error}`);
+    }
+
+    const data = await response.json() as { data?: Array<{ embedding: number[] }> };
+    const embedding = data.data?.[0]?.embedding;
+
+    if (!embedding) {
+      throw new Error('LM Studio returned empty embedding');
+    }
+
+    if (process.env.CV_DEBUG) {
+      console.log(`[VectorManager] LM Studio embedding success: dim=${embedding.length}`);
+    }
+
+    return embedding;
+  }
+
+  /**
+   * Generate embeddings for multiple texts using LM Studio (sequential with progress)
+   */
+  private async embedBatchWithLMStudio(texts: string[]): Promise<number[][]> {
+    const embeddings: number[][] = [];
+    const total = texts.length;
+    let lastProgress = 0;
+
+    for (let i = 0; i < texts.length; i++) {
+      let lastError: Error | null = null;
+      for (let retry = 0; retry < 3; retry++) {
+        try {
+          const embedding = await this.embedWithLMStudio(texts[i]);
+          embeddings.push(embedding);
+          lastError = null;
+          break;
+        } catch (error: any) {
+          lastError = error;
+          if (retry < 2) {
+            await new Promise(r => setTimeout(r, 1000 * (retry + 1)));
+          }
+        }
+      }
+
+      if (lastError) throw lastError;
+
+      const progress = Math.floor((i + 1) / total * 100);
+      if (progress >= lastProgress + 10 || i === total - 1) {
+        console.log(`  LM Studio embeddings: ${i + 1}/${total} (${progress}%)`);
+        lastProgress = progress;
+      }
+    }
+
+    return embeddings;
+  }
+
+  /**
    * Try to generate embeddings with automatic model fallback (including OpenRouter and Ollama)
    */
   private async tryEmbeddingWithFallback(input: string | string[]): Promise<{ embeddings: number[][]; model: string }> {
-    // If using Ollama provider, use it directly
+    // If using a local provider, use it directly
+    if (this.embeddingProvider === 'lmstudio') {
+      const texts = Array.isArray(input) ? input : [input];
+      const embeddings = await this.embedBatchWithLMStudio(texts);
+      return { embeddings, model: this.embeddingModel };
+    }
+
     if (this.embeddingProvider === 'ollama') {
       const texts = Array.isArray(input) ? input : [input];
       const embeddings = await this.embedBatchWithOllama(texts);

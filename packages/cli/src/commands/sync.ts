@@ -138,6 +138,7 @@ export function syncCommand(): Command {
         // Vector manager - check embedding provider preference
         let vector = undefined;
         let ollamaUrl: string | undefined;
+        let lmstudioUrl: string | undefined;
         let openaiApiKey = config.ai.apiKey || process.env.OPENAI_API_KEY;
         let openrouterApiKey = process.env.OPENROUTER_API_KEY;
 
@@ -216,6 +217,25 @@ export function syncCommand(): Command {
               output.info('Continuing without vector embeddings...');
             }
           }
+        } else if (embeddingProvider === 'lmstudio') {
+          // LM Studio for local embeddings
+          const { isLMStudioRunning, getLMStudioUrl } = await import('@cv-git/core');
+          const lmUrl = getLMStudioUrl();
+          const lmAvailable = await isLMStudioRunning(lmUrl);
+          if (lmAvailable) {
+            lmstudioUrl = lmUrl;
+            output.info(`Using LM Studio at ${lmUrl}`);
+            process.env.CV_EMBEDDING_PROVIDER = 'lmstudio';
+            process.env.CV_LMSTUDIO_URL = lmUrl;
+          } else {
+            output.warn('LM Studio not running. Start with: lms server start');
+            if (openrouterApiKey) {
+              output.info('Falling back to OpenRouter for embeddings...');
+              if (!process.env.OPENROUTER_API_KEY) {
+                process.env.OPENROUTER_API_KEY = openrouterApiKey;
+              }
+            }
+          }
         } else if (embeddingProvider === 'openrouter' && openrouterApiKey) {
           // Use OpenRouter for embeddings
           if (!process.env.OPENROUTER_API_KEY) {
@@ -228,7 +248,7 @@ export function syncCommand(): Command {
 
         // Set up Qdrant if we have any embedding capability
         const skipEmbeddings = options.embeddings === false;
-        const hasEmbeddingCapability = ollamaUrl || openaiApiKey || openrouterApiKey;
+        const hasEmbeddingCapability = ollamaUrl || lmstudioUrl || openaiApiKey || openrouterApiKey;
 
         if (skipEmbeddings) {
           output.info('Skipping vector embeddings (--no-embeddings)');
@@ -259,14 +279,16 @@ export function syncCommand(): Command {
             try {
               spinner = output.spinner('Connecting to Qdrant...').start();
               // Create vector manager with repo-specific collections for isolation
+              const useLocal = !!(ollamaUrl || lmstudioUrl);
               vector = createVectorManager({
                 url: qdrantUrl,
-                repoId,  // Use repo-specific collections for isolation
+                repoId,
                 ollamaUrl,
-                openrouterApiKey: ollamaUrl ? undefined : openrouterApiKey,
-                openaiApiKey: ollamaUrl ? undefined : openaiApiKey,
-                cacheDir: path.join(repoRoot, '.cv', 'embeddings'),  // Content-addressed cache
-                vectorSize: embeddingProvider === 'ollama' ? 768 : 1536,  // nomic-embed-text is 768 dims
+                lmstudioUrl,
+                openrouterApiKey: useLocal ? undefined : openrouterApiKey,
+                openaiApiKey: useLocal ? undefined : openaiApiKey,
+                cacheDir: path.join(repoRoot, '.cv', 'embeddings'),
+                vectorSize: (embeddingProvider === 'ollama' || embeddingProvider === 'lmstudio') ? 768 : 1536,
               });
               await vector.connect();
 

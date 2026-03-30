@@ -66,7 +66,7 @@ export interface FeaturesConfig {
  * These are the user's preferred choices for interfaces/providers
  */
 export type AIProvider = 'anthropic' | 'openai' | 'openrouter';
-export type EmbeddingProvider = 'ollama' | 'openai' | 'openrouter';
+export type EmbeddingProvider = 'ollama' | 'lmstudio' | 'openai' | 'openrouter';
 export type GitPlatformType = 'github' | 'gitlab' | 'bitbucket';
 
 export interface UserPreferences {

@@ -54,18 +54,17 @@ export function findCommand(): Command {
 
         // Get embedding credentials
         let ollamaUrl: string | undefined;
+        let lmstudioUrl: string | undefined;
         let openrouterApiKey: string | undefined;
         let openaiApiKey: string | undefined;
 
         if (embeddingProvider === 'ollama') {
           spinner.text = 'Checking Ollama...';
-          // Try to ensure Ollama is available
           const ollamaInfo = await ensureOllama({ silent: true });
           if (ollamaInfo) {
             ollamaUrl = ollamaInfo.url;
             spinner.text = `Using Ollama at ${ollamaUrl}...`;
           } else {
-            // Fall back to cloud providers
             spinner.text = 'Ollama not available, checking cloud providers...';
             const embeddingCreds = await getEmbeddingCredentials({
               openRouterKey: config.embedding?.apiKey,
@@ -73,14 +72,24 @@ export function findCommand(): Command {
             });
             openrouterApiKey = embeddingCreds.openrouterApiKey;
             openaiApiKey = embeddingCreds.openaiApiKey;
-            if (openrouterApiKey) {
-              spinner.text = 'Using OpenRouter for embeddings (Ollama fallback)...';
-            } else if (openaiApiKey) {
-              spinner.text = 'Using OpenAI for embeddings (Ollama fallback)...';
-            }
+          }
+        } else if (embeddingProvider === 'lmstudio') {
+          spinner.text = 'Checking LM Studio...';
+          const { isLMStudioRunning, getLMStudioUrl } = await import('@cv-git/core');
+          const lmUrl = getLMStudioUrl();
+          if (await isLMStudioRunning(lmUrl)) {
+            lmstudioUrl = lmUrl;
+            spinner.text = `Using LM Studio at ${lmUrl}...`;
+          } else {
+            spinner.text = 'LM Studio not available, checking cloud providers...';
+            const embeddingCreds = await getEmbeddingCredentials({
+              openRouterKey: config.embedding?.apiKey,
+              openaiKey: config.ai?.apiKey
+            });
+            openrouterApiKey = embeddingCreds.openrouterApiKey;
+            openaiApiKey = embeddingCreds.openaiApiKey;
           }
         } else {
-          // Use cloud provider as configured
           const embeddingCreds = await getEmbeddingCredentials({
             openRouterKey: config.embedding?.apiKey,
             openaiKey: config.ai?.apiKey
@@ -92,13 +101,15 @@ export function findCommand(): Command {
 
         // Initialize vector manager with proper credentials
         spinner.text = 'Connecting to Qdrant...';
+        const useLocal = !!(ollamaUrl || lmstudioUrl);
         const vector = createVectorManager({
           url: config.vector.url,
           ollamaUrl,
-          openrouterApiKey: ollamaUrl ? undefined : openrouterApiKey,
-          openaiApiKey: ollamaUrl ? undefined : openaiApiKey,
+          lmstudioUrl,
+          openrouterApiKey: useLocal ? undefined : openrouterApiKey,
+          openaiApiKey: useLocal ? undefined : openaiApiKey,
           collections: config.vector.collections,
-          vectorSize: embeddingProvider === 'ollama' ? 768 : 1536
+          vectorSize: (embeddingProvider === 'ollama' || embeddingProvider === 'lmstudio') ? 768 : 1536
         });
 
         await vector.connect();
