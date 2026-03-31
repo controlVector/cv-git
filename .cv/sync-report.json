@@ -1,16 +1,16 @@
 {
-  "timestamp": 1774623584634,
-  "duration": 5.54,
+  "timestamp": 1774904856158,
+  "duration": 5.375,
   "type": "delta",
   "success": true,
   "stats": {
-    "filesProcessed": 7,
+    "filesProcessed": 10,
     "filesFailed": 0,
-    "symbolsCreated": 3035,
+    "symbolsCreated": 3043,
     "vectorsCreated": 0
   },
   "summaryStats": {
-    "generated": 45,
+    "generated": 67,
     "skipped": 0,
     "llmCalls": 0,
     "estimatedCostCents": 0

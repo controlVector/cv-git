@@ -591,7 +591,9 @@ export class VectorManager {
     let embedding: number[];
 
     // Use the appropriate provider
-    if (this.embeddingProvider === 'ollama') {
+    if (this.embeddingProvider === 'lmstudio') {
+      embedding = await this.embedWithLMStudio(text);
+    } else if (this.embeddingProvider === 'ollama') {
       embedding = await this.embedWithOllama(text);
     } else if (this.embeddingProvider === 'openrouter') {
       if (!this.openrouter) {
@@ -670,27 +672,41 @@ export class VectorManager {
       const data = await response.json() as { data?: Array<{ id: string }> };
       const availableModels = data.data?.map(m => m.id) || [];
 
-      // Check if our model is available
-      const modelFound = availableModels.some(m =>
-        m === this.embeddingModel ||
-        m.toLowerCase().includes('embed') ||
-        m.toLowerCase().includes('bge')
-      );
+      // Check if configured model is available
+      const exactMatch = availableModels.find(m => m === this.embeddingModel);
+      if (exactMatch) {
+        // Configured model found
+      } else {
+        // Try to find an embedding-specific model
+        const embedModel = availableModels.find(m => {
+          const lower = m.toLowerCase();
+          return lower.includes('embed') || lower.includes('bge') || lower.includes('nomic');
+        });
 
-      if (!modelFound && availableModels.length > 0) {
-        // Pick the first embedding-like model available
-        const embedModel = availableModels.find(m =>
-          m.toLowerCase().includes('embed') || m.toLowerCase().includes('bge')
-        );
         if (embedModel) {
-          console.log(`LM Studio: Using ${embedModel} for embeddings`);
+          if (this.embeddingModel !== embedModel) {
+            console.log(`LM Studio: Using embedding model ${embedModel}`);
+          }
           this.embeddingModel = embedModel;
-        } else {
-          // No embedding model — use the first available model
-          console.log(`LM Studio: No embedding-specific model found, using ${availableModels[0]}`);
+        } else if (availableModels.length > 0) {
+          console.warn(
+            `LM Studio: No embedding model found. Loaded models are chat-only.\n` +
+            `  Load an embedding model in LM Studio (e.g., nomic-embed-text-v1.5) for best results.\n` +
+            `  Using ${availableModels[0]} as fallback — embeddings may be low quality.`
+          );
           this.embeddingModel = availableModels[0];
+        } else {
+          throw new Error('LM Studio has no models loaded. Load a model in LM Studio first.');
         }
       }
+
+      // Update vector size from known models, or probe with a test embedding
+      const knownModel = EMBEDDING_MODELS[this.embeddingModel];
+      if (knownModel) {
+        this.vectorSize = knownModel.dimension;
+      }
+      // If model not in map, vectorSize stays at whatever the constructor set.
+      // The first actual embedding will reveal the true dimension.
 
       this.embeddingProvider = 'lmstudio';
 
@@ -885,18 +901,36 @@ export class VectorManager {
       }
     }
 
-    // Try Ollama as last resort
-    if (allOpenAIFailed && await this.isOllamaAvailable()) {
-      console.log('Trying Ollama as fallback...');
-      try {
-        await this.initOllama();
-        this.embeddingProvider = 'ollama';
-        const texts = Array.isArray(input) ? input : [input];
-        const embeddings = await this.embedBatchWithOllama(texts);
-        this.modelValidated = true;
-        return { embeddings, model: this.embeddingModel };
-      } catch (ollamaError: any) {
-        console.log(`Ollama fallback failed: ${ollamaError.message}`);
+    // Try local providers as last resort
+    if (allOpenAIFailed) {
+      // Try Ollama
+      if (await this.isOllamaAvailable()) {
+        console.log('Trying Ollama as fallback...');
+        try {
+          await this.initOllama();
+          this.embeddingProvider = 'ollama';
+          const texts = Array.isArray(input) ? input : [input];
+          const embeddings = await this.embedBatchWithOllama(texts);
+          this.modelValidated = true;
+          return { embeddings, model: this.embeddingModel };
+        } catch (ollamaError: any) {
+          console.log(`Ollama fallback failed: ${ollamaError.message}`);
+        }
+      }
+
+      // Try LM Studio
+      if (await this.isLMStudioAvailable()) {
+        console.log('Trying LM Studio as fallback...');
+        try {
+          await this.initLMStudio();
+          this.embeddingProvider = 'lmstudio';
+          const texts = Array.isArray(input) ? input : [input];
+          const embeddings = await this.embedBatchWithLMStudio(texts);
+          this.modelValidated = true;
+          return { embeddings, model: this.embeddingModel };
+        } catch (lmstudioError: any) {
+          console.log(`LM Studio fallback failed: ${lmstudioError.message}`);
+        }
       }
     }
 
@@ -927,8 +961,12 @@ export class VectorManager {
     let newEmbeddings: number[][] = [];
 
     if (textsToEmbed.length > 0) {
+      // If using LM Studio, use LM Studio batch
+      if (this.embeddingProvider === 'lmstudio') {
+        newEmbeddings = await this.embedBatchWithLMStudio(textsToEmbed);
+      }
       // If using Ollama, use Ollama batch
-      if (this.embeddingProvider === 'ollama') {
+      else if (this.embeddingProvider === 'ollama') {
         newEmbeddings = await this.embedBatchWithOllama(textsToEmbed);
       }
       // If using OpenRouter, use OpenRouter batch with retry logic

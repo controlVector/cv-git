@@ -2,6 +2,18 @@
 
 All notable changes to CV-Git will be documented in this file.
 
+## [1.3.2] — 2026-03-30
+
+### Fixed
+- **CRITICAL**: LM Studio embeddings now actually work end-to-end
+  - Added `lmstudio` branch to `VectorManager.embed()` (single-text path used by search)
+  - Added `lmstudio` branch to `VectorManager.embedBatch()` (batch path used by sync)
+  - Added LM Studio to fallback chain in `tryEmbeddingWithFallback()`
+  - Improved `initLMStudio()` model detection with clear warnings for chat-only models
+  - Vector dimension now correctly sourced from EMBEDDING_MODELS for known LM Studio models
+
+---
+
 ## [1.3.1] — 2026-03-30
 
 ### Fixed
