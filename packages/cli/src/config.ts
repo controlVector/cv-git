@@ -67,7 +67,7 @@ export interface FeaturesConfig {
  */
 export type AIProvider = 'anthropic' | 'openai' | 'openrouter';
 export type EmbeddingProvider = 'ollama' | 'lmstudio' | 'openai' | 'openrouter';
-export type GitPlatformType = 'github' | 'gitlab' | 'bitbucket';
+export type GitPlatformType = 'cv-hub' | 'github' | 'gitlab' | 'bitbucket';
 
 export interface UserPreferences {
   version: string;

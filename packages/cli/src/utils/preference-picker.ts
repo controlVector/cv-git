@@ -45,6 +45,10 @@ export async function runPreferencePicker(
       message: 'Which git platform do you primarily use?',
       choices: [
         {
+          name: `${chalk.white('CV-Hub')} ${chalk.gray('- hub.controlvector.io (recommended)')}`,
+          value: 'cv-hub',
+        },
+        {
           name: `${chalk.white('GitHub')} ${chalk.gray('- github.com')}`,
           value: 'github',
         },
@@ -57,7 +61,7 @@ export async function runPreferencePicker(
           value: 'bitbucket',
         },
       ],
-      default: existingPrefs?.gitPlatform || 'github',
+      default: existingPrefs?.gitPlatform || 'cv-hub',
     },
     {
       type: 'list',
@@ -117,6 +121,7 @@ export function displayPreferenceSummary(prefs: PreferenceChoices): void {
   console.log(chalk.gray('─'.repeat(40)));
 
   const platformNames: Record<GitPlatformType, string> = {
+    'cv-hub': 'CV-Hub',
     github: 'GitHub',
     gitlab: 'GitLab',
     bitbucket: 'Bitbucket',

@@ -45,6 +45,7 @@ export function preferencesCommand(): Command {
       console.log(chalk.bold('\nUser Preferences:\n'));
 
       const platformNames: Record<GitPlatformType, string> = {
+        'cv-hub': 'CV-Hub',
         github: 'GitHub',
         gitlab: 'GitLab',
         bitbucket: 'Bitbucket',
