@@ -12,7 +12,7 @@
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { join, basename } from 'node:path';
 
 export interface InitOptions {
@@ -108,7 +108,20 @@ export async function initRepo(options: InitOptions): Promise<InitResult> {
     gitInitialized = true;
   }
 
-  // 2. Ensure .cv directory
+  // 2. Ensure .gitignore blocks credentials
+  const gitignorePath = join(repoPath, '.gitignore');
+  const credentialIgnores = '# Credentials and secrets (auto-added)\n.env\n.env.*\n.claude/\n.claude.json\n.credentials*\n*.pem\n*.key\n.ssh/\n.gnupg/\n.npm/\n.config/\n.zsh_history\n.bash_history\nnode_modules/\n.DS_Store\n';
+  try {
+    let existing = '';
+    try { existing = readFileSync(gitignorePath, 'utf-8'); } catch {}
+    if (!existing.includes('.claude/')) {
+      const prefix = existing && !existing.endsWith('\n') ? '\n' : '';
+      writeFileSync(gitignorePath, existing + prefix + credentialIgnores);
+      log('Added credential protection to .gitignore');
+    }
+  } catch { /* best effort */ }
+
+  // 3. Ensure .cv directory
   const cvDir = join(repoPath, '.cv');
   if (!existsSync(cvDir)) {
     mkdirSync(cvDir, { recursive: true });
