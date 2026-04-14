@@ -67,6 +67,7 @@ import { stashCommand } from './commands/stash.js';
 import { mergeCommand } from './commands/merge.js';
 import { fetchCommand } from './commands/fetch.js';
 import { remoteCommand } from './commands/remote.js';
+import { repoCommand } from './commands/repo.js';
 import { resetCommand } from './commands/reset.js';
 import { revertCommand } from './commands/revert.js';
 import { tagCommand } from './commands/tag.js';
@@ -129,6 +130,7 @@ program.addCommand(stashCommand());           // Git stash wrapper
 program.addCommand(mergeCommand());           // Git merge with conflict help
 program.addCommand(fetchCommand());           // Git fetch wrapper
 program.addCommand(remoteCommand());          // Git remote wrapper
+program.addCommand(repoCommand());            // CV-Hub repo management (cv repo)
 program.addCommand(resetCommand());           // Git reset wrapper
 program.addCommand(revertCommand());          // Git revert wrapper
 program.addCommand(tagCommand());             // Git tag wrapper
