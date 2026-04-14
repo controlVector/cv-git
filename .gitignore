@@ -78,3 +78,4 @@ temp/
 .cv/vectors/
 .cv/codebase-summary.json
 .cv/manifold/
+.npmrc

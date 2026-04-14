@@ -156,26 +156,68 @@ function getRemoteUrl(remote: string = 'origin'): string | null {
  * Get stored credential for a platform
  */
 async function getCredentialForPlatform(platform: GitPlatform): Promise<{ username: string; token: string } | null> {
-  const credentials = new CredentialManager();
-  await credentials.init();
+  // 1. Try CredentialManager (keychain/encrypted file — set by cv auth setup)
+  try {
+    const credentials = new CredentialManager();
+    await credentials.init();
 
-  // List all credentials and find one for this platform
-  const all = await credentials.list();
-  const gitCred = all.find(c =>
-    c.type === CredentialType.GIT_PLATFORM_TOKEN &&
-    c.metadata?.platform === platform
-  );
+    const all = await credentials.list();
+    const gitCred = all.find(c =>
+      c.type === CredentialType.GIT_PLATFORM_TOKEN &&
+      c.metadata?.platform === platform
+    );
 
-  if (!gitCred) return null;
+    if (gitCred) {
+      const full = await credentials.retrieve(gitCred.type, gitCred.name);
+      if (full && 'token' in full && 'username' in full) {
+        return {
+          username: (full as any).username,
+          token: (full as any).token
+        };
+      }
+    }
+  } catch {
+    // CredentialManager not available — fall through to file-based credentials
+  }
 
-  // Retrieve the full credential
-  const full = await credentials.retrieve(gitCred.type, gitCred.name);
-  if (!full || !('token' in full) || !('username' in full)) return null;
+  // 2. For CV-Hub: check shared credentials file (set by cva setup)
+  if (platform === GitPlatform.CV_HUB || platform === GitPlatform.CONTROLFAB) {
+    try {
+      const sharedPath = path.join(os.homedir(), '.config', 'controlvector', 'credentials.json');
+      if (fs.existsSync(sharedPath)) {
+        const shared = JSON.parse(fs.readFileSync(sharedPath, 'utf-8'));
+        if (shared.token && shared.username) {
+          return { username: shared.username, token: shared.token };
+        }
+      }
+    } catch { /* fall through */ }
 
-  return {
-    username: (full as any).username,
-    token: (full as any).token
-  };
+    // 3. Check cv-hub credentials file (legacy format)
+    try {
+      const cvHubPaths = [
+        path.join(os.homedir(), '.config', 'cv-hub', 'credentials'),
+      ];
+      for (const credPath of cvHubPaths) {
+        if (fs.existsSync(credPath)) {
+          const content = fs.readFileSync(credPath, 'utf-8');
+          const tokenMatch = content.match(/CV_HUB_PAT=(.+)/);
+          if (tokenMatch) {
+            const token = tokenMatch[1].trim();
+            // Try to get username from shared creds or use 'user'
+            let username = 'user';
+            try {
+              const sharedPath = path.join(os.homedir(), '.config', 'controlvector', 'credentials.json');
+              const shared = JSON.parse(fs.readFileSync(sharedPath, 'utf-8'));
+              if (shared.username) username = shared.username;
+            } catch {}
+            return { username, token };
+          }
+        }
+      }
+    } catch { /* fall through */ }
+  }
+
+  return null;
 }
 
 /**
