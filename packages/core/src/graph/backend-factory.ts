@@ -25,6 +25,8 @@ export interface CreateBackendOptions {
 export interface BackendResult {
   backend: IGraphBackend;
   type: BackendType;
+  /** True if the factory has already called connect() on the backend. */
+  preConnected: boolean;
 }
 
 /**
@@ -55,30 +57,32 @@ export async function createBackend(options: CreateBackendOptions): Promise<Back
   if (preferred === 'falkordblite') {
     try {
       const { FalkorDbLiteBackend } = await import('./backends/falkordblite-backend.js');
+      const backend = new FalkorDbLiteBackend({ dataDir: options.dataDir });
+      await backend.connect();
       return {
-        backend: new FalkorDbLiteBackend({ dataDir: options.dataDir }),
+        backend,
         type: 'falkordblite',
+        preConnected: true,
       };
-    } catch {
-      // falkordblite not installed — fall back to redis
-      if (process.env.CV_DEBUG) {
-        console.log('[BackendFactory] falkordblite not available, falling back to redis');
-      }
+    } catch (err: any) {
+      console.warn(`[BackendFactory] falkordblite unavailable: ${err.message}`);
+      console.warn('[BackendFactory] Falling back to redis backend');
     }
   }
 
   if (preferred === 'ladybugdb') {
     try {
       const { LadybugBackend } = await import('./backends/ladybug-backend.js');
+      const backend = new LadybugBackend({ dataDir: options.dataDir });
+      await backend.connect();
       return {
-        backend: new LadybugBackend({ dataDir: options.dataDir }),
+        backend,
         type: 'ladybugdb',
+        preConnected: true,
       };
-    } catch {
-      // @ladybugdb/core not installed — fall back to redis
-      if (process.env.CV_DEBUG) {
-        console.log('[BackendFactory] @ladybugdb/core not available, falling back to redis');
-      }
+    } catch (err: any) {
+      console.warn(`[BackendFactory] @ladybugdb/core unavailable: ${err.message}`);
+      console.warn('[BackendFactory] Falling back to redis backend');
     }
   }
 
@@ -87,6 +91,7 @@ export async function createBackend(options: CreateBackendOptions): Promise<Back
   return {
     backend: new RedisBackend({ url }),
     type: 'redis',
+    preConnected: false,
   };
 }
 

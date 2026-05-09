@@ -118,6 +118,7 @@ export class GraphManager {
   async connect(): Promise<void> {
     try {
       // Use injected backend (testing) or auto-detect via factory
+      let preConnected = false;
       if (this.injectedBackend) {
         this.backend = this.injectedBackend;
         this.backendType = 'redis'; // assume redis for injected
@@ -128,9 +129,12 @@ export class GraphManager {
         });
         this.backend = result.backend;
         this.backendType = result.type;
+        preConnected = result.preConnected;
       }
 
-      await this.backend.connect();
+      if (!preConnected) {
+        await this.backend.connect();
+      }
       this.connected = true;
 
       if (process.env.CV_DEBUG) {

@@ -24,7 +24,12 @@ export class FalkorDbLiteBackend implements IGraphBackend {
   }
 
   async connect(): Promise<void> {
-    const falkordblite = await import('falkordblite');
+    let falkordblite;
+    try {
+      falkordblite = await import('falkordblite');
+    } catch (err: any) {
+      throw new Error(`falkordblite not available: ${err.message}. Install with: npm install falkordblite, or set graph backend to redis.`);
+    }
     const FalkorDB = falkordblite.FalkorDB ?? falkordblite.default?.FalkorDB ?? falkordblite.default;
 
     const openOptions: Record<string, unknown> = {};

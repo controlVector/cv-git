@@ -43,7 +43,20 @@
     "test": "vitest",
     "postinstall": "echo '\\n  Run \"cv doctor --fix\" in your project to update hooks.\\n'"
   },
-  "dependencies": {},
+  "dependencies": {
+    "env-paths": "^3.0.0"
+  },
+  "optionalDependencies": {
+    "keytar": "^7.9.0",
+    "falkordblite": "^0.2.0",
+    "@ladybugdb/core": "^0.15.2",
+    "tree-sitter": "npm:@keqingmoe/tree-sitter@^0.26.2",
+    "tree-sitter-go": "^0.21.2",
+    "tree-sitter-java": "^0.21.0",
+    "tree-sitter-python": "^0.21.0",
+    "tree-sitter-rust": "^0.21.0",
+    "tree-sitter-typescript": "^0.21.2"
+  },
   "devDependencies": {
     "@cv-git/core": "workspace:*",
     "@cv-git/credentials": "workspace:*",
