@@ -34,7 +34,7 @@ import { CredentialManager } from '@cv-git/credentials';
 import { addGlobalOptions, createOutput } from '../utils/output.js';
 import { checkCredentials, displayCompactStatus } from '../utils/config-check.js';
 import { getAnthropicApiKey } from '../utils/credentials.js';
-import { ensureFalkorDB, ensureQdrant, ensureOllama, isDockerAvailable } from '../utils/infrastructure.js';
+import { ensureFalkorDB, ensureQdrant, ensureOllama, isDockerAvailable, graphDockerRequiredMessage } from '../utils/infrastructure.js';
 import { getPreferences } from '../config.js';
 
 export function syncCommand(): Command {
@@ -113,7 +113,8 @@ export function syncCommand(): Command {
 
         const falkorInfo = await ensureFalkorDB({ silent: true });
         if (!falkorInfo) {
-          spinner.fail('FalkorDB not available (Docker required)');
+          spinner.fail('FalkorDB not available');
+          console.error('\n' + graphDockerRequiredMessage() + '\n');
           process.exit(1);
         }
 
@@ -594,7 +595,8 @@ async function syncWorkspace(
   // Set up infrastructure (shared across all repos)
   const falkorInfo = await ensureFalkorDB({ silent: true });
   if (!falkorInfo) {
-    spinner.fail('FalkorDB not available (Docker required)');
+    spinner.fail('FalkorDB not available');
+    console.error('\n' + graphDockerRequiredMessage() + '\n');
     process.exit(1);
   }
   spinner.succeed(`Using FalkorDB at ${falkorInfo.url}`);

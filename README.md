@@ -13,14 +13,16 @@ CV-Git wraps Git with a code knowledge graph, vector search, and AI commands so 
 
 ## Platform Support
 
-| Platform | Status | Graph Backend | Server Required? |
+| Platform | Status | Graph Backend | Docker needed? |
 |---|---|---|---|
-| Linux x64 | Supported | FalkorDB (embedded via falkordblite) | No |
-| macOS arm64 | Supported | FalkorDB (embedded via falkordblite) | No |
-| Windows 10/11 x64 | Supported | LadybugDB (embedded) | No |
-| CV-Hub server | Supported | FalkorDB (remote) | Yes (Docker) |
+| Linux x64 | Supported | FalkorDB embedded (falkordblite) if a system `redis-server >= 8` is present, else containerized FalkorDB | Only if no redis-8 |
+| macOS arm64 | Supported | FalkorDB embedded (falkordblite) if a system `redis-server >= 8` is present, else containerized FalkorDB | Only if no redis-8 |
+| Windows 10/11 x64 | Supported (Docker) | Containerized FalkorDB (auto-started) | Yes (Docker Desktop) |
+| CV-Hub server | Supported | FalkorDB (remote) | Yes |
 
-> **Windows** uses LadybugDB as a fully embedded graph database — no Docker, no server process, no configuration required. When FalkorDB ships native Windows binaries, CV-Git will migrate automatically with no user-facing changes.
+> **Windows** runs the graph on a FalkorDB container that CV-Git auto-starts for you. It requires **Docker Desktop** to be installed and running. There is no working native-embedded Windows backend today (falkordblite ships no Windows binary; the `@ladybugdb/core` embedded path is dialect-incompatible, tracked in issue #19), so the containerized client-server path is the Windows graph route.
+
+> **Linux/macOS** prefer the embedded backend, which needs a system `redis-server >= 8.0.0` (newer than most distros ship). If that is missing, CV-Git falls back to the same auto-started FalkorDB container, so Docker is the zero-extra-setup path there too.
 
 ---
 
@@ -29,10 +31,11 @@ CV-Git wraps Git with a code knowledge graph, vector search, and AI commands so 
 | Requirement | Version | Notes |
 |---|---|---|
 | Node.js | >= 20 | Runtime |
+| Docker | Required on Windows; on Linux/macOS only if you lack `redis-server >= 8` | CV-Git auto-starts a `falkordb/falkordb` container for the graph |
 | Ollama | Optional | Local embeddings with `nomic-embed-text` (no API key needed) |
 | Anthropic API key | Optional | Powers `cv explain`, `cv do`, `cv review` |
 
-No Docker is required for local development on any platform. The graph database runs embedded.
+The graph runs embedded where a modern `redis-server` is available; otherwise CV-Git auto-starts a FalkorDB container (Docker required). On Windows, Docker Desktop is required.
 
 ---
 
@@ -85,10 +88,10 @@ The graph backend is auto-detected based on your platform. Override with the `CV
 
 | Value | When to Use |
 |---|---|
-| *(unset)* | Auto-detect (recommended) |
-| `falkordblite` | Force embedded FalkorDB (Linux/macOS) |
-| `ladybugdb` | Force LadybugDB (Windows) |
-| `redis` | Remote FalkorDB server (CV-Hub, Docker) |
+| *(unset)* | Auto-detect: Linux/macOS embedded, Windows containerized (recommended) |
+| `falkordblite` | Force embedded FalkorDB (Linux/macOS; needs system `redis-server >= 8`) |
+| `redis` | Containerized or remote FalkorDB over the network (Windows default; also the Linux/macOS path when no redis-8) |
+| `ladybugdb` | Non-functional (dialect-incompatible with the current `@ladybugdb/core`; see issue #19). Do not use. |
 
 ---
 

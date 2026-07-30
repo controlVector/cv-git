@@ -18,7 +18,7 @@ import {
 import { findRepoRoot, getCVDir } from '@cv-git/shared';
 import { CredentialManager } from '@cv-git/credentials';
 import { addGlobalOptions, createOutput } from '../utils/output.js';
-import { ensureFalkorDB, ensureQdrant, ensureOllama } from '../utils/infrastructure.js';
+import { ensureFalkorDB, ensureQdrant, ensureOllama, graphDockerRequiredMessage } from '../utils/infrastructure.js';
 import { getAnthropicApiKey } from '../utils/credentials.js';
 import { getPreferences } from '../config.js';
 
@@ -80,7 +80,8 @@ export function summaryCommand(): Command {
       spinner = output.spinner('Connecting to FalkorDB...').start();
       const falkorInfo = await ensureFalkorDB({ silent: true });
       if (!falkorInfo) {
-        spinner.fail('FalkorDB not available (Docker required)');
+        spinner.fail('FalkorDB not available');
+        console.error('\n' + graphDockerRequiredMessage() + '\n');
         process.exit(1);
       }
       spinner.succeed(`Connected to FalkorDB`);

@@ -332,6 +332,28 @@ export function isDockerAvailable(): boolean {
 }
 
 /**
+ * Actionable, platform-aware message for when the graph backend cannot start
+ * because Docker is unavailable. `ensureFalkorDB()` returns null in that case;
+ * callers should print this instead of a bare "Docker required".
+ */
+export function graphDockerRequiredMessage(): string {
+  if (process.platform === 'win32') {
+    return (
+      'The knowledge graph runs on FalkorDB in Docker on Windows.\n' +
+      '  1. Install Docker Desktop: https://docs.docker.com/desktop/\n' +
+      '  2. Start Docker Desktop and wait until it reports "running"\n' +
+      '  3. Re-run the command; cv-git auto-starts the FalkorDB container for you.'
+    );
+  }
+  return (
+    'The knowledge graph needs FalkorDB (via Docker).\n' +
+    '  - Start Docker so cv-git can auto-start it, or run it yourself:\n' +
+    '      docker run -d --name cv-git-falkordb -p 6379:6379 falkordb/falkordb:latest\n' +
+    '  - On Linux the embedded backend needs a system redis-server >= 8; the Docker path avoids that.'
+  );
+}
+
+/**
  * Find an available port starting from the given port
  */
 export function findAvailablePort(startPort: number): number {

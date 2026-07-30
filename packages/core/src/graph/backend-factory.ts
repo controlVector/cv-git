@@ -2,12 +2,19 @@
  * Backend Factory — platform-routed graph database selection for CV-Git.
  *
  * Routing:
- *   Windows  → LadybugDB  (@ladybugdb/core, embedded, no server)
- *   Linux    → falkordblite (embedded) with redis fallback
- *   Server   → redis (FalkorDB remote, CV-Hub)
+ *   Windows      → redis (containerized FalkorDB; the CLI auto-starts a
+ *                  falkordb/falkordb Docker container via ensureFalkorDB()).
+ *                  falkordblite has no win32 prebuild and the @ladybugdb/core
+ *                  embedded backend is non-functional (API/dialect mismatch,
+ *                  see ladybug-backend.ts), so the client-server path is the
+ *                  Windows graph route.
+ *   Linux/macOS  → falkordblite (embedded) with redis fallback. When the host
+ *                  lacks a system redis-server >= 8 that falkordblite needs,
+ *                  connect() fails and we fall back to the same containerized
+ *                  redis path (ensureFalkorDB() supplies the URL).
+ *   Server       → redis (FalkorDB remote, CV-Hub / Docker)
  *
  * Override via CV_GIT_GRAPH_BACKEND=redis|falkordblite|ladybugdb
- * When FalkorDB ships native Windows binaries, update this file only.
  */
 
 import type { IGraphBackend, BackendType } from './backend.js';
@@ -39,10 +46,16 @@ export function resolveBackendType(): BackendType {
   }
 
   if (process.platform === 'win32') {
-    return 'ladybugdb';
+    // Windows has no working embedded backend: falkordblite ships no win32
+    // prebuild, and @ladybugdb/core is API/dialect-incompatible (see
+    // ladybug-backend.ts). Use the containerized FalkorDB (redis) path; the
+    // CLI auto-starts the container via ensureFalkorDB().
+    return 'redis';
   }
 
-  // Linux/macOS: prefer embedded, but we check availability at create time
+  // Linux/macOS: prefer embedded, but we check availability at create time.
+  // If the embedded binary is unusable (e.g. no system redis-8), createBackend
+  // falls back to the containerized redis path below.
   return 'falkordblite';
 }
 

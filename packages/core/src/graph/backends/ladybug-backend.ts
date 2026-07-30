@@ -1,20 +1,28 @@
 /**
- * LadybugBackend — embedded LadybugDB for Windows.
+ * LadybugBackend — NON-FUNCTIONAL STUB. Do not route to this backend.
  *
- * Uses `@ladybugdb/core` npm package. LadybugDB is a C++ native addon
- * that provides an embedded property graph database with Cypher support.
+ * This was intended as an embedded Windows backend via `@ladybugdb/core`, but
+ * it does not work against the published `@ladybugdb/core` (verified @0.19.0)
+ * on two independent levels:
  *
- * Key differences from FalkorDB:
- *   - Requires explicit schema creation (CREATE NODE TABLE / CREATE REL TABLE)
- *   - Uses a connection-based API instead of Redis protocol
- *   - Result format differs — normalized to FalkorDB compact shape here
+ *   1. API mismatch: this code calls `db.connect()` and passes a directory it
+ *      mkdir's as the DB path. The real API is Kùzu-style: `new Connection(db)`
+ *      (there is no `db.connect()`), `db.init()`, and the DB path must be a
+ *      file, not a directory. connect() below throws immediately.
+ *   2. Dialect mismatch: `@ladybugdb/core` (Kùzu) requires schema-first DDL
+ *      (`CREATE NODE TABLE ...`) before any insert, whereas GraphManager emits
+ *      schemaless FalkorDB-dialect Cypher (`CREATE (:File {...})` / `MERGE`).
+ *      Those queries fail with "Binder exception: Table ... does not exist".
  *
- * This backend is Windows-only. When FalkorDB ships native Windows binaries,
- * this backend will be replaced by falkordblite.
+ * Windows therefore uses the containerized FalkorDB (redis) path instead; see
+ * backend-factory.ts. Making a native Windows embedded backend work would be a
+ * full rewrite (correct Connection API + schema-table generation + FalkorDB ->
+ * Kùzu query translation), tracked in issue #19. This file is retained only so
+ * an explicit CV_GIT_GRAPH_BACKEND=ladybugdb override fails loudly rather than
+ * silently; it is not on any default code path.
  */
 
 import * as path from 'path';
-import * as fs from 'fs';
 import type { IGraphBackend } from '../backend.js';
 
 export interface LadybugBackendOptions {
@@ -46,12 +54,14 @@ export class LadybugBackend implements IGraphBackend {
   }
 
   async connect(): Promise<void> {
-    const ladybug = await import('@ladybugdb/core');
-    const Database = ladybug.Database ?? ladybug.default?.Database ?? ladybug.default;
-
-    fs.mkdirSync(this.dataDir, { recursive: true });
-    this.db = new Database(this.dataDir);
-    this.conn = this.db.connect();
+    // Non-functional stub (see file header). Fail loudly and actionably rather
+    // than throwing an obscure TypeError deep in the graph path.
+    throw new Error(
+      'The @ladybugdb/core embedded backend is not supported (API/dialect ' +
+        'incompatible with the published @ladybugdb/core; see issue #19). ' +
+        'On Windows the graph uses containerized FalkorDB via Docker; do not ' +
+        'set CV_GIT_GRAPH_BACKEND=ladybugdb.'
+    );
   }
 
   async close(): Promise<void> {
