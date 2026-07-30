@@ -34,7 +34,7 @@
   "optionalDependencies": {
     "falkordblite": "^0.2.0",
     "@ladybugdb/core": "^0.15.2",
-    "tree-sitter": "npm:@keqingmoe/tree-sitter@^0.26.2",
+    "tree-sitter": "^0.21.1",
     "tree-sitter-go": "^0.21.2",
     "tree-sitter-java": "^0.21.0",
     "tree-sitter-python": "^0.21.0",
