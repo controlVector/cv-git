@@ -100,7 +100,9 @@ export async function createBackend(options: CreateBackendOptions): Promise<Back
   }
 
   // redis is always available (it's a direct dependency)
-  const url = options.url || process.env.CV_FALKORDB_URL || process.env.FALKORDB_URL || 'redis://localhost:6379';
+  // Default to 127.0.0.1, not localhost: on Windows `localhost` resolves to IPv6
+  // ::1 first, but the FalkorDB container publishes on IPv4, so the client misses it.
+  const url = options.url || process.env.CV_FALKORDB_URL || process.env.FALKORDB_URL || 'redis://127.0.0.1:6379';
   return {
     backend: new RedisBackend({ url }),
     type: 'redis',

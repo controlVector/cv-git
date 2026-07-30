@@ -356,15 +356,18 @@ export function graphDockerRequiredMessage(): string {
 /**
  * Find an available port starting from the given port
  */
-export function findAvailablePort(startPort: number): number {
+export async function findAvailablePort(startPort: number): Promise<number> {
+  // Cross-platform: bind-test with Node's net (lsof does not exist on Windows).
+  const { createServer } = await import('net');
+  const isFree = (port: number): Promise<boolean> =>
+    new Promise((resolve) => {
+      const server = createServer();
+      server.once('error', () => resolve(false));
+      server.once('listening', () => server.close(() => resolve(true)));
+      server.listen(port, '127.0.0.1');
+    });
   for (let port = startPort; port < startPort + 100; port++) {
-    try {
-      execSync(`lsof -i :${port}`, { stdio: 'ignore' });
-      // Port is in use, try next
-    } catch {
-      // Port is available
-      return port;
-    }
+    if (await isFree(port)) return port;
   }
   return startPort; // Fallback
 }
@@ -408,43 +411,42 @@ function getCVFalkorDBInfo(): { running: boolean; port?: number; stopped?: boole
  * Check if a Redis instance is actually FalkorDB (has graph module)
  */
 async function isFalkorDBInstance(url: string): Promise<boolean> {
+  const client = createClient({ url });
+  // node-redis emits an 'error' EVENT on socket failure, separately from the
+  // connect() promise rejection. Without a listener, Node treats it as an
+  // unhandled 'error' and crashes the process, which fires while polling a
+  // still-booting container. Swallow it; the try/catch handles the outcome.
+  client.on('error', () => {});
   try {
-    const client = createClient({ url });
     await client.connect();
     // Use sendCommand to get raw MODULE LIST response
     const result = await client.sendCommand(['MODULE', 'LIST']);
-    await client.disconnect();
     // Result should contain 'graph' module info
     const resultStr = JSON.stringify(result).toLowerCase();
     return resultStr.includes('graph');
   } catch {
     return false;
+  } finally {
+    try { await client.disconnect(); } catch { /* ignore */ }
   }
 }
 
 /**
  * Wait for FalkorDB to be ready
  */
-async function waitForFalkorDB(port: number, timeoutMs: number = 15000): Promise<boolean> {
+async function waitForFalkorDB(port: number, timeoutMs: number = 30000): Promise<boolean> {
+  // Poll via the Node redis client. Host `redis-cli` is not installed on Windows
+  // (it only ships inside the container), so the old shell-out always failed and
+  // this timed out. Use 127.0.0.1, not localhost, to avoid Windows resolving to
+  // IPv6 ::1 and missing the IPv4-published container.
+  const url = `redis://127.0.0.1:${port}`;
   const startTime = Date.now();
-
   while (Date.now() - startTime < timeoutMs) {
-    try {
-      const result = execSync(`redis-cli -p ${port} MODULE LIST`, {
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'ignore'],
-        timeout: 1000
-      });
-
-      if (result.toLowerCase().includes('graph')) {
-        return true;
-      }
-    } catch {
-      // Not ready yet
+    if (await isFalkorDBInstance(url)) {
+      return true;
     }
     await new Promise(resolve => setTimeout(resolve, 500));
   }
-
   return false;
 }
 
@@ -464,7 +466,7 @@ export async function ensureFalkorDB(options?: {
 
   // If our container is running, return its URL
   if (containerInfo.running && containerInfo.port) {
-    const url = `redis://localhost:${containerInfo.port}`;
+    const url = `redis://127.0.0.1:${containerInfo.port}`;
     if (await isFalkorDBInstance(url)) {
       await persistServiceUrl('falkordb', url);
       return { url, started: false };
@@ -477,7 +479,7 @@ export async function ensureFalkorDB(options?: {
       execSync('docker start cv-git-falkordb', { stdio: 'ignore' });
 
       if (await waitForFalkorDB(containerInfo.port)) {
-        const url = `redis://localhost:${containerInfo.port}`;
+        const url = `redis://127.0.0.1:${containerInfo.port}`;
         await persistServiceUrl('falkordb', url);
         return { url, started: true };
       }
@@ -496,7 +498,7 @@ export async function ensureFalkorDB(options?: {
   }
 
   // Need to create a new container - find available port
-  const port = findAvailablePort(6379);
+  const port = await findAvailablePort(6379);
 
   try {
     execSync(`docker run -d --name cv-git-falkordb -p ${port}:6379 falkordb/falkordb:latest`, {
@@ -519,7 +521,7 @@ export async function ensureFalkorDB(options?: {
   }
 
   if (await waitForFalkorDB(port)) {
-    const url = `redis://localhost:${port}`;
+    const url = `redis://127.0.0.1:${port}`;
     await persistServiceUrl('falkordb', url);
     return { url, started: true };
   }
@@ -622,7 +624,7 @@ export async function ensureQdrant(options?: {
   }
 
   // Need to create a new container
-  const port = findAvailablePort(6333);
+  const port = await findAvailablePort(6333);
 
   try {
     execSync(`docker run -d --name cv-git-qdrant -p ${port}:6333 qdrant/qdrant:latest`, {
@@ -941,7 +943,7 @@ export async function ensureOllama(options?: {
   }
 
   // Need to create a new container
-  port = findAvailablePort(11434);
+  port = await findAvailablePort(11434);
 
   // Build docker run command
   let dockerCmd = `docker run -d --name cv-git-ollama -p ${port}:11434 -v ollama-data:/root/.ollama`;
