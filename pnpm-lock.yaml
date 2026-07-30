@@ -63,10 +63,6 @@ importers:
         version: 0.21.2(@keqingmoe/tree-sitter@0.26.2)
 
   packages/cli:
-    dependencies:
-      env-paths:
-        specifier: ^3.0.0
-        version: 3.0.0
     devDependencies:
       '@cv-git/core':
         specifier: workspace:*
@@ -136,11 +132,11 @@ importers:
         version: 5.9.3
     optionalDependencies:
       '@ladybugdb/core':
-        specifier: ^0.15.2
-        version: 0.15.2
+        specifier: ^0.19.0
+        version: 0.19.0
       falkordblite:
-        specifier: ^0.2.0
-        version: 0.2.0(falkordb@6.6.2)
+        specifier: ^0.3.0
+        version: 0.3.0(falkordb@6.6.2)
       keytar:
         specifier: ^7.9.0
         version: 7.9.0
@@ -153,6 +149,9 @@ importers:
       tree-sitter-java:
         specifier: ^0.21.0
         version: 0.21.0(@keqingmoe/tree-sitter@0.26.2)
+      tree-sitter-javascript:
+        specifier: ^0.21.1
+        version: 0.21.4(@keqingmoe/tree-sitter@0.26.2)
       tree-sitter-python:
         specifier: ^0.21.0
         version: 0.21.0(@keqingmoe/tree-sitter@0.26.2)
@@ -744,8 +743,23 @@ packages:
     cpu: [arm64]
     os: [darwin]
 
+  '@ladybugdb/core-darwin-arm64@0.19.0':
+    resolution: {integrity: sha512-3Ut3XL9kowzBoHw0wrN3QnW4xy5wYoPBypeuMtH92j59fol2w9e3lQJ6DM29YJ4F6mAVfW2cYGBXH2l9aXGmmw==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@ladybugdb/core-darwin-x64@0.19.0':
+    resolution: {integrity: sha512-KHuCBx+jkyxdfFEmmbsfUS1f108P4rS+VNkwCrMLvzJmJOZTZgNKeRmT0vO7qRum5KEoHSIPJLj2Le//rCYigQ==}
+    cpu: [x64]
+    os: [darwin]
+
   '@ladybugdb/core-linux-arm64@0.15.2':
     resolution: {integrity: sha512-9537UbHOiuSr/BaTfjcoBsHxEKF4uEXWyXEjm/AQCGXQFocX3nQDVNDYJzuDYjKZ51oJRJ0oSuesAStOCwjolA==}
+    cpu: [arm64]
+    os: [linux]
+
+  '@ladybugdb/core-linux-arm64@0.19.0':
+    resolution: {integrity: sha512-z4Z67LZlgj6H7YnKMB1PornbdmeszVxfENusfDQ2MFyOyrze1X6c/3MkhVPyunuaTtriN9SBnEdyK39mB7NdyQ==}
     cpu: [arm64]
     os: [linux]
 
@@ -754,13 +768,26 @@ packages:
     cpu: [x64]
     os: [linux]
 
+  '@ladybugdb/core-linux-x64@0.19.0':
+    resolution: {integrity: sha512-aJOh7+XbTzCLNloK+KlDXuRmHgr7nLqyQwR/BR8fP/XsWVnxCKGpVVL8s+Lms7JNQAh6vEsvExttGgUq9hAu1Q==}
+    cpu: [x64]
+    os: [linux]
+
   '@ladybugdb/core-win32-x64@0.15.2':
     resolution: {integrity: sha512-+LIJVKBNSrf2bGruJO4l0ihrLKZkv5+lNitK8xc3T7gC1bcc+FaYtRMvlgZP6Qh2rEHAjqfbaSKVrdw0M2EXTw==}
     cpu: [x64]
     os: [win32]
 
+  '@ladybugdb/core-win32-x64@0.19.0':
+    resolution: {integrity: sha512-y2/IOMKmydo4ZfQPDZuZhiFC104VJQ9lwc0w1KVdvb4Z2RIUUL8/tn5QD4Uq8DUrJGxQhoEESPnlkk69cKaaDQ==}
+    cpu: [x64]
+    os: [win32]
+
   '@ladybugdb/core@0.15.2':
     resolution: {integrity: sha512-DpseEj9CM/QTV0z+rvBk6nB2mOoG4GVhnKKLiXChGTVddgpH6R/Pv2YiDZB7rUIDnFpJxVQNbQaYEkZ7i1h1KA==}
+
+  '@ladybugdb/core@0.19.0':
+    resolution: {integrity: sha512-vlE2D2b6Ej/OiwtBCRtye34j8uRH9aV/ziJM+ZnXow77VkVr8zeVjSrAEj/eisj+uPPQ/pmuOXzJjJra0m0Bbg==}
 
   '@modelcontextprotocol/sdk@0.5.0':
     resolution: {integrity: sha512-RXgulUX6ewvxjAG0kOpLMEdXXWkzWgaoCGaA2CwNW7cQCIphjpJhjpHSiaPdVCnisjRF/0Cm9KWHUuIoeiAblQ==}
@@ -935,79 +962,66 @@ packages:
     resolution: {integrity: sha512-Rn3n+FUk2J5VWx+ywrG/HGPTD9jXNbicRtTM11e/uorplArnXZYsVifnPPqNNP5BsO3roI4n8332ukpY/zN7rQ==}
     cpu: [arm]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-arm-musleabihf@4.55.1':
     resolution: {integrity: sha512-grPNWydeKtc1aEdrJDWk4opD7nFtQbMmV7769hiAaYyUKCT1faPRm2av8CX1YJsZ4TLAZcg9gTR1KvEzoLjXkg==}
     cpu: [arm]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-linux-arm64-gnu@4.55.1':
     resolution: {integrity: sha512-a59mwd1k6x8tXKcUxSyISiquLwB5pX+fJW9TkWU46lCqD/GRDe9uDN31jrMmVP3feI3mhAdvcCClhV8V5MhJFQ==}
     cpu: [arm64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-arm64-musl@4.55.1':
     resolution: {integrity: sha512-puS1MEgWX5GsHSoiAsF0TYrpomdvkaXm0CofIMG5uVkP6IBV+ZO9xhC5YEN49nsgYo1DuuMquF9+7EDBVYu4uA==}
     cpu: [arm64]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-linux-loong64-gnu@4.55.1':
     resolution: {integrity: sha512-r3Wv40in+lTsULSb6nnoudVbARdOwb2u5fpeoOAZjFLznp6tDU8kd+GTHmJoqZ9lt6/Sys33KdIHUaQihFcu7g==}
     cpu: [loong64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-loong64-musl@4.55.1':
     resolution: {integrity: sha512-MR8c0+UxAlB22Fq4R+aQSPBayvYa3+9DrwG/i1TKQXFYEaoW3B5b/rkSRIypcZDdWjWnpcvxbNaAJDcSbJU3Lw==}
     cpu: [loong64]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-linux-ppc64-gnu@4.55.1':
     resolution: {integrity: sha512-3KhoECe1BRlSYpMTeVrD4sh2Pw2xgt4jzNSZIIPLFEsnQn9gAnZagW9+VqDqAHgm1Xc77LzJOo2LdigS5qZ+gw==}
     cpu: [ppc64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-ppc64-musl@4.55.1':
     resolution: {integrity: sha512-ziR1OuZx0vdYZZ30vueNZTg73alF59DicYrPViG0NEgDVN8/Jl87zkAPu4u6VjZST2llgEUjaiNl9JM6HH1Vdw==}
     cpu: [ppc64]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-linux-riscv64-gnu@4.55.1':
     resolution: {integrity: sha512-uW0Y12ih2XJRERZ4jAfKamTyIHVMPQnTZcQjme2HMVDAHY4amf5u414OqNYC+x+LzRdRcnIG1YodLrrtA8xsxw==}
     cpu: [riscv64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-riscv64-musl@4.55.1':
     resolution: {integrity: sha512-u9yZ0jUkOED1BFrqu3BwMQoixvGHGZ+JhJNkNKY/hyoEgOwlqKb62qu+7UjbPSHYjiVy8kKJHvXKv5coH4wDeg==}
     cpu: [riscv64]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-linux-s390x-gnu@4.55.1':
     resolution: {integrity: sha512-/0PenBCmqM4ZUd0190j7J0UsQ/1nsi735iPRakO8iPciE7BQ495Y6msPzaOmvx0/pn+eJVVlZrNrSh4WSYLxNg==}
     cpu: [s390x]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-x64-gnu@4.55.1':
     resolution: {integrity: sha512-a8G4wiQxQG2BAvo+gU6XrReRRqj+pLS2NGXKm8io19goR+K8lw269eTrPkSdDTALwMmJp4th2Uh0D8J9bEV1vg==}
     cpu: [x64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-x64-musl@4.55.1':
     resolution: {integrity: sha512-bD+zjpFrMpP/hqkfEcnjXWHMw5BIghGisOKPj+2NaNDuVT+8Ds4mPf3XcPHuat1tz89WRL+1wbcxKY3WSbiT7w==}
     cpu: [x64]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-openbsd-x64@4.55.1':
     resolution: {integrity: sha512-eLXw0dOiqE4QmvikfQ6yjgkg/xDM+MdU9YJuP4ySTibXU0oAvnEWXt7UDJmD4UkYialMfOGFPJnIHSe/kdzPxg==}
@@ -1071,6 +1085,9 @@ packages:
 
   '@types/node@20.19.28':
     resolution: {integrity: sha512-VyKBr25BuFDzBFCK5sUM6ZXiWfqgCTwTAOK8qzGV/m9FCirXYDlmczJ+d5dXBAQALGCdRRdbteKYfJ84NGEusw==}
+
+  '@types/node@25.9.5':
+    resolution: {integrity: sha512-OScDchr2fwuUmWdf4kZ9h7PcJiYDVInhJizG/biAq3cAvqwYktuy/TYGGdZNMtNTFUP7rnb0NU4TUdm82kt4Rg==}
 
   '@types/semver@7.7.1':
     resolution: {integrity: sha512-FmgJfu+MOcQ370SD0ev7EI8TlCAfKYU+B4m5T3yXc1CiRN94g/SZPtsCkk506aUDtlMnFZvasDwHHUcZUEaYuA==}
@@ -1215,6 +1232,10 @@ packages:
 
   any-promise@1.3.0:
     resolution: {integrity: sha512-7UvmKalWRt1wgjL1RrGxoSJW/0QZFIegpeGvZG9kjp8vrRu55XTHbwnqq2GpXm9uLbcuhxm3IqX9OB4MZR1b2A==}
+
+  apache-arrow@21.2.0:
+    resolution: {integrity: sha512-Hxe6Agq26gQOM954qpzYSllJBPJl+e16U5CkfuMUhLrNba+5nKkttIVlflaovN6oaTratqMGAO8H5u/aNhmHWQ==}
+    hasBin: true
 
   argparse@2.0.1:
     resolution: {integrity: sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==}
@@ -1548,6 +1569,12 @@ packages:
     peerDependencies:
       falkordb: ^6.0.0
 
+  falkordblite@0.3.0:
+    resolution: {integrity: sha512-3DrSaBfoQLW1s3e7nOOJkgQWSn/kWgDsPrXwGtWh7C+RxsfVqzrLDd57MTmlJZW/UhYFX+99XwWgQHFVVQx29Q==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      falkordb: ^6.0.0
+
   fast-deep-equal@3.1.3:
     resolution: {integrity: sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==}
 
@@ -1579,6 +1606,9 @@ packages:
   flat-cache@3.2.0:
     resolution: {integrity: sha512-CYcENa+FtcUKLmhhqyctpclsq7QF38pKjZHsGNiSQF5r4FtoKDWabFDl3hzaEQMvT1LHEysw5twgLvpYYb4vbw==}
     engines: {node: ^10.12.0 || >=12.0.0}
+
+  flatbuffers@25.9.23:
+    resolution: {integrity: sha512-MI1qs7Lo4Syw0EOzUl0xjs2lsoeqFku44KpngfIduHBYvzm8h2+7K8YMQh1JtVVVrUvhLpNwqVi4DERegUJhPQ==}
 
   flatted@3.3.3:
     resolution: {integrity: sha512-GX+ysw4PBCz0PzosHDepZGANEuFCMLrnRTiEy9McGjmkCQYwRq4A/X786G/fjM/+OjsWSU1ZrY5qyARZmO/uwg==}
@@ -1834,6 +1864,9 @@ packages:
 
   json-stable-stringify-without-jsonify@1.0.1:
     resolution: {integrity: sha512-Bdboy+l7tA3OGW6FjyFHWkP5LuByj1Tk33Ljyq0axyzdk9//JSi2u3fP1QSmd1KNwq6VOKYGlAu87CisVir6Pw==}
+
+  json-with-bigint@3.5.10:
+    resolution: {integrity: sha512-Vcx+JVNEBts/xfcoCS69sKrOhOk/3TVlvlT+XzUOefVKnnrbYSCKpDCm10pohsJFtsJVYnwa/cXRZ4eElzaM6w==}
 
   jsonfile@6.2.0:
     resolution: {integrity: sha512-FGuPw30AdOIUTRMC2OMRtQV+jkVj2cfPqSeWXv1NEAJ1qZ5zb1X6z1mFhbfOB/iy3ssJCD+3KuZ8r8C3uVFlAg==}
@@ -2502,6 +2535,9 @@ packages:
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
+  undici-types@7.24.6:
+    resolution: {integrity: sha512-WRNW+sJgj5OBN4/0JpHFqtqzhpbnV0GuB+OozA9gCL7a993SmU+1JBZCzLNxYsbMfIeDL+lTsphD5jN5N+n0zg==}
+
   undici@6.23.0:
     resolution: {integrity: sha512-VfQPToRA5FZs/qJxLIinmU59u0r7LXqoJkCzinq3ckNJp3vKEh7jTWN589YQ5+aoAC/TGRLyJLCPKcLQbM8r9g==}
     engines: {node: '>=18.17'}
@@ -2966,13 +3002,28 @@ snapshots:
   '@ladybugdb/core-darwin-arm64@0.15.2':
     optional: true
 
+  '@ladybugdb/core-darwin-arm64@0.19.0':
+    optional: true
+
+  '@ladybugdb/core-darwin-x64@0.19.0':
+    optional: true
+
   '@ladybugdb/core-linux-arm64@0.15.2':
+    optional: true
+
+  '@ladybugdb/core-linux-arm64@0.19.0':
     optional: true
 
   '@ladybugdb/core-linux-x64@0.15.2':
     optional: true
 
+  '@ladybugdb/core-linux-x64@0.19.0':
+    optional: true
+
   '@ladybugdb/core-win32-x64@0.15.2':
+    optional: true
+
+  '@ladybugdb/core-win32-x64@0.19.0':
     optional: true
 
   '@ladybugdb/core@0.15.2':
@@ -2984,6 +3035,21 @@ snapshots:
       '@ladybugdb/core-linux-arm64': 0.15.2
       '@ladybugdb/core-linux-x64': 0.15.2
       '@ladybugdb/core-win32-x64': 0.15.2
+    transitivePeerDependencies:
+      - supports-color
+    optional: true
+
+  '@ladybugdb/core@0.19.0':
+    dependencies:
+      apache-arrow: 21.2.0
+      cmake-js: 8.0.0
+      node-addon-api: 6.1.0
+    optionalDependencies:
+      '@ladybugdb/core-darwin-arm64': 0.19.0
+      '@ladybugdb/core-darwin-x64': 0.19.0
+      '@ladybugdb/core-linux-arm64': 0.19.0
+      '@ladybugdb/core-linux-x64': 0.19.0
+      '@ladybugdb/core-win32-x64': 0.19.0
     transitivePeerDependencies:
       - supports-color
     optional: true
@@ -3237,6 +3303,11 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
+  '@types/node@25.9.5':
+    dependencies:
+      undici-types: 7.24.6
+    optional: true
+
   '@types/semver@7.7.1': {}
 
   '@types/through@0.0.33':
@@ -3427,6 +3498,14 @@ snapshots:
   ansi-styles@5.2.0: {}
 
   any-promise@1.3.0: {}
+
+  apache-arrow@21.2.0:
+    dependencies:
+      '@types/node': 25.9.5
+      flatbuffers: 25.9.23
+      json-with-bigint: 3.5.10
+      tslib: 2.8.1
+    optional: true
 
   argparse@2.0.1: {}
 
@@ -3831,6 +3910,11 @@ snapshots:
       falkordb: 6.6.2
     optional: true
 
+  falkordblite@0.3.0(falkordb@6.6.2):
+    dependencies:
+      falkordb: 6.6.2
+    optional: true
+
   fast-deep-equal@3.1.3: {}
 
   fast-glob@3.3.3:
@@ -3867,6 +3951,9 @@ snapshots:
       flatted: 3.3.3
       keyv: 4.5.4
       rimraf: 3.0.2
+
+  flatbuffers@25.9.23:
+    optional: true
 
   flatted@3.3.3: {}
 
@@ -4115,6 +4202,9 @@ snapshots:
   json-schema-traverse@0.4.1: {}
 
   json-stable-stringify-without-jsonify@1.0.1: {}
+
+  json-with-bigint@3.5.10:
+    optional: true
 
   jsonfile@6.2.0:
     dependencies:
@@ -4795,6 +4885,9 @@ snapshots:
   undici-types@5.26.5: {}
 
   undici-types@6.21.0: {}
+
+  undici-types@7.24.6:
+    optional: true
 
   undici@6.23.0: {}
 

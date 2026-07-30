@@ -36,23 +36,23 @@
   ],
   "scripts": {
     "build": "tsc && pnpm run bundle",
-    "bundle": "node -e \"const fs=require('fs');const c=fs.readFileSync('dist/index.js','utf8');fs.writeFileSync('dist/index.js',c.replace(/^#!.*\\n/,''))\" && esbuild dist/index.js --bundle --platform=node --format=cjs --outfile=dist/bundle.cjs --external:keytar --external:tree-sitter --external:tree-sitter-go --external:tree-sitter-java --external:tree-sitter-javascript --external:tree-sitter-python --external:tree-sitter-rust --external:tree-sitter-typescript --external:falkordblite --external:falkordb --external:@ladybugdb/core --external:env-paths --banner:js=\"#!/usr/bin/env node\"",
+    "bundle": "node -e \"const fs=require('fs');const c=fs.readFileSync('dist/index.js','utf8');fs.writeFileSync('dist/index.js',c.replace(/^#!.*\\n/,''))\" && esbuild dist/index.js --bundle --platform=node --format=cjs --outfile=dist/bundle.cjs --external:keytar --external:tree-sitter --external:tree-sitter-go --external:tree-sitter-java --external:tree-sitter-javascript --external:tree-sitter-python --external:tree-sitter-rust --external:tree-sitter-typescript --external:falkordblite --external:@ladybugdb/core --banner:js=\"#!/usr/bin/env node\"",
     "dev": "tsc --watch",
     "clean": "rm -rf dist *.tsbuildinfo",
     "start": "node dist/bundle.js",
+    "prepack": "node ../../scripts/verify-pack.mjs",
     "test": "vitest",
     "postinstall": "echo '\\n  Run \"cv doctor --fix\" in your project to update hooks.\\n'"
   },
-  "dependencies": {
-    "env-paths": "^3.0.0"
-  },
+  "dependencies": {},
   "optionalDependencies": {
     "keytar": "^7.9.0",
-    "falkordblite": "^0.2.0",
-    "@ladybugdb/core": "^0.15.2",
+    "falkordblite": "^0.3.0",
+    "@ladybugdb/core": "^0.19.0",
     "tree-sitter": "npm:@keqingmoe/tree-sitter@^0.26.2",
     "tree-sitter-go": "^0.21.2",
     "tree-sitter-java": "^0.21.0",
+    "tree-sitter-javascript": "^0.21.1",
     "tree-sitter-python": "^0.21.0",
     "tree-sitter-rust": "^0.21.0",
     "tree-sitter-typescript": "^0.21.2"

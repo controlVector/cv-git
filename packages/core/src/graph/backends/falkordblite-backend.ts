@@ -68,26 +68,54 @@ export class FalkorDbLiteBackend implements IGraphBackend {
     }
 
     const graph = this.db.selectGraph(graphName);
-    const result = await graph.query(cypher);
+    const result: any = await graph.query(cypher);
 
-    // falkordblite wraps the falkordb client, which may return pre-parsed
-    // results. Normalize to the compact format that parseQueryResult expects:
-    // [headers, rows, statistics]
+    // GraphManager.parseQueryResult expects FalkorDB's compact format:
+    //   [ headerPairs, rowArrays, statistics ]
+    //   headerPairs: [[type, name], ...]
+    //   rowArrays:   [[[type, value], ...], ...]   (positional, one per column)
+    //   statistics:  string[]
     //
-    // The falkordb client returns { header, data, metadata } or similar.
-    // If result already has the [headers, rows, stats] shape (raw mode),
-    // return as-is. Otherwise, convert.
-    if (Array.isArray(result) && result.length >= 2) {
-      // Already in raw format
+    // If falkordblite already handed us that compact shape, pass it through.
+    if (Array.isArray(result)) {
       return result;
     }
 
-    // Convert from falkordb client's parsed format
-    const headers: [number, string][] = (result.header ?? []).map((h: string, i: number) => [1, h]);
-    const rows: [number, unknown][][] = (result.data ?? []).map((row: unknown[]) =>
-      row.map((val: unknown, i: number) => [1, val] as [number, unknown])
-    );
-    const stats: string[] = result.metadata ?? result.statistics ?? [];
+    // Otherwise the underlying falkordb client returned a parsed reply:
+    //   { headers?, data: Array<Record<column, value>>, metadata: string[] }
+    // Note the field is `headers` (not `header`), and each row is an OBJECT
+    // keyed by column name, not a positional array.
+    const data: unknown[] = Array.isArray(result?.data) ? result.data : [];
+    const stats: string[] = result?.metadata ?? result?.statistics ?? [];
+
+    // Determine ordered column names: prefer explicit headers, otherwise
+    // derive from the keys of the first row object (insertion order matches
+    // the RETURN/column order in the falkordb client).
+    let columns: string[] = [];
+    if (Array.isArray(result?.headers) && result.headers.length > 0) {
+      columns = result.headers.map((h: any) =>
+        Array.isArray(h) ? String(h[1]) : String(h?.name ?? h)
+      );
+    } else if (
+      data.length > 0 &&
+      data[0] &&
+      typeof data[0] === 'object' &&
+      !Array.isArray(data[0])
+    ) {
+      columns = Object.keys(data[0] as Record<string, unknown>);
+    }
+
+    const headers: [number, string][] = columns.map((name) => [1, name]);
+    const rows: [number, unknown][][] = data.map((row: any) => {
+      if (Array.isArray(row)) {
+        return row.map((val: unknown) => [1, val] as [number, unknown]);
+      }
+      if (row && typeof row === 'object') {
+        return columns.map((col) => [1, row[col]] as [number, unknown]);
+      }
+      // Scalar row (single unnamed column)
+      return [[1, row] as [number, unknown]];
+    });
 
     return [headers, rows, stats];
   }
