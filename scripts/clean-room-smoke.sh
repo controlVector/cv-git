@@ -32,7 +32,8 @@ node "$REPO_ROOT/scripts/verify-pack.mjs"
 
 say "2. Build + pack the CLI artifact"
 ( cd "$REPO_ROOT" && pnpm build >/dev/null 2>&1 )
-TGZ="$(cd "$REPO_ROOT/packages/cli" && npm pack --silent)"
+# take only the last stdout line: any prepack hook output precedes the filename
+TGZ="$(cd "$REPO_ROOT/packages/cli" && npm pack --silent | tail -n1)"
 TGZ="$REPO_ROOT/packages/cli/$TGZ"
 echo "packed: $TGZ"
 

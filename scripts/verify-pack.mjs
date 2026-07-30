@@ -41,8 +41,11 @@ const declared = new Set([
 
 const missing = externals.filter((name) => !declared.has(name));
 
-console.log(`[verify-pack] bundle externals (${externals.length}): ${externals.join(', ')}`);
-console.log(`[verify-pack] declared deps (${declared.size}): ${[...declared].join(', ') || '(none)'}`);
+// Diagnostics go to stderr so stdout stays clean for `npm pack` consumers:
+// this runs as the cli `prepack` hook, and polluting stdout corrupts callers
+// that capture `npm pack` output (e.g. the clean-room smoke's tarball name).
+console.error(`[verify-pack] bundle externals (${externals.length}): ${externals.join(', ')}`);
+console.error(`[verify-pack] declared deps (${declared.size}): ${[...declared].join(', ') || '(none)'}`);
 
 if (missing.length > 0) {
   console.error('');
@@ -55,4 +58,4 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-console.log('[verify-pack] OK — every externalized module is declared. Safe to pack/publish.');
+console.error('[verify-pack] OK — every externalized module is declared. Safe to pack/publish.');
